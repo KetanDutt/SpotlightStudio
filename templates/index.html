@@ -2246,9 +2246,15 @@
       return 'hd';
     }
 
+    function getImgUrl(path) {
+      if (isDesktopMode || !path) return path;
+      // Stream LFS files directly to bypass GitHub Pages limits
+      return `https://media.githubusercontent.com/media/KetanDutt/SpotlightStudio/main/${path}`;
+    }
+
     function gridCard(w, i) {
-      const src = `images/thumbs/${w.filename}`;
-      const fallback = `images/${w.filename}`;
+      const src = getImgUrl(`images/thumbs/${w.filename}`);
+      const fallback = getImgUrl(`images/${w.filename}`);
       const qClass = getQualityClass(w.quality);
       const isAboveFold = i < 8;
       const loadAttr = isAboveFold ? 'loading="eager" fetchpriority="high"' : 'loading="lazy" fetchpriority="low"';
@@ -2282,8 +2288,8 @@
     }
 
     function listRow(w, i) {
-      const src = `images/thumbs/${w.filename}`;
-      const fallback = `images/${w.filename}`;
+      const src = getImgUrl(`images/thumbs/${w.filename}`);
+      const fallback = getImgUrl(`images/${w.filename}`);
       const qClass = getQualityClass(w.quality);
       const isAboveFold = i < 10;
       const loadAttr = isAboveFold ? 'loading="eager" fetchpriority="high"' : 'loading="lazy" fetchpriority="low"';
@@ -2393,7 +2399,7 @@
 
     function showLbItem(w) {
       currentLbId = w.id;
-      const imgPath = `images/${w.filename}`;
+      const imgPath = getImgUrl(`images/${w.filename}`);
       document.getElementById('lb-img').src = imgPath;
       document.getElementById('lb-img').alt = w.title;
       document.getElementById('lb-title').textContent = w.title || 'Windows Spotlight Wallpaper';
