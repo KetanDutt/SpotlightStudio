@@ -88,6 +88,12 @@ def init_db() -> None:
                 retries    INTEGER NOT NULL DEFAULT 0
             );
 
+            CREATE TABLE IF NOT EXISTS suppressed_urls (
+                url        TEXT PRIMARY KEY,
+                reason     TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS stats (
                 key   TEXT PRIMARY KEY,
                 value TEXT NOT NULL
@@ -99,13 +105,14 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_wallpapers_downloaded_at ON wallpapers(downloaded_at);
             CREATE INDEX IF NOT EXISTS idx_wallpapers_date_spotted ON wallpapers(date_spotted);
             CREATE INDEX IF NOT EXISTS idx_wallpapers_quality ON wallpapers(quality);
+            CREATE INDEX IF NOT EXISTS idx_suppressed_urls_url ON suppressed_urls(url);
         """)
         # Seed initial stats
-        for key in ("status", "scraped_count", "downloaded_count",
+        for key in ("status", "phase", "scraped_count", "downloaded_count",
                     "duplicates_skipped", "duplicates_replaced", "errors"):
             conn.execute(
                 "INSERT OR IGNORE INTO stats(key, value) VALUES (?, ?)",
-                (key, "stopped" if key == "status" else "0"),
+                (key, "stopped" if key == "status" else "idle" if key == "phase" else "0"),
             )
 
     # Ensure files and DB are partitioned into source folders
@@ -273,6 +280,56 @@ def get_wallpaper_by_phash(phash: str) -> Optional[dict]:
     return dict(row) if row else None
 
 
+def find_duplicate_wallpaper(phash: str, max_distance: int = 4) -> Optional[dict]:
+    """
+    Find any existing wallpaper matching phash exactly or within max_distance bits.
+    Uses chunk-indexed filtering for sub-millisecond candidate lookup.
+    """
+    if not phash:
+        return None
+
+    # 1. Exact match fast path (indexed)
+    exact = get_wallpaper_by_phash(phash)
+    if exact:
+        return exact
+
+    if max_distance <= 0 or len(phash) != 64:
+        return None
+
+    # 2. Multi-index candidate filtering (8 chunks of 8 hex chars = 32 bits each)
+    import imagehash
+
+    try:
+        target_h = imagehash.hex_to_hash(phash)
+    except Exception:
+        return None
+
+    chunks = [phash[i * 8 : (i + 1) * 8] for i in range(8)]
+    where_parts = ["SUBSTR(phash, ?, 8) = ?" for _ in range(8)]
+    params: list = []
+    for i, chk in enumerate(chunks):
+        params.extend([i * 8 + 1, chk])
+
+    query = f"SELECT * FROM wallpapers WHERE " + " OR ".join(where_parts)
+    with get_db() as conn:
+        candidates = conn.execute(query, params).fetchall()
+
+    best_match = None
+    min_dist = max_distance + 1
+
+    for cand in candidates:
+        try:
+            cand_h = imagehash.hex_to_hash(cand["phash"])
+            dist = target_h - cand_h
+            if dist <= max_distance and dist < min_dist:
+                min_dist = dist
+                best_match = dict(cand)
+        except Exception:
+            continue
+
+    return best_match
+
+
 def delete_wallpaper(phash: str) -> None:
     with get_db() as conn:
         conn.execute("DELETE FROM wallpapers WHERE phash = ?", (phash,))
@@ -340,8 +397,46 @@ def scrape_queue_size(source: Optional[str] = None) -> int:
 
 # ── Download Queue ──────────────────────────────────────────────────────────
 
+def add_suppressed_url(url: str, reason: str = "duplicate_lower_quality") -> None:
+    """Record a URL as suppressed so it is never enqueued or downloaded again."""
+    if not url:
+        return
+    with get_db() as conn:
+        conn.execute(
+            """INSERT OR IGNORE INTO suppressed_urls (url, reason, created_at)
+               VALUES (?, ?, ?)""",
+            (url, reason, datetime.now(timezone.utc).isoformat()),
+        )
+
+
+def is_url_suppressed(url: str) -> bool:
+    """Return True if URL is marked as suppressed."""
+    if not url:
+        return False
+    with get_db() as conn:
+        row = conn.execute("SELECT 1 FROM suppressed_urls WHERE url = ?", (url,)).fetchone()
+        return row is not None
+
+
+def is_url_known(image_url: str) -> bool:
+    """Check if URL is already downloaded, queued, or suppressed."""
+    if not image_url:
+        return False
+    with get_db() as conn:
+        if conn.execute("SELECT 1 FROM suppressed_urls WHERE url = ?", (image_url,)).fetchone():
+            return True
+        if conn.execute("SELECT 1 FROM download_queue WHERE image_url = ?", (image_url,)).fetchone():
+            return True
+        if conn.execute("SELECT 1 FROM wallpapers WHERE source_url = ?", (image_url,)).fetchone():
+            return True
+        return False
+
+
 def enqueue_download(item: dict) -> bool:
-    """Add an image URL to the download queue.  Returns False if already present."""
+    """Add an image URL to the download queue.  Returns False if already present, downloaded, or suppressed."""
+    url = item.get("image_url")
+    if not url or is_url_known(url):
+        return False
     item.setdefault("added_at", datetime.now(timezone.utc).isoformat())
     item.setdefault("retries", 0)
     with get_db() as conn:
@@ -355,6 +450,118 @@ def enqueue_download(item: dict) -> bool:
             return conn.execute("SELECT changes()").fetchone()[0] > 0
         except Exception:
             return False
+
+
+def clean_download_queue() -> int:
+    """Remove any download_queue items that are already in wallpapers or suppressed_urls."""
+    with get_db() as conn:
+        conn.execute("""
+            DELETE FROM download_queue
+            WHERE image_url IN (SELECT source_url FROM wallpapers WHERE source_url IS NOT NULL)
+        """)
+        c1 = conn.execute("SELECT changes()").fetchone()[0]
+        conn.execute("""
+            DELETE FROM download_queue
+            WHERE image_url IN (SELECT url FROM suppressed_urls)
+        """)
+        c2 = conn.execute("SELECT changes()").fetchone()[0]
+        total_removed = c1 + c2
+        if total_removed > 0:
+            log.info("Cleaned download queue: %d duplicate/suppressed items removed.", total_removed)
+        return total_removed
+
+
+def deduplicate_downloaded_wallpapers() -> int:
+    """
+    Go through all already downloaded wallpapers in the database.
+    Find perceptual duplicates (dist <= 4), keep the higher quality image,
+    and remove the lower quality one from disk and DB.
+    Add removed URL to suppressed_urls so it is never re-downloaded.
+    """
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT id, source, filename, width, height, file_size, phash, source_url, page_url FROM wallpapers"
+        ).fetchall()
+
+    if len(rows) < 2:
+        return 0
+
+    import imagehash
+    from collections import defaultdict
+
+    chunks = defaultdict(list)
+    parsed = []
+    for idx, r in enumerate(rows):
+        h_str = r["phash"]
+        try:
+            h = imagehash.hex_to_hash(h_str)
+            parsed.append((r, h))
+            for c_idx in range(8):
+                chunk_key = (c_idx, h_str[c_idx * 8 : (c_idx + 1) * 8])
+                chunks[chunk_key].append(idx)
+        except Exception:
+            pass
+
+    candidate_pairs = set()
+    for chunk_key, idx_list in chunks.items():
+        if len(idx_list) > 1:
+            for i in range(len(idx_list)):
+                for j in range(i + 1, len(idx_list)):
+                    i1, i2 = (idx_list[i], idx_list[j]) if idx_list[i] < idx_list[j] else (idx_list[j], idx_list[i])
+                    candidate_pairs.add((i1, i2))
+
+    removed_ids = set()
+    removed_count = 0
+
+    for i1, i2 in candidate_pairs:
+        if i1 in removed_ids or i2 in removed_ids:
+            continue
+        r1, h1 = parsed[i1]
+        r2, h2 = parsed[i2]
+        dist = h1 - h2
+        if dist <= 4:
+            s1 = r1["width"] * r1["height"] * 1000 + r1["file_size"]
+            s2 = r2["width"] * r2["height"] * 1000 + r2["file_size"]
+            higher = r1 if s1 >= s2 else r2
+            lower = r2 if s1 >= s2 else r1
+            lower_idx = i2 if s1 >= s2 else i1
+
+            removed_ids.add(lower_idx)
+            removed_count += 1
+
+            # Delete lower quality files from disk
+            for base_dir in (settings.IMAGES_DIR, settings.IMAGES_DIR / "thumbs"):
+                target = base_dir / lower["filename"]
+                if target.exists() and not target.is_dir():
+                    try:
+                        target.unlink()
+                    except Exception:
+                        pass
+
+            # Suppress URL so it is never downloaded again
+            if lower["source_url"]:
+                add_suppressed_url(lower["source_url"], reason="duplicate_lower_quality")
+            if lower["page_url"]:
+                add_suppressed_url(lower["page_url"], reason="duplicate_lower_quality")
+
+            # Remove from DB
+            delete_wallpaper(lower["phash"])
+            increment_stat("duplicates_replaced")
+            log.info(
+                "Deduplication: Kept higher quality %s (%dx%d), removed lower %s (%dx%d)",
+                higher["filename"],
+                higher["width"],
+                higher["height"],
+                lower["filename"],
+                lower["width"],
+                lower["height"],
+            )
+
+    if removed_count > 0:
+        export_catalog_json()
+        log.info("Deduplicated already downloaded images: %d lower quality copies removed.", removed_count)
+
+    return removed_count
 
 
 def pop_download_item(source: Optional[str] = None) -> Optional[dict]:
@@ -434,3 +641,37 @@ def increment_stat(key: str, by: int = 1) -> int:
         )
         row = conn.execute("SELECT value FROM stats WHERE key = ?", (key,)).fetchone()
     return int(row["value"]) if row else 0
+
+
+def get_source_stats() -> dict:
+    """Return available wallpaper counts and discovered/queue stats per source."""
+    with get_db() as conn:
+        wp_rows = conn.execute("SELECT source, COUNT(*) as cnt FROM wallpapers GROUP BY source").fetchall()
+        dl_rows = conn.execute("SELECT source, COUNT(*) as cnt FROM download_queue GROUP BY source").fetchall()
+        sq_rows = conn.execute("SELECT source, COUNT(*) as cnt FROM scrape_queue GROUP BY source").fetchall()
+        total_wp = conn.execute("SELECT COUNT(*) FROM wallpapers").fetchone()[0]
+
+    wp_map = {r["source"]: r["cnt"] for r in wp_rows}
+    dl_map = {r["source"]: r["cnt"] for r in dl_rows}
+    sq_map = {r["source"]: r["cnt"] for r in sq_rows}
+
+    sources = {}
+    known_sources = sorted(set(list(wp_map.keys()) + list(dl_map.keys()) + ["peapix", "win10spotlight"]))
+    for src in known_sources:
+        avail = wp_map.get(src, 0)
+        queued = dl_map.get(src, 0)
+        total_discovered = avail + queued
+        pct = round((avail / total_wp * 100), 1) if total_wp > 0 else 0.0
+        sources[src] = {
+            "available": avail,
+            "queued": queued,
+            "scrape_pages": sq_map.get(src, 0),
+            "total_discovered": total_discovered,
+            "pct_of_total": pct,
+        }
+
+    return {
+        "total_available": total_wp,
+        "sources": sources,
+    }
+

@@ -41,6 +41,7 @@ from src.database import (
     export_catalog_json,
     get_all_wallpapers,
     get_db,
+    get_source_stats,
     get_stats,
     init_db,
     scrape_queue_size,
@@ -183,6 +184,7 @@ def get_status() -> dict:
         "scrape_queue_remaining": scrape_remaining,
         "download_queue_remaining": dl_remaining,
         "progress_pct": progress_pct,
+        "source_stats": get_source_stats(),
         # Concurrency configuration (informational)
         "config": {
             "concurrent_downloads": settings.CONCURRENT_DOWNLOADS,
@@ -191,6 +193,12 @@ def get_status() -> dict:
             "max_connections_per_host": settings.MAX_CONNECTIONS_PER_HOST,
         },
     }
+
+
+@app.get("/api/stats/sources", tags=["Status"], summary="Source availability stats")
+def get_sources_status() -> dict:
+    """Return available and discovered/queue wallpaper counts grouped by source provider."""
+    return get_source_stats()
 
 
 # ── Wallpapers ────────────────────────────────────────────────────────────────

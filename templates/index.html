@@ -645,6 +645,96 @@
       color: var(--text-primary);
     }
 
+    /* ─── Source Availability Dashboard Widget ─── */
+    .sidebar-source-card {
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid var(--glass-border-subtle);
+      border-radius: var(--radius-md);
+      padding: 10px 12px;
+      backdrop-filter: var(--blur-sm);
+      -webkit-backdrop-filter: var(--blur-sm);
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      transition: border-color var(--duration-fast) var(--ease-apple),
+                  background var(--duration-fast) var(--ease-apple);
+    }
+    .sidebar-source-card:hover {
+      border-color: var(--glass-border);
+      background: rgba(255, 255, 255, 0.045);
+    }
+    .src-avail-row {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+    .src-avail-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.74rem;
+    }
+    .src-avail-name {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-weight: 500;
+      color: var(--text-primary);
+    }
+    .src-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .peapix-dot {
+      background: #38bdf8;
+      box-shadow: 0 0 6px rgba(56, 189, 248, 0.6);
+    }
+    .win10-dot {
+      background: #a78bfa;
+      box-shadow: 0 0 6px rgba(167, 139, 250, 0.6);
+    }
+    .src-avail-ratio {
+      font-size: 0.72rem;
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
+      color: var(--text-secondary);
+    }
+    .src-avail-track {
+      width: 100%;
+      height: 6px;
+      background: rgba(255, 255, 255, 0.07);
+      border-radius: 9999px;
+      overflow: hidden;
+      position: relative;
+    }
+    .src-avail-bar {
+      height: 100%;
+      border-radius: 9999px;
+      transition: width 0.6s var(--ease-apple);
+      will-change: width;
+    }
+    .peapix-bar {
+      background: linear-gradient(90deg, #0284c7, #38bdf8);
+      box-shadow: 0 0 8px rgba(56, 189, 248, 0.35);
+    }
+    .win10-bar {
+      background: linear-gradient(90deg, #7c3aed, #a78bfa);
+      box-shadow: 0 0 8px rgba(167, 139, 250, 0.35);
+    }
+    .src-avail-meta {
+      font-size: 0.68rem;
+      color: var(--text-tertiary);
+      font-variant-numeric: tabular-nums;
+    }
+    .metric-sub {
+      font-size: 0.7rem;
+      color: var(--text-tertiary);
+      font-variant-numeric: tabular-nums;
+      margin-left: 2px;
+    }
+
     /* Segmented View Switch (macOS Style) */
     .segmented-control {
       display: flex;
@@ -1329,18 +1419,26 @@
         </div>
 
         <!-- Web Showcase Metrics (Shown in web static mode) -->
-        <div class="web-only metric-item" title="Total wallpapers cataloged">
+        <div class="web-only metric-item" title="Total wallpapers cataloged in library">
           <span>Library:</span>
-          <span class="metric-val" id="w-total">1,378</span>
+          <span class="metric-val" id="w-total">2,296</span>
           <span style="font-size:0.7rem; color:var(--text-tertiary);">wallpapers</span>
         </div>
         <div class="web-only metric-item" title="Ultra High Definition wallpapers">
           <span>Quality:</span>
           <span class="metric-val" style="color:#38bdf8;">4K UHD &amp; FHD</span>
         </div>
-        <div class="web-only metric-item" title="Sources included">
-          <span>Sources:</span>
-          <span class="metric-val" style="color:#a78bfa;">Peapix &amp; Win10</span>
+
+        <!-- Per-Source Availability Metrics -->
+        <div class="metric-item" title="Peapix Spotlight wallpapers available out of total discovered">
+          <span style="color:#38bdf8; font-weight:600;">Peapix:</span>
+          <span class="metric-val" id="m-peapix-avail">895</span>
+          <span class="metric-sub" id="m-peapix-sub">/ 895</span>
+        </div>
+        <div class="metric-item" title="Windows 10 Spotlight wallpapers available out of total discovered">
+          <span style="color:#a78bfa; font-weight:600;">Win10:</span>
+          <span class="metric-val" id="m-win10-avail">1,401</span>
+          <span class="metric-sub" id="m-win10-sub">/ 1,502</span>
         </div>
       </div>
 
@@ -1377,17 +1475,7 @@
           <span>Stop</span>
         </button>
 
-        <!-- Web Mode Desktop App Link Button -->
-        <a id="btn-download-app" class="web-only btn-glass btn-accent" href="https://github.com/KetanDutt/WindowsSpotlightWallpapers" target="_blank" title="Get Desktop Version to crawl and download new wallpapers">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-            <rect x="2" y="3" width="20" height="14" rx="2"/>
-            <line x1="8" y1="21" x2="16" y2="21"/>
-            <line x1="12" y1="17" x2="12" y2="21"/>
-          </svg>
-          <span>Get Desktop App</span>
-        </a>
-
-        <div class="btn-divider"></div>
+        <div class="desktop-only btn-divider"></div>
 
         <!-- Export JSON -->
         <button class="btn-glass btn-util" onclick="handleExport('json')" title="Export Full Database as JSON">
@@ -1476,6 +1564,47 @@
             <option value="peapix">Peapix Spotlight Only</option>
             <option value="win10spotlight">Windows 10 Spotlight Only</option>
           </select>
+        </div>
+
+        <!-- Source Availability Dashboard Widget -->
+        <div class="sidebar-source-card" id="sidebar-source-card">
+          <div class="filter-section-title" style="margin-bottom:4px;">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <rect x="2" y="2" width="20" height="20" rx="4"/>
+              <path d="M3 9h18M9 21V9"/>
+            </svg>
+            <span>Source Availability</span>
+          </div>
+
+          <!-- Peapix Card Row -->
+          <div class="src-avail-row" title="Peapix Spotlight collection">
+            <div class="src-avail-header">
+              <span class="src-avail-name">
+                <span class="src-dot peapix-dot"></span>
+                Peapix Spotlight
+              </span>
+              <span class="src-avail-ratio" id="sb-peapix-ratio">895 / 895</span>
+            </div>
+            <div class="src-avail-track">
+              <div class="src-avail-bar peapix-bar" id="sb-peapix-bar" style="width: 100%;"></div>
+            </div>
+            <div class="src-avail-meta" id="sb-peapix-meta">895 of 2,296 total library (39.0%)</div>
+          </div>
+
+          <!-- Win10 Spotlight Card Row -->
+          <div class="src-avail-row" title="Windows 10 Spotlight collection">
+            <div class="src-avail-header">
+              <span class="src-avail-name">
+                <span class="src-dot win10-dot"></span>
+                Win10 Spotlight
+              </span>
+              <span class="src-avail-ratio" id="sb-win10-ratio">1,401 / 1,502</span>
+            </div>
+            <div class="src-avail-track">
+              <div class="src-avail-bar win10-bar" id="sb-win10-bar" style="width: 93.3%;"></div>
+            </div>
+            <div class="src-avail-meta" id="sb-win10-meta">1,401 of 2,296 total library (61.0%)</div>
+          </div>
         </div>
 
         <!-- Source Filter -->
@@ -1652,7 +1781,8 @@
             <span>Download Full Resolution</span>
           </a>
 
-          <button id="lb-setwp" class="btn-glass btn-util" onclick="setWallpaper()">
+          <!-- Set Desktop Wallpaper (Desktop App Only) -->
+          <button id="lb-setwp" class="desktop-only btn-glass btn-util" onclick="setWallpaper()" style="display:none;">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <rect x="2" y="3" width="20" height="14" rx="2"/>
               <line x1="8" y1="21" x2="16" y2="21"/>
@@ -1762,7 +1892,7 @@
         document.getElementById('s-progress').textContent = '100% Hosted';
         document.getElementById('progress-bar-inner').style.width = '100%';
         document.getElementById('empty-state-desc').innerHTML =
-          'No matching wallpapers found in catalog. Try adjusting filters or download the Desktop App to add new ones.';
+          'No matching wallpapers found in catalog. Try adjusting filters or search terms.';
       }
     }
 
@@ -1804,6 +1934,50 @@
       toast(`Download source set to: ${srcLabel}`, 'info');
     }
 
+    /* ─── Source Availability Tracking ────────────────────────────── */
+    function updateSourceAvailability(stats, totalCount) {
+      if (!stats) return;
+
+      const pData = stats.peapix || { available: 0, total_discovered: 0 };
+      const wData = stats.win10spotlight || { available: 0, total_discovered: 0 };
+      const total = totalCount || stats.total_available || ((pData.available || 0) + (wData.available || 0));
+
+      const pAvail = pData.available || 0;
+      const pTot = pData.total_discovered || pAvail;
+      const pRatio = pTot > 0 ? (pAvail / pTot * 100).toFixed(1) : '100.0';
+      const pTotalPct = total > 0 ? (pAvail / total * 100).toFixed(1) : '0.0';
+
+      const wAvail = wData.available || 0;
+      const wTot = wData.total_discovered || wAvail;
+      const wRatio = wTot > 0 ? (wAvail / wTot * 100).toFixed(1) : '100.0';
+      const wTotalPct = total > 0 ? (wAvail / total * 100).toFixed(1) : '0.0';
+
+      // 1. Top Navigation Ribbon Chips
+      setText('m-peapix-avail', pAvail.toLocaleString());
+      setText('m-peapix-sub', `/ ${pTot.toLocaleString()}`);
+      setText('m-win10-avail', wAvail.toLocaleString());
+      setText('m-win10-sub', `/ ${wTot.toLocaleString()}`);
+
+      // 2. Sidebar Availability Widget
+      setText('sb-peapix-ratio', `${pAvail.toLocaleString()} / ${pTot.toLocaleString()} (${pRatio}%)`);
+      setText('sb-peapix-meta', `${pAvail.toLocaleString()} of ${total.toLocaleString()} total library (${pTotalPct}%)`);
+      const pBar = document.getElementById('sb-peapix-bar');
+      if (pBar) pBar.style.width = `${Math.min(100, Math.max(0, parseFloat(pRatio)))}%`;
+
+      setText('sb-win10-ratio', `${wAvail.toLocaleString()} / ${wTot.toLocaleString()} (${wRatio}%)`);
+      setText('sb-win10-meta', `${wAvail.toLocaleString()} of ${total.toLocaleString()} total library (${wTotalPct}%)`);
+      const wBar = document.getElementById('sb-win10-bar');
+      if (wBar) wBar.style.width = `${Math.min(100, Math.max(0, parseFloat(wRatio)))}%`;
+
+      // 3. Update select options in #f-source
+      const srcSelect = document.getElementById('f-source');
+      if (srcSelect && srcSelect.options.length >= 3) {
+        srcSelect.options[0].text = `All Sources (${total.toLocaleString()} total)`;
+        srcSelect.options[1].text = `Peapix Spotlight (${pAvail.toLocaleString()} available)`;
+        srcSelect.options[2].text = `Windows 10 Spotlight (${wAvail.toLocaleString()} available)`;
+      }
+    }
+
     function applyStatus(d) {
       const s = d.engine_status;
       const activeSrc = d.active_source || currentDownloadSource || 'both';
@@ -1836,6 +2010,11 @@
       setText('s-errors',     d.errors);
       setText('s-pages',      d.scrape_queue_remaining);
       setText('s-progress',   d.progress_pct + '%');
+
+      /* Source Availability Update */
+      if (d.source_stats && d.source_stats.sources) {
+        updateSourceAvailability(d.source_stats.sources, d.source_stats.total_available);
+      }
 
       /* Speed Tracker */
       const speed = _recordSpeed(d.downloaded_count);
@@ -1892,6 +2071,12 @@
           staticCatalog = JSON.parse(cached);
           preIndexCatalog(staticCatalog);
           document.getElementById('w-total').textContent = staticCatalog.length.toLocaleString();
+          const pCount = staticCatalog.filter(w => (w.source || '').toLowerCase() === 'peapix').length;
+          const wCount = staticCatalog.filter(w => (w.source || '').toLowerCase() === 'win10spotlight').length;
+          updateSourceAvailability({
+            peapix: { available: pCount, total_discovered: pCount },
+            win10spotlight: { available: wCount, total_discovered: wCount },
+          }, staticCatalog.length);
           applyClientFilters();
         } catch (_) {}
       } else {
@@ -1906,6 +2091,12 @@
         sessionStorage.setItem('spotlight_catalog_v2', JSON.stringify(staticCatalog));
         preIndexCatalog(staticCatalog);
         document.getElementById('w-total').textContent = staticCatalog.length.toLocaleString();
+        const pCount = staticCatalog.filter(w => (w.source || '').toLowerCase() === 'peapix').length;
+        const wCount = staticCatalog.filter(w => (w.source || '').toLowerCase() === 'win10spotlight').length;
+        updateSourceAvailability({
+          peapix: { available: pCount, total_discovered: pCount },
+          win10spotlight: { available: wCount, total_discovered: wCount },
+        }, staticCatalog.length);
         applyClientFilters();
       } catch (e) {
         if (!staticCatalog || staticCatalog.length === 0) {
@@ -2052,14 +2243,15 @@
             <div class="card-title-overlay">
               <div class="card-title">${esc(w.title)}</div>
             </div>
-            <button class="card-wp-pill" onclick="event.stopPropagation();setWallpaperById(${w.id})" title="${isDesktopMode ? 'Set as Windows Desktop Wallpaper' : 'Set as Desktop Wallpaper (Requires Desktop App)'}">
+            ${isDesktopMode ? `
+            <button class="card-wp-pill" onclick="event.stopPropagation();setWallpaperById(${w.id})" title="Set as Windows Desktop Wallpaper">
               <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
                 <rect x="2" y="3" width="20" height="14" rx="2"/>
                 <line x1="8" y1="21" x2="16" y2="21"/>
                 <line x1="12" y1="17" x2="12" y2="21"/>
               </svg>
               <span>Set</span>
-            </button>
+            </button>` : ''}
           </div>
           <div class="card-footer">
             <span class="badge-quality ${qClass}">${w.quality}</span>
@@ -2188,6 +2380,8 @@
       document.getElementById('lb-download').href = imgPath;
       document.getElementById('lb-download').download = w.filename.split('/').pop();
       document.getElementById('lb-source').href = w.page_url || '#';
+      const setWpBtn = document.getElementById('lb-setwp');
+      if (setWpBtn) setWpBtn.style.display = isDesktopMode ? '' : 'none';
 
       document.getElementById('lb-meta').innerHTML = [
         `<span>📐 ${w.width} × ${w.height} px</span>`,
