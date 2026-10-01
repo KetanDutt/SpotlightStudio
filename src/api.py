@@ -118,24 +118,35 @@ async def service_worker():
 # ── Control ───────────────────────────────────────────────────────────────────
 
 @app.post("/api/control/start", tags=["Control"], summary="Start / resume download")
-def start_download() -> dict:
-    """Start the download engine (idempotent if already running)."""
-    engine.start()
-    return {"status": engine.status}
+def start_download(
+    source: str = Query("both", description="Download source provider: 'peapix', 'win10spotlight', or 'both'"),
+) -> dict:
+    """Start the download engine with the specified source (idempotent if already running)."""
+    engine.start(source=source)
+    return {
+        "status": engine.status,
+        "active_source": engine.active_source,
+    }
 
 
 @app.post("/api/control/pause", tags=["Control"], summary="Pause download")
 def pause_download() -> dict:
     """Pause the engine; the queue is preserved."""
     engine.pause()
-    return {"status": engine.status}
+    return {
+        "status": engine.status,
+        "active_source": engine.active_source,
+    }
 
 
 @app.post("/api/control/stop", tags=["Control"], summary="Stop download")
 def stop_download() -> dict:
     """Stop the engine; the queue is preserved and can be resumed with start."""
     engine.stop()
-    return {"status": engine.status}
+    return {
+        "status": engine.status,
+        "active_source": engine.active_source,
+    }
 
 
 # ── Status ────────────────────────────────────────────────────────────────────
@@ -145,9 +156,17 @@ def get_status() -> dict:
     """Return live download statistics and engine state."""
     stats = get_stats()
     downloaded = int(stats.get("downloaded_count", 0))
-    total_estimated = settings.PEAPIX_TOTAL_PAGES * 40 + settings.WIN10_TOTAL_PAGES * 4
-    scrape_remaining = scrape_queue_size()
-    dl_remaining = download_queue_size()
+
+    if engine.active_source == "peapix":
+        total_estimated = settings.PEAPIX_TOTAL_PAGES * 40
+    elif engine.active_source == "win10spotlight":
+        total_estimated = settings.WIN10_TOTAL_PAGES * 4
+    else:
+        total_estimated = settings.PEAPIX_TOTAL_PAGES * 40 + settings.WIN10_TOTAL_PAGES * 4
+
+    target_src = None if engine.active_source == "both" else engine.active_source
+    scrape_remaining = scrape_queue_size(source=target_src)
+    dl_remaining = download_queue_size(source=target_src)
 
     progress_pct = 0.0
     if total_estimated > 0 and downloaded > 0:
@@ -155,6 +174,7 @@ def get_status() -> dict:
 
     return {
         "engine_status": engine.status,
+        "active_source": engine.active_source,
         "scraped_count": int(stats.get("scraped_count", 0)),
         "downloaded_count": downloaded,
         "duplicates_skipped": int(stats.get("duplicates_skipped", 0)),

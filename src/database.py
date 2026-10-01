@@ -280,45 +280,61 @@ def delete_wallpaper(phash: str) -> None:
 
 # ── Scrape Queue ────────────────────────────────────────────────────────────
 
-def seed_scrape_queue(peapix_pages: int, win10_pages: int) -> None:
-    """Populate the scrape queue with all gallery pages if not already seeded."""
+def seed_scrape_queue(
+    peapix_pages: int,
+    win10_pages: int,
+    target_source: Optional[str] = None,
+    force: bool = False,
+) -> None:
+    """Populate the scrape queue with gallery pages for the target source(s)."""
     now = datetime.now(timezone.utc).isoformat()
     with get_db() as conn:
-        existing = conn.execute("SELECT COUNT(*) FROM scrape_queue").fetchone()[0]
-        if existing > 0:
-            return  # already seeded
+        if target_source in ("peapix", None, "both"):
+            peapix_count = conn.execute("SELECT COUNT(*) FROM scrape_queue WHERE source = 'peapix'").fetchone()[0]
+            if peapix_count == 0 or force:
+                rows = [("https://peapix.com/spotlight", "peapix", 100, now)]
+                for i in range(2, peapix_pages + 1):
+                    rows.append((f"https://peapix.com/spotlight/page-{i}", "peapix", 10, now))
+                conn.executemany(
+                    "INSERT OR IGNORE INTO scrape_queue(url, source, priority, added_at) VALUES(?,?,?,?)",
+                    rows,
+                )
 
-        rows = []
-        # Peapix spotlight pages
-        rows.append(("https://peapix.com/spotlight", "peapix", 100, now))
-        for i in range(2, peapix_pages + 1):
-            rows.append((f"https://peapix.com/spotlight/page-{i}", "peapix", 10, now))
-
-        # Windows10Spotlight pages
-        rows.append(("https://windows10spotlight.com/", "win10spotlight", 100, now))
-        for i in range(2, win10_pages + 1):
-            rows.append((f"https://windows10spotlight.com/page/{i}", "win10spotlight", 10, now))
-
-        conn.executemany(
-            "INSERT OR IGNORE INTO scrape_queue(url, source, priority, added_at) VALUES(?,?,?,?)",
-            rows,
-        )
+        if target_source in ("win10spotlight", None, "both"):
+            win10_count = conn.execute("SELECT COUNT(*) FROM scrape_queue WHERE source = 'win10spotlight'").fetchone()[0]
+            if win10_count == 0 or force:
+                rows = [("https://windows10spotlight.com/", "win10spotlight", 100, now)]
+                for i in range(2, win10_pages + 1):
+                    rows.append((f"https://windows10spotlight.com/page/{i}", "win10spotlight", 10, now))
+                conn.executemany(
+                    "INSERT OR IGNORE INTO scrape_queue(url, source, priority, added_at) VALUES(?,?,?,?)",
+                    rows,
+                )
 
 
-def pop_scrape_page() -> Optional[dict]:
-    """Remove and return the highest-priority unscraped page."""
+def pop_scrape_page(source: Optional[str] = None) -> Optional[dict]:
+    """Remove and return the highest-priority unscraped page, optionally filtered by source."""
     with get_db() as conn:
-        row = conn.execute(
-            "SELECT * FROM scrape_queue ORDER BY priority DESC, id ASC LIMIT 1"
-        ).fetchone()
+        if source and source != "both":
+            row = conn.execute(
+                "SELECT * FROM scrape_queue WHERE source = ? ORDER BY priority DESC, id ASC LIMIT 1",
+                (source,),
+            ).fetchone()
+        else:
+            row = conn.execute(
+                "SELECT * FROM scrape_queue ORDER BY priority DESC, id ASC LIMIT 1"
+            ).fetchone()
         if row:
             conn.execute("DELETE FROM scrape_queue WHERE id = ?", (row["id"],))
             return dict(row)
     return None
 
 
-def scrape_queue_size() -> int:
+def scrape_queue_size(source: Optional[str] = None) -> int:
+    """Return remaining scrape pages count, optionally filtered by source."""
     with get_db() as conn:
+        if source and source != "both":
+            return conn.execute("SELECT COUNT(*) FROM scrape_queue WHERE source = ?", (source,)).fetchone()[0]
         return conn.execute("SELECT COUNT(*) FROM scrape_queue").fetchone()[0]
 
 
@@ -341,12 +357,18 @@ def enqueue_download(item: dict) -> bool:
             return False
 
 
-def pop_download_item() -> Optional[dict]:
-    """Remove and return the next download item (FIFO)."""
+def pop_download_item(source: Optional[str] = None) -> Optional[dict]:
+    """Remove and return the next download item (FIFO), optionally filtered by source."""
     with get_db() as conn:
-        row = conn.execute(
-            "SELECT * FROM download_queue ORDER BY id ASC LIMIT 1"
-        ).fetchone()
+        if source and source != "both":
+            row = conn.execute(
+                "SELECT * FROM download_queue WHERE source = ? ORDER BY id ASC LIMIT 1",
+                (source,),
+            ).fetchone()
+        else:
+            row = conn.execute(
+                "SELECT * FROM download_queue ORDER BY id ASC LIMIT 1"
+            ).fetchone()
         if row:
             conn.execute("DELETE FROM download_queue WHERE id = ?", (row["id"],))
             return dict(row)
@@ -367,8 +389,11 @@ def re_enqueue_with_retry(item: dict, max_retries: int) -> None:
             )
 
 
-def download_queue_size() -> int:
+def download_queue_size(source: Optional[str] = None) -> int:
+    """Return remaining download items count, optionally filtered by source."""
     with get_db() as conn:
+        if source and source != "both":
+            return conn.execute("SELECT COUNT(*) FROM download_queue WHERE source = ?", (source,)).fetchone()[0]
         return conn.execute("SELECT COUNT(*) FROM download_queue").fetchone()[0]
 
 

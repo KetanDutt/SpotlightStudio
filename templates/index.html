@@ -449,6 +449,29 @@
       margin: 0 4px;
     }
 
+    /* Download Source Selector */
+    .dl-source-wrap {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+    }
+    .dl-source-picker {
+      height: 32px;
+      padding: 4px 26px 4px 10px;
+      font-size: 0.74rem;
+      font-weight: 600;
+      border-radius: var(--radius-md);
+      background-color: rgba(255, 255, 255, 0.06);
+      border-color: var(--glass-border-medium);
+      color: var(--text-primary);
+      cursor: pointer;
+      transition: all var(--duration-fast) var(--ease-apple);
+    }
+    .dl-source-picker:hover {
+      background-color: rgba(255, 255, 255, 0.1);
+      border-color: var(--glass-border-hover);
+    }
+
     /* Keyboard Shortcut Hint Pill */
     .kbd-hint {
       display: inline-flex;
@@ -1323,6 +1346,15 @@
 
       <!-- Action Controls -->
       <div class="controls-group">
+        <!-- Download Source Selector (Desktop Mode) -->
+        <div class="desktop-only dl-source-wrap" title="Select source to download/crawl from">
+          <select id="dl-source-select" class="glass-select dl-source-picker" onchange="handleDownloadSourceChange(this.value)">
+            <option value="both" selected>Both Sources</option>
+            <option value="peapix">Peapix Only</option>
+            <option value="win10spotlight">Win10 Only</option>
+          </select>
+        </div>
+
         <!-- Desktop Engine Controls -->
         <button id="btn-start" class="desktop-only btn-glass btn-start" onclick="ctrl('start')" style="display:none;">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
@@ -1427,6 +1459,23 @@
             <input id="f-search" class="glass-input" type="search" placeholder="Title, location, tag..." oninput="debouncedRefresh()" />
             <span class="glass-input-kbd"><kbd class="kbd-hint">/</kbd></span>
           </div>
+        </div>
+
+        <!-- Desktop Crawl Source Setting -->
+        <div class="desktop-only">
+          <div class="filter-section-title">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+              <polyline points="7 10 12 15 17 10"/>
+              <line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+            <span>Download Source</span>
+          </div>
+          <select id="sidebar-dl-source" class="glass-select" onchange="handleDownloadSourceChange(this.value)">
+            <option value="both" selected>Both (Peapix + Win10)</option>
+            <option value="peapix">Peapix Spotlight Only</option>
+            <option value="win10spotlight">Windows 10 Spotlight Only</option>
+          </select>
         </div>
 
         <!-- Source Filter -->
@@ -1657,6 +1706,7 @@
 
     /* ─── State Management ─────────────────────────────────────────── */
     let isDesktopMode  = false;
+    let currentDownloadSource = 'both';
     let staticCatalog  = [];
     let filteredCatalog= [];
     let currentPage    = 1;
@@ -1727,14 +1777,50 @@
       } catch (_) { /* Engine poll catch */ }
     }
 
+    async function handleDownloadSourceChange(val) {
+      currentDownloadSource = val || 'both';
+      const dlSelect = document.getElementById('dl-source-select');
+      if (dlSelect && dlSelect.value !== currentDownloadSource) dlSelect.value = currentDownloadSource;
+      const sbSelect = document.getElementById('sidebar-dl-source');
+      if (sbSelect && sbSelect.value !== currentDownloadSource) sbSelect.value = currentDownloadSource;
+
+      const srcLabel = currentDownloadSource === 'peapix' ? 'Peapix only' : currentDownloadSource === 'win10spotlight' ? 'Win10 Spotlight only' : 'Both sources';
+
+      if (!isDesktopMode) return;
+
+      // If engine is currently running, dynamically update source without interrupting loop
+      const badgeText = document.getElementById('status-badge-text');
+      const isRunning = badgeText && badgeText.textContent.toLowerCase().includes('running');
+      if (isRunning) {
+        try {
+          const r = await fetch(`/api/control/start?source=${encodeURIComponent(currentDownloadSource)}`, { method: 'POST' });
+          if (r.ok) {
+            toast(`Switched crawling & downloading to ${srcLabel}`, 'info');
+            await pollStatus();
+            return;
+          }
+        } catch (_) {}
+      }
+      toast(`Download source set to: ${srcLabel}`, 'info');
+    }
+
     function applyStatus(d) {
       const s = d.engine_status;
+      const activeSrc = d.active_source || currentDownloadSource || 'both';
+      currentDownloadSource = activeSrc;
+
+      // Sync source selectors to the engine's active source
+      const dlSelect = document.getElementById('dl-source-select');
+      if (dlSelect && dlSelect.value !== activeSrc) dlSelect.value = activeSrc;
+      const sbSelect = document.getElementById('sidebar-dl-source');
+      if (sbSelect && sbSelect.value !== activeSrc) sbSelect.value = activeSrc;
 
       /* Status Pill */
       const badge = document.getElementById('status-badge');
       const badgeText = document.getElementById('status-badge-text');
       badge.className = `status-pill badge-${s}`;
-      badgeText.textContent = s;
+      const srcLabel = activeSrc === 'peapix' ? 'Peapix' : activeSrc === 'win10spotlight' ? 'Win10' : 'Both';
+      badgeText.textContent = (s === 'running') ? `Running (${srcLabel})` : s;
 
       /* Action Buttons Toggle */
       toggle('btn-start', s !== 'running');
@@ -1763,10 +1849,16 @@
     async function ctrl(action) {
       if (!isDesktopMode) return;
       try {
-        const r = await fetch(`/api/control/${action}`, { method: 'POST' });
+        let url = `/api/control/${action}`;
+        if (action === 'start') {
+          url += `?source=${encodeURIComponent(currentDownloadSource || 'both')}`;
+        }
+        const r = await fetch(url, { method: 'POST' });
         const d = await r.json();
+        const activeSrc = d.active_source || currentDownloadSource || 'both';
         applyStatus({
           engine_status: d.status,
+          active_source: activeSrc,
           scraped_count: 0,
           downloaded_count: 0,
           duplicates_skipped: 0,
@@ -1778,7 +1870,8 @@
         });
         await pollStatus();
         if (action === 'start') {
-          toast('Engine started. Crawling & downloading in 4K...', 'info');
+          const srcLabel = activeSrc === 'peapix' ? 'Peapix only' : activeSrc === 'win10spotlight' ? 'Win10 Spotlight only' : 'Both sources';
+          toast(`Engine started. Crawling & downloading (${srcLabel}) in 4K...`, 'info');
           await refreshGallery(true);
         } else if (action === 'pause') {
           toast('Engine paused. Download queue preserved.', 'info');

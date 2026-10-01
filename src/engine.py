@@ -79,6 +79,7 @@ class DownloadEngine:
 
     def __init__(self) -> None:
         self._status: Status = "stopped"
+        self._active_source: str = "both"
         self._lock = threading.Lock()
         self._loop: asyncio.AbstractEventLoop | None = None
         self._thread: threading.Thread | None = None
@@ -91,18 +92,38 @@ class DownloadEngine:
     def status(self) -> Status:
         return self._status
 
-    def start(self) -> None:
-        """Start the engine, or resume from pause."""
+    @property
+    def active_source(self) -> str:
+        return self._active_source
+
+    def start(self, source: str = "both") -> None:
+        """Start the engine, or resume from pause, with optional source filter ('peapix', 'win10spotlight', or 'both')."""
         with self._lock:
+            src = source.lower().strip() if source else "both"
+            if src not in ("peapix", "win10spotlight", "both"):
+                src = "both"
+            self._active_source = src
+            set_stat("active_source", self._active_source)
+
+            # Ensure the scrape queue contains pages for the selected source(s)
+            seed_scrape_queue(
+                settings.PEAPIX_TOTAL_PAGES,
+                settings.WIN10_TOTAL_PAGES,
+                target_source=self._active_source,
+            )
+
             if self._status == "running":
+                log.info("Engine source updated to: %s", self._active_source)
                 return
+
             if self._status == "paused":
                 self._status = "running"
                 set_stat("status", "running")
                 if self._pause_event and self._loop:
                     self._loop.call_soon_threadsafe(self._pause_event.set)
-                log.info("Engine resumed.")
+                log.info("Engine resumed with source filter: %s", self._active_source)
                 return
+
             # stopped → fresh thread
             self._status = "running"
             set_stat("status", "running")
@@ -111,7 +132,8 @@ class DownloadEngine:
             )
             self._thread.start()
             log.info(
-                "Engine started  (downloads=%d, scrapers=%d, connections=%d/%d).",
+                "Engine started (source=%s, downloads=%d, scrapers=%d, connections=%d/%d).",
+                self._active_source,
                 settings.CONCURRENT_DOWNLOADS,
                 settings.CONCURRENT_SCRAPERS,
                 settings.MAX_CONNECTIONS,
@@ -188,7 +210,11 @@ class DownloadEngine:
         self._pause_event.set()   # initially running
 
         init_db()
-        seed_scrape_queue(settings.PEAPIX_TOTAL_PAGES, settings.WIN10_TOTAL_PAGES)
+        seed_scrape_queue(
+            settings.PEAPIX_TOTAL_PAGES,
+            settings.WIN10_TOTAL_PAGES,
+            target_source=self._active_source,
+        )
 
         # ── Shared HTTP session ────────────────────────────────────────────
         connector = aiohttp.TCPConnector(
@@ -225,12 +251,14 @@ class DownloadEngine:
                 if self._stop_event.is_set():
                     break
 
+                target_src = None if self._active_source == "both" else self._active_source
+
                 # ── Scrape: keep the download queue topped up ────────────
                 while (
                     len(scrape_tasks) < settings.CONCURRENT_SCRAPERS
-                    and download_queue_size() < _QUEUE_LOW_WATER
+                    and download_queue_size(source=target_src) < _QUEUE_LOW_WATER
                 ):
-                    page = pop_scrape_page()
+                    page = pop_scrape_page(source=target_src)
                     if not page:
                         break
                     t = asyncio.create_task(
@@ -242,7 +270,7 @@ class DownloadEngine:
 
                 # ── Download: saturate the concurrency limit ─────────────
                 while len(dl_tasks) < settings.CONCURRENT_DOWNLOADS:
-                    item = pop_download_item()
+                    item = pop_download_item(source=target_src)
                     if not item:
                         break
                     t = asyncio.create_task(
@@ -265,10 +293,10 @@ class DownloadEngine:
                 if (
                     not dl_tasks
                     and not scrape_tasks
-                    and download_queue_size() == 0
-                    and scrape_queue_size() == 0
+                    and download_queue_size(source=target_src) == 0
+                    and scrape_queue_size(source=target_src) == 0
                 ):
-                    log.info("🎉 All downloads complete!")
+                    log.info("🎉 All downloads complete for source '%s'!", self._active_source)
                     with self._lock:
                         self._status = "stopped"
                         set_stat("status", "stopped")
