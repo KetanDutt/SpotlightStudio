@@ -1376,6 +1376,7 @@
               <span class="status-dot"></span>
               <span id="status-badge-text">Web Catalog</span>
             </span>
+            <span id="engine-phase" class="desktop-only" style="font-size:0.7rem; color:var(--text-tertiary); margin-left:6px; font-weight: 500;">Idle</span>
           </div>
         </div>
       </div>
@@ -1996,10 +1997,29 @@
       const srcLabel = activeSrc === 'peapix' ? 'Peapix' : activeSrc === 'win10spotlight' ? 'Win10' : 'Both';
       badgeText.textContent = (s === 'running') ? `Running (${srcLabel})` : s;
 
-      /* Action Buttons Toggle */
-      toggle('btn-start', s !== 'running');
-      toggle('btn-pause', s === 'running');
-      toggle('btn-stop',  s !== 'stopped');
+      /* Engine Phase Text */
+      const phaseEl = document.getElementById('engine-phase');
+      if (phaseEl) phaseEl.textContent = d.phase || (s === 'running' ? 'Active' : 'Idle');
+
+      /* Action Buttons Disable States */
+      const setBtnState = (id, disabled) => {
+        const el = document.getElementById(id);
+        if (el) {
+          if (disabled) {
+            el.setAttribute('disabled', 'true');
+            el.style.opacity = '0.4';
+            el.style.pointerEvents = 'none';
+          } else {
+            el.removeAttribute('disabled');
+            el.style.opacity = '1';
+            el.style.pointerEvents = 'auto';
+          }
+        }
+      };
+
+      setBtnState('btn-start', s === 'running');
+      setBtnState('btn-pause', s !== 'running');
+      setBtnState('btn-stop', s === 'stopped');
 
       /* Metric Ribbon Updates */
       setText('s-scraped',    d.scraped_count);
@@ -2226,9 +2246,15 @@
       return 'hd';
     }
 
+    function getImgUrl(path) {
+      if (isDesktopMode || !path) return path;
+      // Stream LFS files directly to bypass GitHub Pages limits
+      return `https://media.githubusercontent.com/media/KetanDutt/SpotlightStudio/main/${path}`;
+    }
+
     function gridCard(w, i) {
-      const src = `images/thumbs/${w.filename}`;
-      const fallback = `images/${w.filename}`;
+      const src = getImgUrl(`images/thumbs/${w.filename}`);
+      const fallback = getImgUrl(`images/${w.filename}`);
       const qClass = getQualityClass(w.quality);
       const isAboveFold = i < 8;
       const loadAttr = isAboveFold ? 'loading="eager" fetchpriority="high"' : 'loading="lazy" fetchpriority="low"';
@@ -2262,8 +2288,8 @@
     }
 
     function listRow(w, i) {
-      const src = `images/thumbs/${w.filename}`;
-      const fallback = `images/${w.filename}`;
+      const src = getImgUrl(`images/thumbs/${w.filename}`);
+      const fallback = getImgUrl(`images/${w.filename}`);
       const qClass = getQualityClass(w.quality);
       const isAboveFold = i < 10;
       const loadAttr = isAboveFold ? 'loading="eager" fetchpriority="high"' : 'loading="lazy" fetchpriority="low"';
@@ -2373,7 +2399,7 @@
 
     function showLbItem(w) {
       currentLbId = w.id;
-      const imgPath = `images/${w.filename}`;
+      const imgPath = getImgUrl(`images/${w.filename}`);
       document.getElementById('lb-img').src = imgPath;
       document.getElementById('lb-img').alt = w.title;
       document.getElementById('lb-title').textContent = w.title || 'Windows Spotlight Wallpaper';

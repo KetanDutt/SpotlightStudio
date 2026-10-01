@@ -4,7 +4,7 @@
  * while allowing browser HTTP/2 native multi-threaded streaming for image assets.
  */
 
-const CACHE_NAME = 'spotlight-studio-v2.3';
+const CACHE_NAME = 'spotlight-studio-v2.4';
 const STATIC_ASSETS = [
   './',
   './index.html',
