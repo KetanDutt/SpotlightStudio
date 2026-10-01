@@ -9,6 +9,7 @@ download_queue : image URLs yet to be downloaded
 """
 from __future__ import annotations
 
+import logging
 import re
 import shutil
 import sqlite3
@@ -20,6 +21,7 @@ from typing import Generator, Optional
 
 from src.config import settings
 
+log = logging.getLogger("database")
 
 # Thread-local storage so each thread gets its own connection
 _local = threading.local()

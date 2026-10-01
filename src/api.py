@@ -176,6 +176,7 @@ def get_status() -> dict:
     return {
         "engine_status": engine.status,
         "active_source": engine.active_source,
+        "phase": stats.get("phase", "Idle"),
         "scraped_count": int(stats.get("scraped_count", 0)),
         "downloaded_count": downloaded,
         "duplicates_skipped": int(stats.get("duplicates_skipped", 0)),

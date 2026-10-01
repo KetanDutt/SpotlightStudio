@@ -49,6 +49,7 @@ import aiohttp
 
 from src.config import settings
 from src.database import (
+    deduplicate_downloaded_wallpapers,
     download_queue_size,
     enqueue_download,
     export_catalog_json,
@@ -61,7 +62,7 @@ from src.database import (
     seed_scrape_queue,
     set_stat,
 )
-from src.downloader import process_download
+from src.downloader import create_missing_thumbs, process_download
 from src.scrapers import scrape_peapix_gallery_page, scrape_win10spotlight_page
 
 log = logging.getLogger("engine")
@@ -243,6 +244,7 @@ class DownloadEngine:
             dl_tasks:     set[asyncio.Task] = set()
             scrape_tasks: set[asyncio.Task] = set()
             last_synced = int(get_stats().get("downloaded_count", 0))
+            post_scrape_tasks_done = False
 
             while not self._stop_event.is_set():
 
@@ -253,10 +255,12 @@ class DownloadEngine:
 
                 target_src = None if self._active_source == "both" else self._active_source
 
-                # ── Scrape: keep the download queue topped up ────────────
+                # ── Scrape: exhaust the queue first ──────────────────────
+                if scrape_queue_size(source=target_src) > 0:
+                    set_stat("phase", "Scraping site sources")
                 while (
                     len(scrape_tasks) < settings.CONCURRENT_SCRAPERS
-                    and download_queue_size(source=target_src) < _QUEUE_LOW_WATER
+                    and scrape_queue_size(source=target_src) > 0
                 ):
                     page = pop_scrape_page(source=target_src)
                     if not page:
@@ -268,17 +272,32 @@ class DownloadEngine:
                     scrape_tasks.add(t)
                     t.add_done_callback(scrape_tasks.discard)
 
-                # ── Download: saturate the concurrency limit ─────────────
-                while len(dl_tasks) < settings.CONCURRENT_DOWNLOADS:
-                    item = pop_download_item(source=target_src)
-                    if not item:
-                        break
-                    t = asyncio.create_task(
-                        self._download_one(session, dl_sem, item),
-                        name=f"dl-{item['id']}",
-                    )
-                    dl_tasks.add(t)
-                    t.add_done_callback(dl_tasks.discard)
+                # ── Transition to Download Phase ─────────────────────────
+                if scrape_queue_size(source=target_src) == 0 and len(scrape_tasks) == 0:
+                    if not post_scrape_tasks_done:
+                        set_stat("phase", "Deduplicating & creating thumbs")
+                        log.info("Scraping complete. Running post-scrape tasks...")
+                        # Run deduplication in thread pool to avoid blocking event loop
+                        loop = asyncio.get_running_loop()
+                        await loop.run_in_executor(None, deduplicate_downloaded_wallpapers)
+                        # Create missing thumbs
+                        await create_missing_thumbs()
+                        post_scrape_tasks_done = True
+                        log.info("Post-scrape tasks complete. Starting downloads...")
+
+                    # ── Download: saturate the concurrency limit ─────────────
+                    if download_queue_size(source=target_src) > 0 or len(dl_tasks) > 0:
+                        set_stat("phase", "Downloading images")
+                    while len(dl_tasks) < settings.CONCURRENT_DOWNLOADS:
+                        item = pop_download_item(source=target_src)
+                        if not item:
+                            break
+                        t = asyncio.create_task(
+                            self._download_one(session, dl_sem, item),
+                            name=f"dl-{item['id']}",
+                        )
+                        dl_tasks.add(t)
+                        t.add_done_callback(dl_tasks.discard)
 
                 # ── Periodic static catalog export (every 25 downloads) ──
                 cur_downloaded = int(get_stats().get("downloaded_count", 0))
@@ -300,6 +319,7 @@ class DownloadEngine:
                     with self._lock:
                         self._status = "stopped"
                         set_stat("status", "stopped")
+                        set_stat("phase", "Idle")
                     break
 
                 await asyncio.sleep(settings.REQUEST_DELAY)

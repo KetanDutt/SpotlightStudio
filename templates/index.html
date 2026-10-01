@@ -1376,6 +1376,7 @@
               <span class="status-dot"></span>
               <span id="status-badge-text">Web Catalog</span>
             </span>
+            <span id="engine-phase" class="desktop-only" style="font-size:0.7rem; color:var(--text-tertiary); margin-left:6px; font-weight: 500;">Idle</span>
           </div>
         </div>
       </div>
@@ -1996,10 +1997,29 @@
       const srcLabel = activeSrc === 'peapix' ? 'Peapix' : activeSrc === 'win10spotlight' ? 'Win10' : 'Both';
       badgeText.textContent = (s === 'running') ? `Running (${srcLabel})` : s;
 
-      /* Action Buttons Toggle */
-      toggle('btn-start', s !== 'running');
-      toggle('btn-pause', s === 'running');
-      toggle('btn-stop',  s !== 'stopped');
+      /* Engine Phase Text */
+      const phaseEl = document.getElementById('engine-phase');
+      if (phaseEl) phaseEl.textContent = d.phase || (s === 'running' ? 'Active' : 'Idle');
+
+      /* Action Buttons Disable States */
+      const setBtnState = (id, disabled) => {
+        const el = document.getElementById(id);
+        if (el) {
+          if (disabled) {
+            el.setAttribute('disabled', 'true');
+            el.style.opacity = '0.4';
+            el.style.pointerEvents = 'none';
+          } else {
+            el.removeAttribute('disabled');
+            el.style.opacity = '1';
+            el.style.pointerEvents = 'auto';
+          }
+        }
+      };
+
+      setBtnState('btn-start', s === 'running');
+      setBtnState('btn-pause', s !== 'running');
+      setBtnState('btn-stop', s === 'stopped');
 
       /* Metric Ribbon Updates */
       setText('s-scraped',    d.scraped_count);

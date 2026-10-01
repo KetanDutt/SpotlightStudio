@@ -43,7 +43,9 @@ from PIL import Image
 
 from src.config import settings
 from src.database import (
+    add_suppressed_url,
     delete_wallpaper,
+    get_db,
     get_wallpaper_by_phash,
     increment_stat,
     re_enqueue_with_retry,
@@ -224,6 +226,9 @@ async def process_download(
         if new_score <= old_score:
             log.debug("⊘ Duplicate (kept existing): %s", url)
             increment_stat("duplicates_skipped")
+            add_suppressed_url(actual_url, reason="duplicate_lower_quality")
+            if url != actual_url:
+                add_suppressed_url(url, reason="duplicate_lower_quality")
             return True                               # not a failure
 
         # New copy is strictly better — remove old files (both nested and legacy flat)
@@ -234,6 +239,11 @@ async def process_download(
             legacy_target = base_dir / Path(existing["filename"]).name
             if legacy_target.exists() and legacy_target != target and not legacy_target.is_dir():
                 legacy_target.unlink()
+
+        if existing.get("source_url"):
+            add_suppressed_url(existing["source_url"], reason="duplicate_lower_quality")
+        if existing.get("page_url"):
+            add_suppressed_url(existing["page_url"], reason="duplicate_lower_quality")
 
         delete_wallpaper(phash)
         increment_stat("duplicates_replaced")
@@ -281,3 +291,43 @@ async def process_download(
         file_size / 1_048_576,
     )
     return True
+
+
+async def create_missing_thumbs() -> int:
+    """Finds downloaded wallpapers without a thumbnail and generates them."""
+    with get_db() as conn:
+        rows = conn.execute("SELECT filename FROM wallpapers").fetchall()
+
+    missing = []
+    for row in rows:
+        filename = row["filename"]
+        thumb_path = THUMBS_DIR / filename
+        if not thumb_path.exists():
+            full_path = settings.IMAGES_DIR / filename
+            if full_path.exists():
+                missing.append((full_path, thumb_path))
+
+    if not missing:
+        return 0
+
+    log.info("Found %d missing thumbnails. Generating...", len(missing))
+    loop = asyncio.get_running_loop()
+
+    def _gen(src: Path, dst: Path):
+        try:
+            with open(src, "rb") as f:
+                data = f.read()
+            img = _decode_image(data)
+            _write_thumbnail(img, dst)
+        except Exception as e:
+            log.error("Failed to generate thumb for %s: %s", src, e)
+
+    tasks = []
+    for src, dst in missing:
+        tasks.append(loop.run_in_executor(_cpu_pool, _gen, src, dst))
+
+    if tasks:
+        await asyncio.gather(*tasks)
+
+    log.info("Finished generating missing thumbnails.")
+    return len(missing)
