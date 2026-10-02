@@ -5,7 +5,7 @@
 ```bash
 git clone https://github.com/KetanDutt/SpotlightStudio.git && cd SpotlightStudio     # `git lfs install` first if you want the images
 python -m venv .venv && . .venv/bin/activate          # Windows: .venv\Scripts\activate
-pip install -r requirements-dev.txt                    # runtime + pytest + httpx + ruff
+pip install -r requirements-dev.txt                    # runtime + pytest + httpx + ruff + imagehash (parity test)
 cp .env.example .env                                   # optional
 python main.py --server                                # http://127.0.0.1:8765/
 ```
