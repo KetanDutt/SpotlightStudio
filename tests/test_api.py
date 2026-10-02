@@ -247,6 +247,19 @@ def test_cors_is_off_by_default_and_opt_in(env, eng, monkeypatch):
         assert configured.post("/api/control/pause", headers={"Origin": "https://other.example"}).status_code == 403
 
 
+def test_host_policy_is_evaluated_per_request(env, eng, monkeypatch):
+    """`--host 0.0.0.0` (applied after the app object exists) must take effect immediately."""
+    with TestClient(create_app(settings, eng), base_url="http://192.168.1.20:8765") as client:
+        assert client.get("/api/health").status_code == 400
+        monkeypatch.setattr(settings, "HOST", "0.0.0.0")
+        assert client.get("/api/health").status_code == 200
+        monkeypatch.setattr(settings, "ALLOWED_HOSTS", ["*.spotlight.lan", "10.0.0.5"])
+        assert client.get("/api/health", headers={"Host": "nas.spotlight.lan:8765"}).status_code == 200
+        assert client.get("/api/health", headers={"Host": "10.0.0.5"}).status_code == 200
+        assert client.get("/api/health", headers={"Host": "evil.com"}).status_code == 400
+        assert client.get("/api/health", headers={"Host": "evilspotlight.lan"}).status_code == 400
+
+
 def test_non_loopback_binding_accepts_any_host(env, eng, monkeypatch):
     monkeypatch.setattr(settings, "HOST", "0.0.0.0")
     with TestClient(create_app(settings, eng), base_url="http://192.168.1.20:8765") as lan:

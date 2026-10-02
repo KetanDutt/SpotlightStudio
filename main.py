@@ -332,6 +332,10 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Spotlight Studio {__version__}")
         return 0
 
+    # An explicit --host/--port is authoritative (the API derives its Host allow-list from it).
+    from src.config import settings
+
+    settings.HOST, settings.PORT = args.host, args.port
     configure_logging()
     if args.check:
         return run_check()

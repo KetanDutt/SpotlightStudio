@@ -327,12 +327,16 @@ class DownloadEngine:
     def snapshot(self) -> dict[str, Any]:
         """Point-in-time view of the engine for ``/api/status``."""
         run = self._run
-        finished = self._status == "stopped"
+        status = self._status
+        finished = status == "stopped"
+        # Derive the label from the status so Pause/Stop show up instantly (the supervisor
+        # refreshes ``run.phase`` only every 250 ms).
+        phase = "Paused" if status == "paused" else "Stopping…" if status == "stopping" else run.phase
         return {
-            "status": self._status,
+            "status": status,
             "active_source": self._source,
             "mode": self._mode,
-            "phase": run.phase,
+            "phase": phase,
             "progress_pct": run.progress_pct(finished),
             "rate_per_sec": round(run.rate(), 2),
             "breaker_active": time.monotonic() < self._breaker_until,

@@ -12,8 +12,8 @@ user's browser could try to talk to it:
   not stop the *side effect*.  → :class:`OriginCheckMiddleware` rejects unsafe
   methods whose ``Origin`` / ``Sec-Fetch-Site`` says they come from elsewhere.
 * **DNS rebinding** – an attacker domain re-pointed at 127.0.0.1 makes the request
-  look same-origin.  → ``TrustedHostMiddleware`` only answers to known Host headers
-  (configured in :meth:`Settings.allowed_hosts`).
+  look same-origin.  → :class:`HostCheckMiddleware` only answers to known Host headers
+  (configured in :meth:`Settings.allowed_hosts`, evaluated per request).
 * **Content sniffing / framing / XSS** – :class:`SecurityHeadersMiddleware` adds
   ``nosniff``, ``X-Frame-Options`` and a strict Content-Security-Policy.
 
@@ -22,10 +22,11 @@ CSP forbids inline scripts, so even a hostile title cannot execute code.
 """
 from __future__ import annotations
 
+from collections.abc import Callable
 from urllib.parse import urlparse
 
 from starlette.datastructures import Headers
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, PlainTextResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 UNSAFE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
@@ -54,6 +55,52 @@ _STATIC_SECURITY_HEADERS = {
     "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=()",
     "Cross-Origin-Opener-Policy": "same-origin",
 }
+
+
+def hostname_of(host_header: str) -> str:
+    """``example.com:8765`` → ``example.com``; ``[::1]:8765`` → ``[::1]`` (IPv6 keeps its brackets)."""
+    host = host_header.strip().lower()
+    if host.startswith("["):
+        end = host.find("]")
+        return host[: end + 1] if end != -1 else host
+    return host.split(":", 1)[0]
+
+
+def host_allowed(host_header: str, allowed: list[str]) -> bool:
+    """Match a Host header against exact names, ``*`` and ``*.example.com`` wildcards."""
+    if "*" in allowed:
+        return True
+    name = hostname_of(host_header)
+    for pattern in allowed:
+        pattern = pattern.lower()
+        if name == pattern or (pattern.startswith("*.") and name.endswith(pattern[1:])):
+            return True
+    return False
+
+
+class HostCheckMiddleware:
+    """
+    Answer only to known ``Host`` headers (DNS-rebinding protection).
+
+    Unlike Starlette's ``TrustedHostMiddleware`` the allow-list is a *callable*
+    evaluated on every request, so ``--host 0.0.0.0`` / ``ALLOWED_HOSTS`` changes made
+    after the app object was created are honoured.
+    """
+
+    def __init__(self, app: ASGIApp, get_allowed: Callable[[], list[str]]) -> None:
+        self.app = app
+        self.get_allowed = get_allowed
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] in {"http", "websocket"}:
+            host = Headers(scope=scope).get("host", "")
+            if not host_allowed(host, self.get_allowed()):
+                if scope["type"] == "http":
+                    await PlainTextResponse("Invalid host header", status_code=400)(scope, receive, send)
+                else:
+                    await send({"type": "websocket.close", "code": 1008})
+                return
+        await self.app(scope, receive, send)
 
 
 class SecurityHeadersMiddleware:

@@ -110,3 +110,10 @@ def test_foreign_program_on_the_port_is_reported(env, restore_logging):
         assert cli.port_in_use("127.0.0.1", port) and not cli.is_spotlight_studio("127.0.0.1", port)
         assert cli.run_server("127.0.0.1", port) == 1
         assert cli.run_desktop("127.0.0.1", port) == 1
+
+
+def test_host_flag_updates_the_settings_used_by_the_api(env, restore_logging, monkeypatch):
+    monkeypatch.setattr(settings, "HOST", "127.0.0.1")
+    assert cli.main(["--sync-catalog", "--host", "0.0.0.0", "--port", "9123"]) == 0
+    assert settings.HOST == "0.0.0.0" and settings.PORT == 9123
+    assert settings.allowed_hosts() == ["*"]

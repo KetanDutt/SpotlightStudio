@@ -281,7 +281,7 @@ def test_sql_injection_attempts_are_inert(env):
 
 def test_random_tags_and_iteration(env):
     for i in range(5):
-        add_wallpaper(tags="common,t%d" % i, source="peapix" if i < 3 else "win10spotlight")
+        add_wallpaper(tags=f"common,t{i}", source="peapix" if i < 3 else "win10spotlight")
     assert db.get_random_wallpaper(source="win10spotlight")["source"] == "win10spotlight"
     assert db.get_random_wallpaper(search="nothing-matches-this") is None
     counts = db.get_tag_counts()

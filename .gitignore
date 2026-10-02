@@ -1,41 +1,52 @@
-# Python bytecode
+# ── Python ───────────────────────────────────────────────────────────────
 __pycache__/
 *.py[cod]
 *.pyo
 *.pyd
 .Python
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
 
-# Virtual environments
+# ── Virtual environments ─────────────────────────────────────────────────
 venv/
 env/
 .venv/
 
-# Local environment configuration & secrets
+# ── Node tooling (the JS unit tests need no dependencies; keep accidental installs out)
+node_modules/
+
+# ── Local configuration & secrets ────────────────────────────────────────
 .env
 .env.local
 
-# Logs (database, catalog, and images are tracked in git)
-*.log
-data/*.log
+# ── Runtime state ────────────────────────────────────────────────────────
+# The database, the catalog JSON and the images ARE tracked in git.
+# SQLite's transient side files are NOT: committing a stale -wal onto a newer
+# database can corrupt it.
+data/*.db-wal
+data/*.db-shm
+data/*.db-journal
 data/*.tmp
+*.log
+*.log.*
+*.part
 
-# IDEs & System files
+# ── IDEs & operating systems ─────────────────────────────────────────────
 .vscode/
 .idea/
 *.swp
 .DS_Store
 Thumbs.db
+ehthumbs.db
 desktop.ini
-
-# Packaging
-dist/
-build/
-*.egg-info/
-
-# OS temp files
+$RECYCLE.BIN/
 *.~lock.*
 *.tmp
 
-# Windows
-ehthumbs.db
-$RECYCLE.BIN/
+# ── Packaging ────────────────────────────────────────────────────────────
+dist/
+build/
+*.egg-info/

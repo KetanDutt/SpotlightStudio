@@ -152,12 +152,12 @@ def test_pause_stops_new_work_and_resume_continues(site, eng):
     eng.start("peapix", "full")
     assert wait_until(lambda: eng.run.downloaded >= 1)
     eng.pause()
-    assert eng.status == "paused"
+    assert eng.status == "paused" and eng.snapshot()["phase"] == "Paused"
     time.sleep(0.6)                                                       # let in-flight downloads finish
     settled = eng.run.downloaded
     time.sleep(0.6)
     assert eng.run.downloaded == settled, "no new downloads may start while paused"
-    assert eng.snapshot()["phase"] == "Paused"
+    assert eng.snapshot()["phase"] == "Paused"                            # immediately, not on the next tick
     assert eng.start("peapix", "full") == "resumed"
     finish(eng)
     assert db.count_wallpapers() == 8
@@ -273,11 +273,11 @@ def test_repair_mode_backfills_titles_tags_and_dates(site, eng, add):
     assert eng.run.repaired == 7
     assert not any(path.startswith("/img/") for path in site.hits)         # repair never downloads images
 
-    hits_before = site.hits["/images/%d" % (5000 + site.win10_items[0].seed)]
+    hits_before = site.hits[f"/images/{5000 + site.win10_items[0].seed}"]
     eng.start("both", "repair")                                             # idempotent
     finish(eng)
     assert eng.run.repaired == 0
-    assert site.hits["/images/%d" % (5000 + site.win10_items[0].seed)] == hits_before  # nothing left to fetch
+    assert site.hits[f"/images/{5000 + site.win10_items[0].seed}"] == hits_before  # nothing left to fetch
 
 
 # ── Units ──────────────────────────────────────────────────────────────────

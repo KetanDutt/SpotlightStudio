@@ -36,7 +36,6 @@ from fastapi.responses import (
 )
 from pydantic import BaseModel
 from starlette.middleware.gzip import GZipMiddleware
-from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.staticfiles import StaticFiles
 from starlette.types import ASGIApp, Receive, Scope, Send
 
@@ -60,7 +59,7 @@ from src.database import (
 )
 from src.downloader import shutdown_cpu_pool
 from src.engine import DownloadEngine, EngineBusy, engine
-from src.security import OriginCheckMiddleware, SecurityHeadersMiddleware
+from src.security import HostCheckMiddleware, OriginCheckMiddleware, SecurityHeadersMiddleware
 from src.utils import csv_safe, is_lfs_pointer
 from src.wallpaper import UnsupportedPlatform, WallpaperError, set_desktop_wallpaper
 
@@ -257,7 +256,7 @@ def create_app(cfg: Settings = settings, eng: DownloadEngine = engine) -> FastAP
             allow_headers=["Content-Type"],
         )
     app.add_middleware(OriginCheckMiddleware, allowed_origins=cfg.CORS_ORIGINS)
-    app.add_middleware(TrustedHostMiddleware, allowed_hosts=cfg.allowed_hosts())
+    app.add_middleware(HostCheckMiddleware, get_allowed=cfg.allowed_hosts)
     app.add_middleware(SecurityHeadersMiddleware)
 
     @app.exception_handler(EngineBusy)
