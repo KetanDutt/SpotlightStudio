@@ -14,7 +14,7 @@ env/
 .env
 .env.local
 
-# Temporary execution files & logs (database and catalog are tracked in git)
+# Logs (database, catalog, and images are tracked in git)
 *.log
 data/*.log
 data/*.tmp
@@ -25,8 +25,17 @@ data/*.tmp
 *.swp
 .DS_Store
 Thumbs.db
+desktop.ini
 
 # Packaging
 dist/
 build/
 *.egg-info/
+
+# OS temp files
+*.~lock.*
+*.tmp
+
+# Windows
+ehthumbs.db
+$RECYCLE.BIN/

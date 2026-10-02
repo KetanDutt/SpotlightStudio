@@ -13,6 +13,7 @@ load_dotenv(ROOT / ".env")
 
 
 class Settings:
+    VERSION: str = "2.1.0"
     # ── Server ────────────────────────────────────────────────────────────
     HOST: str = os.getenv("HOST", "127.0.0.1")
     PORT: int = int(os.getenv("PORT", "8765"))
@@ -20,7 +21,6 @@ class Settings:
     # ── Paths ──────────────────────────────────────────────────────────────
     IMAGES_DIR: Path = ROOT / os.getenv("IMAGES_DIR", "images")
     DB_PATH:    Path = ROOT / os.getenv("DB_PATH",    "data/wallpapers.db")
-    STATE_PATH: Path = ROOT / os.getenv("STATE_PATH", "data/state.json")
     LOG_PATH:   Path = ROOT / os.getenv("LOG_PATH",   "data/downloader.log")
 
     # ── Download concurrency ───────────────────────────────────────────────

@@ -160,7 +160,27 @@ Applies the chosen wallpaper directly as the Windows desktop background using th
 
 ### 5. Export & Catalog Synchronization
 
-#### `GET /api/export/json`
+#
+### `GET /api/wallpapers/{wallpaper_id}/image`
+
+**Tags:** Wallpapers  
+**Summary:** Redirect to wallpaper image
+
+Returns an HTTP 302 redirect to the full-resolution image file served from `/images/`.
+
+**Path Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `wallpaper_id` | integer | Wallpaper database ID |
+
+**Response:** `302 Found` with `Location` header pointing to the image.
+
+**Example:**
+```bash
+curl -L http://127.0.0.1:8765/api/wallpapers/42/image -o wallpaper.jpg
+```
+
+### `GET /api/export/json`
 Streams the entire database catalog as an attachment download (`spotlight_wallpapers.json`).
 
 #### `GET /api/export/csv`

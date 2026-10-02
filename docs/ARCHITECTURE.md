@@ -106,3 +106,26 @@ The project features a single unified interface ([`index.html`](file:///c:/Users
    - Detects the local FastAPI backend.
    - Activates crawler engine controls (Start, Pause, Stop), rolling speed calculation (`⚡ /s`), queue backlogs, and Windows desktop wallpaper integration (`SystemParametersInfoW`).
    - Automatically synchronizes `data/wallpapers.json` whenever wallpapers are downloaded.
+
+## SQLite Performance Tuning
+
+The database connection is configured with the following pragmas for optimal performance:
+
+| Pragma | Value | Effect |
+|--------|-------|--------|
+| `journal_mode` | `WAL` | Write-Ahead Logging for concurrent reads during writes |
+| `synchronous` | `NORMAL` | Safe checkpoint syncs without full fsync on every write |
+| `cache_size` | `-64000` | 64 MB in-memory page cache to minimize disk I/O |
+| `temp_store` | `MEMORY` | Temporary tables and indexes stored in memory |
+| `foreign_keys` | `ON` | Referential integrity enforcement |
+
+Additional indexes beyond primary keys:
+- `idx_wallpapers_phash` — Fast duplicate detection
+- `idx_wallpapers_source` — Source filter queries
+- `idx_wallpapers_source_url` — URL deduplication
+- `idx_wallpapers_downloaded_at` — Default sort order
+- `idx_wallpapers_date_spotted` — Date sort queries  
+- `idx_wallpapers_quality` — Quality filter queries
+- `idx_wallpapers_title` — Title search queries
+- `idx_dl_queue_source` — Source-filtered queue pops
+- `idx_dl_queue_retries` — Failed item cleanup queries

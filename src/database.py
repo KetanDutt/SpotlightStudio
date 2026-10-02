@@ -13,6 +13,7 @@ import logging
 import re
 import shutil
 import sqlite3
+from collections import defaultdict
 import threading
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -32,6 +33,9 @@ def _get_conn() -> sqlite3.Connection:
         conn = sqlite3.connect(str(settings.DB_PATH), check_same_thread=False)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")
+        conn.execute("PRAGMA cache_size=-64000")  # 64 MB page cache
+        conn.execute("PRAGMA temp_store=MEMORY")
         conn.execute("PRAGMA foreign_keys=ON")
         _local.conn = conn
     return _local.conn
@@ -489,7 +493,6 @@ def deduplicate_downloaded_wallpapers() -> int:
         return 0
 
     import imagehash
-    from collections import defaultdict
 
     chunks = defaultdict(list)
     parsed = []
@@ -606,18 +609,6 @@ def download_queue_size(source: Optional[str] = None) -> int:
         return conn.execute("SELECT COUNT(*) FROM download_queue").fetchone()[0]
 
 
-def is_url_known(image_url: str) -> bool:
-    """Check if URL is already downloaded or queued."""
-    with get_db() as conn:
-        dq = conn.execute(
-            "SELECT 1 FROM download_queue WHERE image_url = ?", (image_url,)
-        ).fetchone()
-        if dq:
-            return True
-        wp = conn.execute(
-            "SELECT 1 FROM wallpapers WHERE source_url = ?", (image_url,)
-        ).fetchone()
-        return wp is not None
 
 
 # ── Stats ───────────────────────────────────────────────────────────────────

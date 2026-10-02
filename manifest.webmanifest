@@ -1,0 +1,20 @@
+{
+  "name": "Spotlight Studio",
+  "short_name": "SpotlightStudio",
+  "description": "Browse and download 4K UHD Windows Spotlight Wallpapers.",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#08090e",
+  "theme_color": "#08090e",
+  "orientation": "landscape-primary",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🖼️</text></svg>",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["photography", "entertainment"],
+  "screenshots": []
+}

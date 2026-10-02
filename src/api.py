@@ -3,16 +3,20 @@ api.py – FastAPI application.
 
 Endpoints
 ---------
-GET  /                     → Serve the dashboard HTML
-GET  /api/status           → Live engine stats
-POST /api/control/start    → Start / resume the download engine
-POST /api/control/pause    → Pause the engine (queue persists)
-POST /api/control/stop     → Stop the engine (queue persists)
-GET  /api/wallpapers       → Paginated, filtered, sorted wallpaper list
-GET  /api/wallpapers/{id}  → Single wallpaper detail
-GET  /api/export/json      → Download all metadata as JSON
-GET  /api/export/csv       → Download all metadata as CSV
-POST /api/wallpaper/{id}/set-wallpaper → Set image as Windows desktop wallpaper
+GET  /                              → Serve the dashboard HTML
+GET  /api/status                    → Live engine stats
+POST /api/control/start             → Start / resume the download engine
+POST /api/control/pause             → Pause the engine (queue persists)
+POST /api/control/stop              → Stop the engine (queue persists)
+GET  /api/wallpapers                → Paginated, filtered, sorted wallpaper list
+GET  /api/wallpapers/{id}           → Single wallpaper detail
+GET  /api/wallpapers/{id}/image     → Redirect to the full-resolution image file
+POST /api/wallpapers/{id}/set-wallpaper → Set image as Windows desktop wallpaper
+GET  /api/export/json               → Download all metadata as JSON
+GET  /api/export/csv                → Download all metadata as CSV
+GET  /api/health                    → System health check
+POST /api/catalog/sync              → Sync data/wallpapers.json
+GET  /api/stats/sources             → Per-source wallpaper stats
 """
 from __future__ import annotations
 
@@ -35,7 +39,7 @@ from fastapi.responses import (
 from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
 
-from src.config import settings
+from src.config import settings, Settings
 from src.database import (
     download_queue_size,
     export_catalog_json,
@@ -73,7 +77,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Windows Spotlight Downloader",
     description="Download, organise, and browse high-quality Windows Spotlight wallpapers.",
-    version="2.1.0",
+    version=Settings.VERSION,
     docs_url="/api/docs",
     redoc_url="/api/redoc",
     lifespan=lifespan,
@@ -242,14 +246,18 @@ def get_wallpaper(wallpaper_id: int) -> dict:
 # ── Export ────────────────────────────────────────────────────────────────────
 
 @app.get("/api/export/json", tags=["Export"], summary="Export metadata as JSON")
-def export_json() -> StreamingResponse:
+def export_json() -> FileResponse:
     """Download all wallpaper metadata as a JSON file."""
-    wallpapers, _ = get_all_wallpapers(page=1, per_page=999_999)
-    content = json.dumps(wallpapers, indent=2, ensure_ascii=False)
-    return StreamingResponse(
-        io.StringIO(content),
+    # Use the already-maintained static catalog file for efficiency
+    catalog_path = settings.DB_PATH.parent / "wallpapers.json"
+    if not catalog_path.exists():
+        export_catalog_json()
+    if not catalog_path.exists():
+        raise HTTPException(status_code=503, detail="Catalog not available")
+    return FileResponse(
+        str(catalog_path),
         media_type="application/json",
-        headers={"Content-Disposition": "attachment; filename=spotlight_wallpapers.json"},
+        filename="spotlight_wallpapers.json",
     )
 
 
@@ -318,11 +326,14 @@ def set_desktop_wallpaper(wallpaper_id: int) -> dict:
 
 @app.get("/api/health", tags=["System"], summary="System health check")
 def health_check() -> dict:
+    """
+    NOTE: Rate limiting is recommended for production.
+    """
     """Return system operational status and queue counts."""
     stats = get_stats()
     return {
         "status": "healthy",
-        "version": "2.1.0",
+        "version": Settings.VERSION,
         "engine_status": stats.get("status", "stopped"),
         "downloaded_count": int(stats.get("downloaded_count", 0)),
         "scrape_queue_size": scrape_queue_size(),
@@ -339,3 +350,17 @@ def sync_catalog() -> dict:
         "wallpapers_synced": count,
         "path": "data/wallpapers.json",
     }
+
+
+from fastapi.responses import RedirectResponse
+
+@app.get("/api/wallpapers/{wallpaper_id}/image", tags=["Wallpapers"], summary="Get wallpaper image")
+def get_wallpaper_image(wallpaper_id: int) -> RedirectResponse:
+    """Redirect to the full-resolution wallpaper image file."""
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT filename FROM wallpapers WHERE id = ?", (wallpaper_id,)
+        ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Wallpaper not found")
+    return RedirectResponse(url=f"/images/{row['filename']}", status_code=302)

@@ -28,6 +28,7 @@ import logging
 import re
 from urllib.parse import urljoin
 
+import asyncio
 import aiohttp
 from bs4 import BeautifulSoup, Tag
 
@@ -56,6 +57,8 @@ async def _fetch_html(
                 log.debug("HTTP %d for %s (attempt %d)", resp.status, url, attempt)
         except Exception as exc:
             log.debug("Fetch error %s (attempt %d): %s", url, attempt, exc)
+        if attempt < retries:
+            await asyncio.sleep(0.5 * (attempt + 1))  # exponential backoff
     return None
 
 

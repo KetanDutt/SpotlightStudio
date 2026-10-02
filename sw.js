@@ -6,6 +6,7 @@
 
 const CACHE_NAME = 'spotlight-studio-v2.4';
 const STATIC_ASSETS = [
+  './manifest.webmanifest',
   './',
   './index.html',
   './data/wallpapers.json'

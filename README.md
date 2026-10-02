@@ -4,6 +4,7 @@ A high-performance, multithreaded desktop application, web crawler, and static s
 
 [![Static Showcase](https://img.shields.io/badge/Web%20Showcase-GitHub%20Pages-38bdf8?style=flat-square)](index.html)
 [![Python](https://img.shields.io/badge/Python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.14-3b82f6?style=flat-square)](https://www.python.org/)
+[![Changelog](https://img.shields.io/badge/Changelog-v2.1.0-6366f1?style=flat-square)](CHANGELOG.md)
 [![License](https://img.shields.io/badge/License-MIT-10b981?style=flat-square)](LICENSE)
 
 ---
@@ -207,6 +208,7 @@ WindowsSpotlightWallpapers/
 | `POST` | `/api/wallpapers/{id}/set-wallpaper` | Applies the image as Windows desktop wallpaper |
 | `POST` | `/api/catalog/sync` | Manually triggers `data/wallpapers.json` export |
 | `GET` | `/api/export/json` | Exports entire wallpaper database as JSON |
+| `GET` | `/api/wallpapers/{id}/image` | Redirects to the full-resolution wallpaper image |
 | `GET` | `/api/export/csv` | Exports entire wallpaper database as CSV |
 | `GET` | `/api/docs` | Interactive Swagger UI API documentation |
 | `GET` | `/api/redoc` | Interactive ReDoc documentation |
@@ -214,6 +216,14 @@ WindowsSpotlightWallpapers/
 *For complete API schemas and query parameter definitions, see [`docs/API.md`](docs/API.md).*
 
 ---
+
+## 📋 Changelog
+
+See [`CHANGELOG.md`](CHANGELOG.md) for a detailed version history.
+
+## 🤝 Contributing
+
+Contributions are welcome! See [`CONTRIBUTING.md`](CONTRIBUTING.md) for development setup, code style, and PR guidelines.
 
 ## 📚 Documentation Links
 
