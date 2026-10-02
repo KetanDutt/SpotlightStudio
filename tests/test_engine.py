@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import time
+from collections import Counter
 
 import pytest
 
@@ -52,18 +54,71 @@ def test_full_crawl_end_to_end(site, eng):
     snap = eng.snapshot()
     assert snap["status"] == "stopped" and snap["progress_pct"] == 100
     run = eng.run
-    assert run.result == "completed"
-    assert (run.downloaded, run.duplicates, run.errors) == (EXPECTED_LIBRARY - 1, 1, 0)
+    assert run.result == "completed" and run.errors == 0
+    # The Peapix copy (1280×720) and the Win10 copy (640×360) of seed 1 are downloaded concurrently, so
+    # either may be stored first: the other is then skipped as a duplicate (better copy first) or
+    # supersedes it (worse copy first).  The outcome counters differ, the library must not.
+    assert run.downloaded == EXPECTED_LIBRARY - 1
+    assert run.duplicates + run.replaced == 1
     assert run.pages_total == run.pages_done == 4                       # wrong hints corrected by discovery
     assert run.titles_enriched == 3                                      # seeds 102,104,106 list a hash → post title fetched
     assert db.count_wallpapers() == EXPECTED_LIBRARY - 1
     assert db.scrape_queue_size() == 0 and db.download_queue_size() == 0
-    assert not [r for r in db.get_all_wallpapers(per_page=100)[0] if len(r["title"]) == 32]
+    rows = db.get_all_wallpapers(per_page=100)[0]
+    assert not [r for r in rows if len(r["title"]) == 32]
+    assert Counter(r["source"] for r in rows) == {"peapix": 8, "win10spotlight": 5}  # the better copy survives
     assert len(json.loads(settings.CATALOG_PATH.read_text(encoding="utf-8"))) == EXPECTED_LIBRARY - 1
     assert db.get_stat("status") == "stopped" and db.get_stat("last_run_result") == "completed"
-    assert db.get_stat("last_run_mode") == "full" and int(db.get_stat("last_run_downloaded")) == 13
+    assert db.get_stat("last_run_mode") == "full"
+    assert int(db.get_stat("last_run_downloaded")) == run.downloaded + run.replaced
     assert len(list((settings.IMAGES_DIR / "thumbs").rglob("*.jpg"))) == 13
     assert db.get_stat("scraped_count") == "14"
+
+
+@pytest.mark.parametrize(
+    ("late", "downloaded", "duplicates", "replaced"),
+    [("win10", 13, 1, 0), ("peapix", 13, 0, 1)],
+    ids=["better-copy-first", "worse-copy-first"],
+)
+def test_cross_site_duplicate_ends_the_same_whichever_copy_arrives_first(
+    site, eng, monkeypatch, late, downloaded, duplicates, replaced
+):
+    """
+    Peapix 1 (1280×720) and its Win10 copy (640×360) are downloaded concurrently, so the engine must
+    cope with either arriving first: the worse copy is skipped, or it is stored and then superseded.
+    Only the counters differ – the library, its files and the surviving copy are identical.
+    """
+    site.win10_items[0] = Item(1, "Win10 copy of Peapix 1", ["lake"], "2026-08-01")
+    peapix_copy, win10_copy = hash32(1), site.win10_image_name(site.win10_items[0])
+    late_copy, early_copy = (peapix_copy, win10_copy) if late == "peapix" else (win10_copy, peapix_copy)
+    early_done = asyncio.Event()
+    real_process = engine_mod.process_download
+
+    # Ordering by event, not by sleeping: the late copy is held back until the early one is completely
+    # processed, so the outcome cannot depend on how fast the two sites happen to answer.
+    async def ordered(session, item, **kwargs):
+        url = item["image_url"]
+        if late_copy in url:
+            await asyncio.wait_for(early_done.wait(), 30)
+        try:
+            return await real_process(session, item, **kwargs)
+        finally:
+            if early_copy in url:
+                early_done.set()
+
+    monkeypatch.setattr(engine_mod, "process_download", ordered)
+    assert eng.start("both", "full") == "started"
+    finish(eng)
+
+    run = eng.run
+    assert (run.downloaded, run.duplicates, run.replaced, run.errors) == (downloaded, duplicates, replaced, 0)
+    rows = db.get_all_wallpapers(per_page=100)[0]
+    assert len(rows) == EXPECTED_LIBRARY - 1
+    assert Counter(r["source"] for r in rows) == {"peapix": 8, "win10spotlight": 5}  # the better copy survives
+    assert len([r for r in rows if r["source"] == "peapix" and r["width"] == 1280]) == 8
+    files = [p for p in settings.IMAGES_DIR.rglob("*.jpg") if "thumbs" not in p.parts]
+    assert len(files) == EXPECTED_LIBRARY - 1                                           # no orphans
+    assert int(db.get_stat("last_run_downloaded")) == run.downloaded + run.replaced
 
 
 def test_scraping_and_downloading_overlap(site, eng):
@@ -153,10 +208,10 @@ def test_pause_stops_new_work_and_resume_continues(site, eng):
     assert wait_until(lambda: eng.run.downloaded >= 1)
     eng.pause()
     assert eng.status == "paused" and eng.snapshot()["phase"] == "Paused"
-    time.sleep(0.6)                                                       # let in-flight downloads finish
+    assert wait_until(lambda: eng._download_inflight == 0, timeout=30)    # in-flight downloads may finish …
     settled = eng.run.downloaded
     time.sleep(0.6)
-    assert eng.run.downloaded == settled, "no new downloads may start while paused"
+    assert eng.run.downloaded == settled, "… but no new download may start while paused"
     assert eng.snapshot()["phase"] == "Paused"                            # immediately, not on the next tick
     assert eng.start("peapix", "full") == "resumed"
     finish(eng)
