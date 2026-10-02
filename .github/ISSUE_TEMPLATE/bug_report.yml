@@ -1,0 +1,38 @@
+name: Bug report
+description: Something does not work as documented
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: Include what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: "1. Start the app …\n2. Click …"
+    validations:
+      required: true
+  - type: dropdown
+    id: mode
+    attributes:
+      label: How are you using it?
+      options: [Desktop window, "Server (browser)", "GitHub Pages showcase", "Command line (--crawl / --check)"]
+    validations:
+      required: true
+  - type: input
+    id: env
+    attributes:
+      label: Environment
+      description: App version (About dialog), OS, Python version, browser
+      placeholder: "2.2.0 · Windows 11 · Python 3.12 · Edge 130"
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Output of `python main.py --check` and relevant lines of `data/downloader.log`
+      render: shell

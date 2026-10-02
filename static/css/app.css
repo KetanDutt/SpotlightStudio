@@ -53,13 +53,13 @@
   --bg-elev: #ffffff;
   --text: #0e1626;
   --text-2: #475569;
-  --text-3: #5b6a80;
-  --accent: #1d6fe0;
+  --text-3: #546378;
+  --accent: #1757c4;
   --accent-ink: #ffffff;
   --accent-grad: linear-gradient(135deg, #2f9bf0 0%, #2563eb 55%, #4f46e5 100%);
-  --ok: #059669;
-  --warn: #b45309;
-  --danger: #dc2626;
+  --ok: #065f46;
+  --warn: #92400e;
+  --danger: #b91c1c;
   --glass: rgba(255, 255, 255, 0.74);
   --glass-strong: rgba(255, 255, 255, 0.94);
   --fill: rgba(15, 23, 42, 0.05);

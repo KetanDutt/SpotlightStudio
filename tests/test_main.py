@@ -117,3 +117,17 @@ def test_host_flag_updates_the_settings_used_by_the_api(env, restore_logging, mo
     assert cli.main(["--sync-catalog", "--host", "0.0.0.0", "--port", "9123"]) == 0
     assert settings.HOST == "0.0.0.0" and settings.PORT == 9123
     assert settings.allowed_hosts() == ["*"]
+
+
+def test_sigterm_is_mapped_to_a_graceful_keyboard_interrupt():
+    import signal
+
+    previous = signal.getsignal(signal.SIGTERM)
+    try:
+        cli.install_termination_handlers()
+        handler = signal.getsignal(signal.SIGTERM)
+        assert handler is cli._raise_keyboard_interrupt
+        with pytest.raises(KeyboardInterrupt):
+            handler(signal.SIGTERM, None)
+    finally:
+        signal.signal(signal.SIGTERM, previous)

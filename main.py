@@ -20,6 +20,7 @@ import argparse
 import json
 import logging
 import logging.handlers
+import signal
 import socket
 import sys
 import threading
@@ -139,6 +140,26 @@ class ServerThread:
         self.thread.join(timeout)
 
 
+def _raise_keyboard_interrupt(_signum, _frame) -> None:
+    raise KeyboardInterrupt
+
+
+def install_termination_handlers() -> None:
+    """
+    Treat SIGTERM (service managers, ``timeout``, ``docker stop``) and Ctrl+Break on Windows like
+    Ctrl+C, so the engine is stopped and its queue claims are released instead of the process
+    being killed mid-download.  (A hard kill is still safe: claims are released on the next start.)
+    """
+    for name in ("SIGTERM", "SIGBREAK"):
+        number = getattr(signal, name, None)
+        if number is None:
+            continue
+        try:
+            signal.signal(number, _raise_keyboard_interrupt)
+        except (ValueError, OSError):  # not the main thread / unsupported on this platform
+            pass
+
+
 # ══════════════════════════════════════════════════════════════════════════
 # Modes
 # ══════════════════════════════════════════════════════════════════════════
@@ -209,6 +230,7 @@ def open_desktop_window(url: str) -> bool:
 
 
 def run_desktop(host: str, port: int) -> int:
+    install_termination_handlers()
     url = f"{base_url(host, port)}/?app=desktop"
     server: ServerThread | None = None
     if port_in_use(host, port):
@@ -240,6 +262,7 @@ def run_crawl(source: str, mode: str) -> int:
     from src.downloader import shutdown_cpu_pool
     from src.engine import engine
 
+    install_termination_handlers()
     maintenance.startup_tasks()
     action = engine.start(source, mode)
     log.info("Crawl %s (mode=%s, source=%s). Press Ctrl+C to stop.", action, mode, source)
