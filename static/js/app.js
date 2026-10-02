@@ -847,6 +847,7 @@
     const id = C.parseHash(location.hash);
     if (id == null) {
       if (lb.dlg.open) lb.dlg.close();
+      syncURL(); // history.back() restores the *old* URL: re-apply the current filters (e.g. after a tag click)
       return;
     }
     const item = app.catalog.byId.get(id);
