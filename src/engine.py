@@ -43,6 +43,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import sys
 import threading
 import time
 from collections import deque
@@ -90,6 +91,11 @@ from src.scrapers import (
 from src.utils import is_placeholder_title, utcnow_iso
 
 log = logging.getLogger("engine")
+
+# Half-closed TLS connections only leak on interpreters without CPython PR #118960 (first released in 3.12.8
+# and 3.13.1).  aiohttp ignores the option elsewhere and emits a DeprecationWarning if it is passed anyway;
+# this mirrors aiohttp's own NEEDS_CLEANUP_CLOSED.
+_NEEDS_CLEANUP_CLOSED = sys.version_info < (3, 12, 8) or sys.version_info[:3] == (3, 13, 0)
 
 Status = Literal["stopped", "running", "paused", "stopping"]
 VALID_SOURCES = ("peapix", "win10spotlight", "both")
@@ -469,7 +475,7 @@ class DownloadEngine:
             limit_per_host=settings.MAX_CONNECTIONS_PER_HOST,
             ssl=settings.VERIFY_SSL,
             ttl_dns_cache=600,
-            enable_cleanup_closed=True,
+            enable_cleanup_closed=_NEEDS_CLEANUP_CLOSED,
         )
         timeout = aiohttp.ClientTimeout(
             total=settings.TIMEOUT, connect=10, sock_read=settings.TIMEOUT
