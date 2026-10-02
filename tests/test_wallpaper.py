@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -37,15 +38,23 @@ def test_windows_dispatch(image, monkeypatch):
     assert seen == [image.resolve()]
 
 
-def test_macos_uses_osascript_and_escapes_quotes(tmp_path, monkeypatch):
-    tricky = tmp_path / 'my "best" pic.jpg'
-    tricky.write_bytes(b"x")
+def test_macos_uses_osascript(image, monkeypatch):
     rec = Recorder()
     monkeypatch.setattr(wallpaper.platform, "system", lambda: "Darwin")
     monkeypatch.setattr(wallpaper.subprocess, "run", rec)
-    set_desktop_wallpaper(tricky)
+    set_desktop_wallpaper(image)
     (cmd,) = rec.calls
-    assert cmd[0] == "osascript" and 'my \\"best\\" pic.jpg' in cmd[2]
+    assert cmd[0] == "osascript" and "POSIX file" in cmd[2] and "wall paper.jpg" in cmd[2]
+
+
+def test_macos_script_escapes_quotes_and_backslashes(monkeypatch):
+    # Calls the helper directly: going through set_desktop_wallpaper() needs a real file, and a double
+    # quote is not a legal character in a Windows file name (this test also runs on the Windows CI job).
+    rec = Recorder()
+    monkeypatch.setattr(wallpaper.subprocess, "run", rec)
+    wallpaper._set_macos(Path('my "best" pic\\copy.jpg'))
+    (cmd,) = rec.calls
+    assert cmd[0] == "osascript" and 'POSIX file "my \\"best\\" pic\\\\copy.jpg"' in cmd[2]
 
 
 def test_gnome_sets_light_and_dark_uris(image, monkeypatch):
