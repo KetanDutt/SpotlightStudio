@@ -7,7 +7,7 @@
   <meta name="description" content="Browse and download 4K UHD Windows Spotlight Wallpapers in a modern Liquid Glass interface." />
   <meta name="theme-color" content="#08090e" />
     <link rel="manifest" href="./manifest.webmanifest" />
-  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="Spotlight Studio" />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🖼️</text></svg>" />
@@ -2419,8 +2419,9 @@
 
     function getImgUrl(path) {
       if (isDesktopMode || !path) return path;
-      // Stream LFS files directly to bypass GitHub Pages limits
-      return `https://media.githubusercontent.com/media/KetanDutt/SpotlightStudio/main/${path}`;
+      // Use the raw blob endpoint because GitHub Pages doesn't serve LFS natively 
+      // and media.githubusercontent.com is frequently rate-limited/404s
+      return `https://github.com/KetanDutt/SpotlightStudio/blob/main/${path}?raw=true`;
     }
 
     function gridCard(w, i) {

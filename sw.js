@@ -41,6 +41,10 @@ self.addEventListener('fetch', event => {
   }
 
   // 2. Stale-While-Revalidate for catalog JSON & HTML shell
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    return;
+  }
+  
   event.respondWith(
     caches.match(event.request).then(cached => {
       const networkPromise = fetch(event.request).then(response => {
