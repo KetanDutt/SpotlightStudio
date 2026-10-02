@@ -12,6 +12,10 @@ Pipeline (``process_download``)
    * the new copy is strictly better        → replace, keeping the union of tags.
 4. **Store**   image + thumbnail written atomically, then the DB row.
 
+Steps 3 and 4 are **one critical section** (a per-event-loop ``asyncio.Lock``): downloads run
+concurrently and the copies of one picture from two sources are often in flight together, so
+without it both would pass the duplicate check and both would be stored.
+
 Peapix resolution fallback
 --------------------------
   ``_UHD.jpg`` (3840×2160) → ``_1920`` → ``_1280`` → ``_640``
@@ -30,6 +34,7 @@ import asyncio
 import io
 import logging
 import re
+import weakref
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
@@ -88,6 +93,27 @@ def shutdown_cpu_pool(wait: bool = False) -> None:
     if _cpu_pool is not None:
         _cpu_pool.shutdown(wait=wait, cancel_futures=True)
         _cpu_pool = None
+
+
+# ── Serialising "is there a duplicate?" + "insert the row" ────────────────────
+
+# Several downloads run concurrently, and the Peapix and Windows10Spotlight copies of one picture are
+# often in flight together.  If the duplicate check and the insert were not one critical section both
+# copies would pass the check (neither row exists yet) and the picture would be stored twice.  Only that
+# cheap last step is serialised – fetching and the CPU-heavy decode / hash / thumbnail work stay parallel.
+# asyncio locks belong to the loop they are first used in and every engine run creates its own loop,
+# hence one lock per loop.
+_store_locks: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Lock] = (
+    weakref.WeakKeyDictionary()
+)
+
+
+def _store_lock() -> asyncio.Lock:
+    loop = asyncio.get_running_loop()
+    lock = _store_locks.get(loop)
+    if lock is None:
+        lock = _store_locks[loop] = asyncio.Lock()
+    return lock
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -295,66 +321,67 @@ async def process_download(
     file_size = len(fetched.data)
     new_score = quality_score(info.width, info.height, file_size)
 
-    # ── 3. de-duplicate (near-duplicates included) ─────────────────────────
-    existing = find_duplicate_wallpaper(info.phash, DEFAULT_MAX_DISTANCE)
-    title = item.get("title", "")
-    tags = item.get("tags", "")
-    date_spotted = item.get("date_spotted", "")
-    replaced = False
+    # ── 3 + 4. de-duplicate, then store – ONE critical section (see _store_lock) ─────
+    async with _store_lock():
+        existing = find_duplicate_wallpaper(info.phash, DEFAULT_MAX_DISTANCE)
+        title = item.get("title", "")
+        tags = item.get("tags", "")
+        date_spotted = item.get("date_spotted", "")
+        replaced = False
 
-    if existing:
-        old_score = quality_score(existing["width"], existing["height"], existing["file_size"])
-        if new_score <= old_score:
-            merge_wallpaper_metadata(
-                existing["id"], title=title, tags=tags, date_spotted=date_spotted
+        if existing:
+            old_score = quality_score(existing["width"], existing["height"], existing["file_size"])
+            if new_score <= old_score:
+                merge_wallpaper_metadata(
+                    existing["id"], title=title, tags=tags, date_spotted=date_spotted
+                )
+                add_suppressed_url(fetched.url, reason="duplicate_lower_quality")
+                if url != fetched.url:
+                    add_suppressed_url(url, reason="duplicate_lower_quality")
+                increment_stat("duplicates_skipped")
+                log.debug("⊘ Duplicate (kept existing): %s", url)
+                return "duplicate"
+
+            # The new copy is strictly better: carry the old metadata over, drop the old files.
+            title = choose_title(existing["title"], title)
+            tags = merge_tags(existing["tags"], tags)
+            date_spotted = existing["date_spotted"] or date_spotted
+            item = {**item, "page_url": item.get("page_url") or existing["page_url"]}
+            storage.delete_wallpaper_files(existing["filename"])
+            for old_url in (existing.get("source_url"), existing.get("page_url")):
+                if old_url and old_url != fetched.url:
+                    add_suppressed_url(old_url, reason="duplicate_lower_quality")
+            delete_wallpaper(existing["phash"])
+            increment_stat("duplicates_replaced")
+            replaced = True
+            log.info("↑ Replaced with higher quality: %s", existing["filename"])
+
+        # ── 4. store files, then the DB row ───────────────────────────────────
+        filename = storage.url_to_filename(source, fetched.url, storage.extension_for_format(info.fmt))
+        try:
+            await loop.run_in_executor(pool, storage.write_image, filename, fetched.data)
+            await loop.run_in_executor(pool, storage.write_thumbnail, filename, info.thumb)
+            upsert_wallpaper(
+                {
+                    "phash": info.phash,
+                    "filename": filename,
+                    "title": (title or "").strip(),
+                    "source": source,
+                    "source_url": fetched.url,
+                    "page_url": item.get("page_url", ""),
+                    "width": info.width,
+                    "height": info.height,
+                    "file_size": file_size,
+                    "tags": tags,
+                    "date_spotted": date_spotted,
+                    "downloaded_at": utcnow_iso(),
+                    "quality": quality_label(info.width),
+                }
             )
-            add_suppressed_url(fetched.url, reason="duplicate_lower_quality")
-            if url != fetched.url:
-                add_suppressed_url(url, reason="duplicate_lower_quality")
-            increment_stat("duplicates_skipped")
-            log.debug("⊘ Duplicate (kept existing): %s", url)
-            return "duplicate"
-
-        # The new copy is strictly better: carry the old metadata over, drop the old files.
-        title = choose_title(existing["title"], title)
-        tags = merge_tags(existing["tags"], tags)
-        date_spotted = existing["date_spotted"] or date_spotted
-        item = {**item, "page_url": item.get("page_url") or existing["page_url"]}
-        storage.delete_wallpaper_files(existing["filename"])
-        for old_url in (existing.get("source_url"), existing.get("page_url")):
-            if old_url and old_url != fetched.url:
-                add_suppressed_url(old_url, reason="duplicate_lower_quality")
-        delete_wallpaper(existing["phash"])
-        increment_stat("duplicates_replaced")
-        replaced = True
-        log.info("↑ Replaced with higher quality: %s", existing["filename"])
-
-    # ── 4. store files, then the DB row ───────────────────────────────────
-    filename = storage.url_to_filename(source, fetched.url, storage.extension_for_format(info.fmt))
-    try:
-        await loop.run_in_executor(pool, storage.write_image, filename, fetched.data)
-        await loop.run_in_executor(pool, storage.write_thumbnail, filename, info.thumb)
-        upsert_wallpaper(
-            {
-                "phash": info.phash,
-                "filename": filename,
-                "title": (title or "").strip(),
-                "source": source,
-                "source_url": fetched.url,
-                "page_url": item.get("page_url", ""),
-                "width": info.width,
-                "height": info.height,
-                "file_size": file_size,
-                "tags": tags,
-                "date_spotted": date_spotted,
-                "downloaded_at": utcnow_iso(),
-                "quality": quality_label(info.width),
-            }
-        )
-    except BaseException:
-        storage.delete_wallpaper_files(filename)  # never leave orphans behind
-        raise
-    increment_stat("downloaded_count")
+        except BaseException:
+            storage.delete_wallpaper_files(filename)  # never leave orphans behind
+            raise
+        increment_stat("downloaded_count")
 
     log.info(
         "✓ %s  %dx%d  %s  %.2f MB%s",

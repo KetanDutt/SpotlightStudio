@@ -23,7 +23,7 @@ A reliability, security and quality release: the crawler no longer loses work, t
 ### Changed
 - **Engine rewritten**: scraping and downloading now genuinely run concurrently (2.1 downloaded nothing until all ~1,350 pages were scraped, despite the docs); work is *claimed* rather than deleted, so **Stop/crash never loses queued items** and failed scrape pages are retried instead of silently dropped.
 - Peapix resolution fallback (`UHD → 1920 → 1280 → 640`) happens only for permanent 404/403/410; a timeout or 5xx retries the best variant instead of silently storing a lower resolution (the last retry may still degrade).
-- Near-duplicate detection (Hamming ≤ 4) now runs **at insert time** (it only ran in a post-scrape sweep and never for new downloads); the surviving copy inherits the union of tags and the better title.
+- Near-duplicate detection (Hamming ≤ 4) now runs **at insert time** (it only ran in a post-scrape sweep and never for new downloads); the surviving copy inherits the union of tags and the better title. Check and insert are one critical section, so two copies of a picture that are in flight together (typically the Peapix and the Windows10Spotlight version) cannot both be stored.
 - One CPU job per image (decode + hash + thumbnail) bounds memory; images and thumbnails are written atomically.
 - Peapix parsing is content-based instead of class-name based (the old selectors lost 895 of 896 Peapix titles and all tags).
 - `date_spotted` is normalised to `YYYY-MM-DD` (sorting by date was meaningless with mixed `May 14, 2025` / ISO values); default sort is now *Newest first*.

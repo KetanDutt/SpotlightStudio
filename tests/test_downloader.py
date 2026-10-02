@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import io
+import time
 
 import aiohttp
 import pytest
@@ -195,6 +196,36 @@ def test_better_copy_replaces_old_one_and_keeps_metadata(site):
     files = sorted(p.name for p in settings.IMAGES_DIR.rglob("*.jpg") if "thumbs" not in p.parts)
     assert files == [row["filename"].split("/")[-1]]                      # old file removed
     assert db.get_stat("duplicates_replaced") == "1"
+
+
+def test_two_copies_in_flight_at_once_are_stored_only_once(site, monkeypatch):
+    """
+    Regression: "is there a duplicate?" and "insert the row" must be one critical section.
+
+    The engine downloads several wallpapers concurrently, so the Peapix and the Windows10Spotlight copy
+    of the same picture are often in flight together.  Without serialisation both pass the duplicate
+    check (neither row exists yet) and the library ends up with the picture twice, or with an orphaned
+    file.  The slow write below widens the window so that the interleaving is reproducible.
+    """
+    real_write = storage.write_image
+
+    def slow_write(filename, data):
+        time.sleep(0.25)
+        return real_write(filename, data)
+
+    monkeypatch.setattr(storage, "write_image", slow_write)
+    better = item_for(site, 1)                                                      # 1280×720
+    worse = {**item_for(site, 1), "image_url": peapix_url(site, 1, "640"), "title": "Same picture, small"}
+
+    async def go(session):
+        return await asyncio.gather(process_download(session, better), process_download(session, worse))
+
+    outcomes = run(go)
+    assert sorted(outcomes) in (["downloaded", "duplicate"], ["downloaded", "replaced"])  # winner depends on timing
+    rows, total = db.get_all_wallpapers()
+    assert total == 1 and rows[0]["width"] == 1280                                  # one copy, the better one
+    files = sorted(p.name for p in settings.IMAGES_DIR.rglob("*.jpg") if "thumbs" not in p.parts)
+    assert files == [rows[0]["filename"].split("/")[-1]]                            # and no orphaned file
 
 
 def test_bad_images_are_rejected_or_retried(site, monkeypatch):
