@@ -3,228 +3,431 @@ database.py – SQLite-backed persistent storage for all wallpaper metadata.
 
 Tables
 ------
-wallpapers   : one row per unique wallpaper (keyed by perceptual hash)
-scrape_queue : pages yet to be scraped
-download_queue : image URLs yet to be downloaded
+wallpapers      one row per unique wallpaper (keyed by perceptual hash)
+scrape_queue    gallery pages still to be scraped         (claim based)
+download_queue  image URLs still to be downloaded         (claim based)
+suppressed_urls URLs that must never be downloaded again (lower-quality duplicates)
+stats           key/value operational counters
+
+Concurrency model
+-----------------
+* One SQLite connection **per thread** (``threading.local``), WAL journal mode.
+* Connections run in *autocommit* mode and :func:`get_db` opens explicit
+  transactions.  Nested ``get_db()`` blocks join the outermost transaction, so
+  an inner helper can never commit half of its caller's work.
+* Streaming readers (exports) open their own short-lived connection because a
+  generator may be resumed on a different worker thread.
+
+Queue semantics (crash safety)
+------------------------------
+Items are **claimed** (``claimed_at`` set) instead of deleted when a worker
+starts on them and only removed once the work finished.  If the application is
+stopped or killed mid-flight the claims are released on the next start, so no
+URL is ever lost.  (Before v2.2 popped items were deleted immediately.)
+
+Schema versions (``PRAGMA user_version``)
+-----------------------------------------
+1  original schema
+2  queue claims + retry counters, page_url / title indexes, normalised dates,
+   canonical quality labels, tz-aware timestamps
 """
 from __future__ import annotations
 
+import json
 import logging
-import re
-import shutil
 import sqlite3
-from collections import defaultdict
 import threading
-from contextlib import contextmanager
-from datetime import datetime, timezone
+from collections import Counter
+from collections.abc import Iterator
+from contextlib import closing, contextmanager
 from pathlib import Path
-from typing import Generator, Optional
+from typing import Any
 
 from src.config import settings
+from src.hashing import CHUNK_HEX_LEN, chunk_keys, hamming_hex, is_valid_phash
+from src.utils import (
+    atomic_write_bytes,
+    canonical_quality,
+    choose_title,
+    escape_like,
+    merge_tags,
+    normalize_date,
+    normalize_tags,
+    normalize_timestamp,
+    utcnow_iso,
+)
 
 log = logging.getLogger("database")
 
-# Thread-local storage so each thread gets its own connection
+SCHEMA_VERSION = 2
+
+#: Columns published in the static catalog / ``/api/catalog`` (everything except ``phash``).
+CATALOG_FIELDS: tuple[str, ...] = (
+    "id",
+    "filename",
+    "title",
+    "source",
+    "source_url",
+    "page_url",
+    "width",
+    "height",
+    "file_size",
+    "tags",
+    "date_spotted",
+    "downloaded_at",
+    "quality",
+)
+
+#: Sort keys accepted by :func:`get_all_wallpapers`.  User input never reaches the
+#: query string – :func:`_order_by` maps it onto these constants.
+ALLOWED_SORTS = ("downloaded_at", "date_spotted", "width", "height", "file_size", "title")
+
+# Quality filter → width predicate (labels are derived from the width).
+_QUALITY_SQL = {
+    "4k": "width >= 3840",
+    "2k": "width >= 2560 AND width < 3840",
+    "fhd": "width >= 1920 AND width < 2560",
+    "hd": "width >= 1280 AND width < 1920",
+    "sd": "width < 1280",
+}
+ALLOWED_QUALITIES = tuple(_QUALITY_SQL)
+
 _local = threading.local()
+_export_lock = threading.Lock()
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Connection management
+# ══════════════════════════════════════════════════════════════════════════
+
+
+def _new_connection(path: Path | str | None = None) -> sqlite3.Connection:
+    """Open a configured connection (autocommit; explicit transactions via get_db)."""
+    target = Path(path) if path else settings.DB_PATH
+    conn = sqlite3.connect(str(target), timeout=30, isolation_level=None, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA busy_timeout=30000")
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    conn.execute("PRAGMA cache_size=-32000")  # 32 MB page cache per connection
+    conn.execute("PRAGMA temp_store=MEMORY")
+    conn.execute("PRAGMA foreign_keys=ON")
+    return conn
 
 
 def _get_conn() -> sqlite3.Connection:
-    if not hasattr(_local, "conn") or _local.conn is None:
-        conn = sqlite3.connect(str(settings.DB_PATH), check_same_thread=False)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA synchronous=NORMAL")
-        conn.execute("PRAGMA cache_size=-64000")  # 64 MB page cache
-        conn.execute("PRAGMA temp_store=MEMORY")
-        conn.execute("PRAGMA foreign_keys=ON")
+    """Thread-local connection; transparently re-opened when ``DB_PATH`` changes."""
+    path = str(settings.DB_PATH)
+    conn = getattr(_local, "conn", None)
+    if conn is None or getattr(_local, "path", None) != path:
+        if conn is not None:
+            try:
+                conn.close()
+            except sqlite3.Error:
+                pass
+        settings.DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+        conn = _new_connection()
         _local.conn = conn
-    return _local.conn
+        _local.path = path
+        _local.depth = 0
+    return conn
+
+
+def close_connection() -> None:
+    """Close the current thread's connection (used by tests and on shutdown)."""
+    conn = getattr(_local, "conn", None)
+    if conn is not None:
+        try:
+            conn.close()
+        except sqlite3.Error:
+            pass
+    _local.conn = None
+    _local.path = None
+    _local.depth = 0
 
 
 @contextmanager
-def get_db() -> Generator[sqlite3.Connection, None, None]:
+def get_db(write: bool = False):
+    """
+    Yield the thread's connection inside a transaction.
+
+    * commits when the block succeeds, rolls back when it raises;
+    * nested use joins the outermost transaction;
+    * ``write=True`` takes the write lock up-front (``BEGIN IMMEDIATE``) which
+      avoids ``SQLITE_BUSY`` upgrade failures for read-then-write sequences.
+    """
     conn = _get_conn()
+    depth = getattr(_local, "depth", 0)
+    outermost = depth == 0
+    if outermost:
+        conn.execute("BEGIN IMMEDIATE" if write else "BEGIN")
+    _local.depth = depth + 1
     try:
         yield conn
-    except Exception:
-        conn.rollback()
+    except BaseException:
+        if outermost and conn.in_transaction:
+            conn.execute("ROLLBACK")
         raise
     else:
-        conn.commit()
+        if outermost and conn.in_transaction:
+            conn.execute("COMMIT")
+    finally:
+        _local.depth = depth
+
+
+@contextmanager
+def read_connection() -> Iterator[sqlite3.Connection]:
+    """A private connection for streaming queries (a generator may hop worker threads)."""
+    with closing(_new_connection()) as conn:
+        yield conn
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Schema & migrations
+# ══════════════════════════════════════════════════════════════════════════
+
+_BASELINE_SQL = """
+CREATE TABLE IF NOT EXISTS wallpapers (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    phash         TEXT    UNIQUE NOT NULL,
+    filename      TEXT    NOT NULL,
+    title         TEXT    NOT NULL DEFAULT '',
+    source        TEXT    NOT NULL,
+    source_url    TEXT    NOT NULL,
+    page_url      TEXT    NOT NULL DEFAULT '',
+    width         INTEGER NOT NULL DEFAULT 0,
+    height        INTEGER NOT NULL DEFAULT 0,
+    file_size     INTEGER NOT NULL DEFAULT 0,
+    tags          TEXT    NOT NULL DEFAULT '',
+    date_spotted  TEXT    NOT NULL DEFAULT '',
+    downloaded_at TEXT    NOT NULL,
+    quality       TEXT    NOT NULL DEFAULT 'UHD'
+);
+
+CREATE TABLE IF NOT EXISTS scrape_queue (
+    id       INTEGER PRIMARY KEY AUTOINCREMENT,
+    url      TEXT    UNIQUE NOT NULL,
+    source   TEXT    NOT NULL,
+    priority INTEGER NOT NULL DEFAULT 0,
+    added_at TEXT    NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS download_queue (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    image_url    TEXT    UNIQUE NOT NULL,
+    page_url     TEXT    NOT NULL DEFAULT '',
+    title        TEXT    NOT NULL DEFAULT '',
+    source       TEXT    NOT NULL,
+    tags         TEXT    NOT NULL DEFAULT '',
+    date_spotted TEXT    NOT NULL DEFAULT '',
+    added_at     TEXT    NOT NULL,
+    retries      INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS suppressed_urls (
+    url        TEXT PRIMARY KEY,
+    reason     TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS stats (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_wallpapers_source       ON wallpapers(source);
+CREATE INDEX IF NOT EXISTS idx_wallpapers_source_url   ON wallpapers(source_url);
+CREATE INDEX IF NOT EXISTS idx_wallpapers_downloaded_at ON wallpapers(downloaded_at);
+CREATE INDEX IF NOT EXISTS idx_wallpapers_date_spotted ON wallpapers(date_spotted);
+CREATE INDEX IF NOT EXISTS idx_wallpapers_quality      ON wallpapers(quality);
+"""
+
+_COUNTER_STATS = (
+    "scraped_count",
+    "downloaded_count",
+    "duplicates_skipped",
+    "duplicates_replaced",
+    "errors",
+)
+
+
+def _table_columns(conn: sqlite3.Connection, table: str) -> set[str]:
+    return {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+
+
+def _add_column(conn: sqlite3.Connection, table: str, column: str, ddl: str) -> None:
+    if column not in _table_columns(conn, table):
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
+
+
+def _migrate_to_v2(conn: sqlite3.Connection) -> None:
+    """Queue claims, retry counters, extra indexes and one-off data clean-up."""
+    _add_column(conn, "scrape_queue", "retries", "INTEGER NOT NULL DEFAULT 0")
+    _add_column(conn, "scrape_queue", "claimed_at", "TEXT")
+    _add_column(conn, "download_queue", "claimed_at", "TEXT")
+
+    # Redundant with the UNIQUE / PRIMARY KEY auto-indexes.
+    conn.execute("DROP INDEX IF EXISTS idx_wallpapers_phash")
+    conn.execute("DROP INDEX IF EXISTS idx_suppressed_urls_url")
+    for stmt in (
+        "CREATE INDEX IF NOT EXISTS idx_wallpapers_page_url ON wallpapers(page_url)",
+        "CREATE INDEX IF NOT EXISTS idx_wallpapers_title_nocase "
+        "ON wallpapers(title COLLATE NOCASE)",
+        "CREATE INDEX IF NOT EXISTS idx_dq_claim ON download_queue(claimed_at, id)",
+        "CREATE INDEX IF NOT EXISTS idx_dq_source ON download_queue(source, claimed_at, id)",
+        "CREATE INDEX IF NOT EXISTS idx_sq_claim ON scrape_queue(claimed_at, priority DESC, id)",
+        "CREATE INDEX IF NOT EXISTS idx_sq_source "
+        "ON scrape_queue(source, claimed_at, priority DESC, id)",
+    ):
+        conn.execute(stmt)
+
+    # Normalise legacy values.  Unparseable dates are left untouched (never lose data).
+    updates = []
+    for row in conn.execute(
+        "SELECT id, date_spotted, quality, width, downloaded_at, tags FROM wallpapers"
+    ).fetchall():
+        date = normalize_date(row["date_spotted"]) or row["date_spotted"]
+        quality = canonical_quality(row["quality"], row["width"])
+        stamp = normalize_timestamp(row["downloaded_at"])
+        tags = normalize_tags(row["tags"])
+        if (date, quality, stamp, tags) != (
+            row["date_spotted"],
+            row["quality"],
+            row["downloaded_at"],
+            row["tags"],
+        ):
+            updates.append((date, quality, stamp, tags, row["id"]))
+    if updates:
+        conn.executemany(
+            "UPDATE wallpapers SET date_spotted=?, quality=?, downloaded_at=?, tags=? WHERE id=?",
+            updates,
+        )
+        log.info("Migration v2: normalised %d wallpaper rows.", len(updates))
+
+
+_MIGRATIONS = {2: _migrate_to_v2}
 
 
 def init_db() -> None:
-    """Create all tables if they don't exist."""
+    """Create / upgrade the schema.  Safe to call repeatedly and from any thread."""
+    settings.ensure_dirs()
+    conn = _get_conn()
+    conn.executescript(_BASELINE_SQL)  # IF NOT EXISTS → no-op on existing databases
+
+    current = conn.execute("PRAGMA user_version").fetchone()[0]
+    for version in range(current + 1, SCHEMA_VERSION + 1):
+        migrate = _MIGRATIONS.get(version)
+        with get_db(write=True) as tx:
+            if migrate:
+                migrate(tx)
+            tx.execute(f"PRAGMA user_version = {version}")
+        log.info("Database schema upgraded to v%d.", version)
+
+    with get_db(write=True) as tx:
+        for key in _COUNTER_STATS:
+            tx.execute("INSERT OR IGNORE INTO stats(key, value) VALUES (?, '0')", (key,))
+        tx.execute("INSERT OR IGNORE INTO stats(key, value) VALUES ('status', 'stopped')")
+        tx.execute("INSERT OR IGNORE INTO stats(key, value) VALUES ('phase', 'Idle')")
+        tx.execute("INSERT OR IGNORE INTO stats(key, value) VALUES ('library_rev', '0')")
+
+
+def reset_runtime_state() -> None:
+    """
+    Called once at process start: whatever a previous (killed) process left
+    behind – ``status=running``, claimed queue rows – is stale.
+    """
+    with get_db(write=True) as conn:
+        conn.execute("INSERT OR REPLACE INTO stats(key, value) VALUES ('status', 'stopped')")
+        conn.execute("INSERT OR REPLACE INTO stats(key, value) VALUES ('phase', 'Idle')")
+        conn.execute("UPDATE scrape_queue SET claimed_at = NULL WHERE claimed_at IS NOT NULL")
+        conn.execute("UPDATE download_queue SET claimed_at = NULL WHERE claimed_at IS NOT NULL")
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Change tracking & catalog export
+# ══════════════════════════════════════════════════════════════════════════
+
+
+def _bump_rev(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        "INSERT INTO stats(key, value) VALUES ('library_rev', '1') "
+        "ON CONFLICT(key) DO UPDATE SET value = CAST(value AS INTEGER) + 1"
+    )
+
+
+def library_signature() -> str:
+    """Cheap identifier that changes whenever any wallpaper row changes (ETag source)."""
     with get_db() as conn:
-        conn.executescript("""
-            CREATE TABLE IF NOT EXISTS wallpapers (
-                id           INTEGER PRIMARY KEY AUTOINCREMENT,
-                phash        TEXT    UNIQUE NOT NULL,
-                filename     TEXT    NOT NULL,
-                title        TEXT    NOT NULL DEFAULT '',
-                source       TEXT    NOT NULL,
-                source_url   TEXT    NOT NULL,
-                page_url     TEXT    NOT NULL DEFAULT '',
-                width        INTEGER NOT NULL DEFAULT 0,
-                height       INTEGER NOT NULL DEFAULT 0,
-                file_size    INTEGER NOT NULL DEFAULT 0,
-                tags         TEXT    NOT NULL DEFAULT '',
-                date_spotted TEXT    NOT NULL DEFAULT '',
-                downloaded_at TEXT   NOT NULL,
-                quality      TEXT    NOT NULL DEFAULT 'UHD'
-            );
-
-            CREATE TABLE IF NOT EXISTS scrape_queue (
-                id       INTEGER PRIMARY KEY AUTOINCREMENT,
-                url      TEXT    UNIQUE NOT NULL,
-                source   TEXT    NOT NULL,
-                priority INTEGER NOT NULL DEFAULT 0,
-                added_at TEXT    NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS download_queue (
-                id         INTEGER PRIMARY KEY AUTOINCREMENT,
-                image_url  TEXT    UNIQUE NOT NULL,
-                page_url   TEXT    NOT NULL DEFAULT '',
-                title      TEXT    NOT NULL DEFAULT '',
-                source     TEXT    NOT NULL,
-                tags       TEXT    NOT NULL DEFAULT '',
-                date_spotted TEXT  NOT NULL DEFAULT '',
-                added_at   TEXT    NOT NULL,
-                retries    INTEGER NOT NULL DEFAULT 0
-            );
-
-            CREATE TABLE IF NOT EXISTS suppressed_urls (
-                url        TEXT PRIMARY KEY,
-                reason     TEXT NOT NULL DEFAULT '',
-                created_at TEXT NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS stats (
-                key   TEXT PRIMARY KEY,
-                value TEXT NOT NULL
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_wallpapers_phash ON wallpapers(phash);
-            CREATE INDEX IF NOT EXISTS idx_wallpapers_source ON wallpapers(source);
-            CREATE INDEX IF NOT EXISTS idx_wallpapers_source_url ON wallpapers(source_url);
-            CREATE INDEX IF NOT EXISTS idx_wallpapers_downloaded_at ON wallpapers(downloaded_at);
-            CREATE INDEX IF NOT EXISTS idx_wallpapers_date_spotted ON wallpapers(date_spotted);
-            CREATE INDEX IF NOT EXISTS idx_wallpapers_quality ON wallpapers(quality);
-            CREATE INDEX IF NOT EXISTS idx_suppressed_urls_url ON suppressed_urls(url);
-        """)
-        # Seed initial stats
-        for key in ("status", "phase", "scraped_count", "downloaded_count",
-                    "duplicates_skipped", "duplicates_replaced", "errors"):
-            conn.execute(
-                "INSERT OR IGNORE INTO stats(key, value) VALUES (?, ?)",
-                (key, "stopped" if key == "status" else "idle" if key == "phase" else "0"),
-            )
-
-    # Ensure files and DB are partitioned into source folders
-    migrate_storage_to_source_folders()
-    # Ensure static catalog JSON for GitHub Pages is up-to-date
-    export_catalog_json()
+        rev = conn.execute("SELECT value FROM stats WHERE key = 'library_rev'").fetchone()
+        count = conn.execute("SELECT COUNT(*) FROM wallpapers").fetchone()[0]
+    return f"{rev[0] if rev else 0}-{count}"
 
 
-def export_catalog_json(dest_path: Optional[Path] = None) -> int:
+def build_catalog() -> tuple[bytes, int]:
     """
-    Export all wallpapers to a static JSON file (data/wallpapers.json)
-    for GitHub Pages and static web viewers.
-    """
-    import json
-    target = dest_path or (settings.DB_PATH.parent / "wallpapers.json")
-    target.parent.mkdir(parents=True, exist_ok=True)
+    Serialise the public catalog (newest first, without the internal ``phash``).
 
+    Returns ``(utf-8 json bytes, item count)``.  The output is deterministic –
+    ``ORDER BY downloaded_at DESC, id DESC`` – so an unchanged library produces a
+    byte-identical file and no spurious git diff.
+    """
+    cols = ", ".join(CATALOG_FIELDS)
     with get_db() as conn:
-        rows = conn.execute("SELECT * FROM wallpapers ORDER BY downloaded_at DESC").fetchall()
-        catalog = [dict(r) for r in rows]
-
-    temp_file = target.with_suffix(".tmp")
-    with open(temp_file, "w", encoding="utf-8") as f:
-        json.dump(catalog, f, ensure_ascii=False, separators=(",", ":"))
-    temp_file.replace(target)
-    return len(catalog)
+        rows = conn.execute(
+            f"SELECT {cols} FROM wallpapers ORDER BY downloaded_at DESC, id DESC"
+        ).fetchall()
+    items = [dict(zip(CATALOG_FIELDS, tuple(r), strict=True)) for r in rows]
+    payload = json.dumps(items, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    return payload, len(items)
 
 
-def migrate_storage_to_source_folders() -> dict:
+def export_catalog_json(dest_path: Path | None = None) -> int:
     """
-    Ensure all wallpapers and thumbnails on disk are organized into
-    source-specific subdirectories (e.g. images/peapix/ and images/win10spotlight/)
-    and that DB filename paths reflect their source subfolders.
+    Write the static catalog used by the GitHub-Pages showcase.
+
+    The file is only rewritten when its content actually changed.  Returns the
+    number of wallpapers in the catalog.
     """
-    images_dir = settings.IMAGES_DIR
-    thumbs_dir = images_dir / "thumbs"
-
-    images_dir.mkdir(parents=True, exist_ok=True)
-    thumbs_dir.mkdir(parents=True, exist_ok=True)
-
-    moved_images = 0
-    moved_thumbs = 0
-    updated_db = 0
-
-    with get_db() as conn:
-        rows = conn.execute("SELECT id, filename, source FROM wallpapers").fetchall()
-        for row in rows:
-            w_id = row["id"]
-            old_fn = row["filename"]
-            source = row["source"] or "other"
-            clean_source = re.sub(r"[^a-zA-Z0-9_-]", "", source) or "other"
-
-            pure_name = Path(old_fn).name
-            new_fn = f"{clean_source}/{pure_name}"
-
-            # 1. Full image
-            dest_dir = images_dir / clean_source
-            dest_dir.mkdir(parents=True, exist_ok=True)
-            dest_file = dest_dir / pure_name
-
-            flat_src = images_dir / pure_name
-            if flat_src.exists() and flat_src.is_file() and flat_src != dest_file:
-                try:
-                    shutil.move(str(flat_src), str(dest_file))
-                    moved_images += 1
-                except Exception:
-                    pass
-
-            # 2. Thumbnail
-            dest_thumb_dir = thumbs_dir / clean_source
-            dest_thumb_dir.mkdir(parents=True, exist_ok=True)
-            dest_thumb = dest_thumb_dir / pure_name
-
-            flat_thumb = thumbs_dir / pure_name
-            if flat_thumb.exists() and flat_thumb.is_file() and flat_thumb != dest_thumb:
-                try:
-                    shutil.move(str(flat_thumb), str(dest_thumb))
-                    moved_thumbs += 1
-                except Exception:
-                    pass
-
-            # 3. DB filename update
-            if old_fn != new_fn:
-                conn.execute(
-                    "UPDATE wallpapers SET filename = ? WHERE id = ?",
-                    (new_fn, w_id)
-                )
-                updated_db += 1
-
-    return {
-        "moved_images": moved_images,
-        "moved_thumbs": moved_thumbs,
-        "updated_db": updated_db,
-    }
+    target = Path(dest_path) if dest_path else settings.CATALOG_PATH
+    with _export_lock:
+        payload, count = build_catalog()
+        try:
+            if target.exists() and target.stat().st_size == len(payload):
+                if target.read_bytes() == payload:
+                    return count
+        except OSError:
+            pass
+        atomic_write_bytes(target, payload)
+    return count
 
 
-# ── Wallpapers ─────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════
+# Wallpapers
+# ══════════════════════════════════════════════════════════════════════════
 
-def upsert_wallpaper(data: dict) -> bool:
+
+def upsert_wallpaper(data: dict[str, Any]) -> bool:
     """
-    Insert or replace a wallpaper record.  Returns True if it was newly
-    inserted, False if it replaced an existing lower-quality entry.
+    Insert a wallpaper, or refresh the file-related columns of an existing one
+    with the same perceptual hash.  Returns ``True`` if a new row was created.
     """
-    data.setdefault("downloaded_at", datetime.now(timezone.utc).isoformat())
-    with get_db() as conn:
-        conn.execute("""
+    record = dict(data)
+    record.setdefault("downloaded_at", utcnow_iso())
+    record["date_spotted"] = normalize_date(record.get("date_spotted")) or (
+        record.get("date_spotted") or ""
+    )
+    record["tags"] = normalize_tags(record.get("tags"))
+    record["quality"] = canonical_quality(record.get("quality"), int(record.get("width") or 0))
+    for key, default in (("title", ""), ("page_url", ""), ("width", 0), ("height", 0),
+                         ("file_size", 0)):
+        record.setdefault(key, default)
+
+    with get_db(write=True) as conn:
+        existed = conn.execute(
+            "SELECT 1 FROM wallpapers WHERE phash = ?", (record["phash"],)
+        ).fetchone()
+        conn.execute(
+            """
             INSERT INTO wallpapers
                 (phash, filename, title, source, source_url, page_url,
                  width, height, file_size, tags, date_spotted, downloaded_at, quality)
@@ -232,15 +435,45 @@ def upsert_wallpaper(data: dict) -> bool:
                 (:phash, :filename, :title, :source, :source_url, :page_url,
                  :width, :height, :file_size, :tags, :date_spotted, :downloaded_at, :quality)
             ON CONFLICT(phash) DO UPDATE SET
-                filename     = excluded.filename,
-                source_url   = excluded.source_url,
-                width        = excluded.width,
-                height       = excluded.height,
-                file_size    = excluded.file_size,
-                quality      = excluded.quality,
-                downloaded_at= excluded.downloaded_at
-        """, data)
-    return True
+                filename      = excluded.filename,
+                source_url    = excluded.source_url,
+                width         = excluded.width,
+                height        = excluded.height,
+                file_size     = excluded.file_size,
+                quality       = excluded.quality,
+                downloaded_at = excluded.downloaded_at
+            """,
+            record,
+        )
+        _bump_rev(conn)
+    return existed is None
+
+
+def _search_terms(search: str, limit: int = 8) -> list[str]:
+    return [t for t in (search or "").lower().split() if t][:limit]
+
+
+def _build_filters(
+    search: str = "", source: str = "", tag: str = "", quality: str = ""
+) -> tuple[str, list[Any]]:
+    wheres: list[str] = []
+    params: list[Any] = []
+    for term in _search_terms(search):
+        like = f"%{escape_like(term)}%"
+        wheres.append(
+            "(title LIKE ? ESCAPE '\\' OR tags LIKE ? ESCAPE '\\' "
+            "OR date_spotted LIKE ? ESCAPE '\\')"
+        )
+        params.extend([like, like, like])
+    if source:
+        wheres.append("source = ?")
+        params.append(source)
+    if tag:
+        wheres.append("(',' || tags || ',') LIKE ? ESCAPE '\\'")
+        params.append(f"%,{escape_like(tag.strip().lower())},%")
+    if quality and quality.lower() in _QUALITY_SQL:
+        wheres.append(f"({_QUALITY_SQL[quality.lower()]})")
+    return (("WHERE " + " AND ".join(wheres)) if wheres else ""), params
 
 
 def get_all_wallpapers(
@@ -250,421 +483,545 @@ def get_all_wallpapers(
     source: str = "",
     sort: str = "downloaded_at",
     order: str = "DESC",
+    tag: str = "",
+    quality: str = "",
 ) -> tuple[list[dict], int]:
-    """Return a paginated list of wallpapers and the total count."""
-    wheres, params = [], []
-    if search:
-        wheres.append("(title LIKE ? OR tags LIKE ?)")
-        params.extend([f"%{search}%", f"%{search}%"])
-    if source:
-        wheres.append("source = ?")
-        params.append(source)
+    """
+    Paginated, filtered, *deterministically ordered* wallpaper list.
 
-    where_clause = ("WHERE " + " AND ".join(wheres)) if wheres else ""
-    allowed_sorts = {"downloaded_at", "width", "height", "file_size", "title", "date_spotted"}
-    sort = sort if sort in allowed_sorts else "downloaded_at"
-    order = "ASC" if order.upper() == "ASC" else "DESC"
+    ``search`` is tokenised: every whitespace separated term must match the
+    title, a tag or the date (AND semantics).  A unique ``id`` tie-breaker is
+    always appended so pages never overlap or skip rows.
+    """
+    where_clause, params = _build_filters(search, source, tag, quality)
+    order_by = _order_by(sort, order)
+    page = max(1, int(page))
+    per_page = max(1, int(per_page))
 
     with get_db() as conn:
-        total = conn.execute(
-            f"SELECT COUNT(*) FROM wallpapers {where_clause}", params
-        ).fetchone()[0]
+        total = conn.execute(f"SELECT COUNT(*) FROM wallpapers {where_clause}", params).fetchone()[0]
         rows = conn.execute(
-            f"""SELECT * FROM wallpapers {where_clause}
-                ORDER BY {sort} {order}
-                LIMIT ? OFFSET ?""",
-            params + [per_page, (page - 1) * per_page],
+            f"SELECT * FROM wallpapers {where_clause} "
+            f"ORDER BY {order_by} LIMIT ? OFFSET ?",
+            [*params, per_page, (page - 1) * per_page],
         ).fetchall()
     return [dict(r) for r in rows], total
 
 
-def get_wallpaper_by_phash(phash: str) -> Optional[dict]:
+def _order_by(sort: str, order: str) -> str:
+    """
+    Build a safe, deterministic ``ORDER BY`` clause body.
+
+    Rows whose ``date_spotted`` is unknown always sort last (in both directions)
+    and the unique ``id`` is the final tie-breaker so pagination is stable.
+    """
+    direction = "ASC" if str(order).upper() == "ASC" else "DESC"
+    if sort == "date_spotted":
+        return f"(date_spotted = '') ASC, date_spotted {direction}, id {direction}"
+    if sort == "title":
+        return f"title COLLATE NOCASE {direction}, id {direction}"
+    column = sort if sort in ALLOWED_SORTS else "downloaded_at"
+    return f"{column} {direction}, id {direction}"
+
+
+def get_wallpaper(wallpaper_id: int) -> dict | None:
+    with get_db() as conn:
+        row = conn.execute("SELECT * FROM wallpapers WHERE id = ?", (wallpaper_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def get_wallpaper_by_phash(phash: str) -> dict | None:
+    with get_db() as conn:
+        row = conn.execute("SELECT * FROM wallpapers WHERE phash = ?", (phash,)).fetchone()
+    return dict(row) if row else None
+
+
+def get_wallpaper_by_page_url(page_url: str) -> dict | None:
+    if not page_url:
+        return None
     with get_db() as conn:
         row = conn.execute(
-            "SELECT * FROM wallpapers WHERE phash = ?", (phash,)
+            "SELECT * FROM wallpapers WHERE page_url = ? LIMIT 1", (page_url,)
         ).fetchone()
     return dict(row) if row else None
 
 
-def find_duplicate_wallpaper(phash: str, max_distance: int = 4) -> Optional[dict]:
+def get_random_wallpaper(
+    search: str = "", source: str = "", tag: str = "", quality: str = ""
+) -> dict | None:
+    where_clause, params = _build_filters(search, source, tag, quality)
+    with get_db() as conn:
+        row = conn.execute(
+            f"SELECT * FROM wallpapers {where_clause} ORDER BY RANDOM() LIMIT 1", params
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def count_wallpapers(source: str = "") -> int:
+    with get_db() as conn:
+        if source:
+            return conn.execute(
+                "SELECT COUNT(*) FROM wallpapers WHERE source = ?", (source,)
+            ).fetchone()[0]
+        return conn.execute("SELECT COUNT(*) FROM wallpapers").fetchone()[0]
+
+
+def iter_wallpapers(batch_size: int = 500, fields: tuple[str, ...] | None = None) -> Iterator[dict]:
+    """Stream every wallpaper (id order) using a private read-only connection."""
+    cols = ", ".join(fields) if fields else "*"
+    with read_connection() as conn:
+        cursor = conn.execute(f"SELECT {cols} FROM wallpapers ORDER BY id")
+        while True:
+            rows = cursor.fetchmany(batch_size)
+            if not rows:
+                return
+            for row in rows:
+                yield dict(row)
+
+
+def get_tag_counts(source: str = "") -> Counter:
+    """Frequency of every tag (optionally restricted to one source)."""
+    counts: Counter = Counter()
+    with get_db() as conn:
+        if source:
+            cursor = conn.execute("SELECT tags FROM wallpapers WHERE source = ?", (source,))
+        else:
+            cursor = conn.execute("SELECT tags FROM wallpapers")
+        for (tags,) in cursor:
+            if tags:
+                counts.update(t for t in tags.split(",") if t)
+    return counts
+
+
+def find_duplicate_wallpaper(phash: str, max_distance: int = 4) -> dict | None:
     """
-    Find any existing wallpaper matching phash exactly or within max_distance bits.
-    Uses chunk-indexed filtering for sub-millisecond candidate lookup.
+    Closest existing wallpaper whose hash is within ``max_distance`` bits.
+
+    Candidate selection uses the pigeonhole principle: with 8 chunks, any two
+    hashes at distance ≤ 7 share at least one identical chunk, so comparing
+    chunks first avoids computing 7 000+ full distances.
     """
     if not phash:
         return None
-
-    # 1. Exact match fast path (indexed)
     exact = get_wallpaper_by_phash(phash)
     if exact:
         return exact
-
-    if max_distance <= 0 or len(phash) != 64:
+    if max_distance <= 0 or not is_valid_phash(phash):
         return None
 
-    # 2. Multi-index candidate filtering (8 chunks of 8 hex chars = 32 bits each)
-    import imagehash
-
-    try:
-        target_h = imagehash.hex_to_hash(phash)
-    except Exception:
-        return None
-
-    chunks = [phash[i * 8 : (i + 1) * 8] for i in range(8)]
-    where_parts = ["SUBSTR(phash, ?, 8) = ?" for _ in range(8)]
-    params: list = []
-    for i, chk in enumerate(chunks):
-        params.extend([i * 8 + 1, chk])
-
-    query = f"SELECT * FROM wallpapers WHERE " + " OR ".join(where_parts)
+    clauses = " OR ".join("SUBSTR(phash, ?, ?) = ?" for _ in range(8))
+    params: list[Any] = []
+    for i, chunk in enumerate(chunk_keys(phash)):
+        params.extend([i * CHUNK_HEX_LEN + 1, CHUNK_HEX_LEN, chunk])
     with get_db() as conn:
-        candidates = conn.execute(query, params).fetchall()
+        candidates = conn.execute(f"SELECT * FROM wallpapers WHERE {clauses}", params).fetchall()
 
-    best_match = None
-    min_dist = max_distance + 1
-
+    best: dict | None = None
+    best_distance = max_distance + 1
     for cand in candidates:
         try:
-            cand_h = imagehash.hex_to_hash(cand["phash"])
-            dist = target_h - cand_h
-            if dist <= max_distance and dist < min_dist:
-                min_dist = dist
-                best_match = dict(cand)
-        except Exception:
+            distance = hamming_hex(phash, cand["phash"])
+        except ValueError:
             continue
-
-    return best_match
+        if distance < best_distance:
+            best, best_distance = dict(cand), distance
+    return best
 
 
 def delete_wallpaper(phash: str) -> None:
-    with get_db() as conn:
+    with get_db(write=True) as conn:
         conn.execute("DELETE FROM wallpapers WHERE phash = ?", (phash,))
+        _bump_rev(conn)
 
 
-# ── Scrape Queue ────────────────────────────────────────────────────────────
+def delete_wallpaper_by_id(wallpaper_id: int) -> None:
+    with get_db(write=True) as conn:
+        conn.execute("DELETE FROM wallpapers WHERE id = ?", (wallpaper_id,))
+        _bump_rev(conn)
 
-def seed_scrape_queue(
-    peapix_pages: int,
-    win10_pages: int,
-    target_source: Optional[str] = None,
-    force: bool = False,
-) -> None:
-    """Populate the scrape queue with gallery pages for the target source(s)."""
-    now = datetime.now(timezone.utc).isoformat()
+
+def update_wallpaper_metadata(
+    wallpaper_id: int,
+    *,
+    title: str | None = None,
+    tags: str | None = None,
+    date_spotted: str | None = None,
+) -> bool:
+    """Overwrite the provided descriptive fields.  Returns True when a row changed."""
+    sets, params = [], []
+    if title is not None:
+        sets.append("title = ?")
+        params.append(title.strip())
+    if tags is not None:
+        sets.append("tags = ?")
+        params.append(normalize_tags(tags))
+    if date_spotted is not None:
+        sets.append("date_spotted = ?")
+        params.append(normalize_date(date_spotted) or date_spotted)
+    if not sets:
+        return False
+    with get_db(write=True) as conn:
+        cursor = conn.execute(
+            f"UPDATE wallpapers SET {', '.join(sets)} WHERE id = ?", [*params, wallpaper_id]
+        )
+        changed = cursor.rowcount > 0
+        if changed:
+            _bump_rev(conn)
+    return changed
+
+
+def merge_wallpaper_metadata(
+    wallpaper_id: int, *, title: str = "", tags: str = "", date_spotted: str = ""
+) -> bool:
+    """
+    Enrich an existing row *without destroying information*: a real title replaces
+    a placeholder, tags are unioned and an empty date is filled in.
+    Returns True when anything changed.
+    """
+    with get_db(write=True) as conn:
+        row = conn.execute(
+            "SELECT title, tags, date_spotted FROM wallpapers WHERE id = ?", (wallpaper_id,)
+        ).fetchone()
+        if not row:
+            return False
+        new_title = choose_title(row["title"], title) if title else row["title"]
+        new_tags = merge_tags(row["tags"], tags)
+        new_date = row["date_spotted"] or normalize_date(date_spotted) or ""
+        if (new_title, new_tags, new_date) == (row["title"], row["tags"], row["date_spotted"]):
+            return False
+        conn.execute(
+            "UPDATE wallpapers SET title = ?, tags = ?, date_spotted = ? WHERE id = ?",
+            (new_title, new_tags, new_date, wallpaper_id),
+        )
+        _bump_rev(conn)
+    return True
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Scrape queue (claim based)
+# ══════════════════════════════════════════════════════════════════════════
+
+
+def enqueue_scrape_pages(rows: list[tuple[str, str, int]]) -> int:
+    """
+    Add ``(url, source, priority)`` gallery pages.  Existing pages are kept but
+    their priority is raised to the new value when it is higher.  Returns the
+    number of *new* pages.
+    """
+    if not rows:
+        return 0
+    now = utcnow_iso()
+    with get_db(write=True) as conn:
+        before = conn.execute("SELECT COUNT(*) FROM scrape_queue").fetchone()[0]
+        conn.executemany(
+            """
+            INSERT INTO scrape_queue(url, source, priority, added_at) VALUES (?, ?, ?, ?)
+            ON CONFLICT(url) DO UPDATE SET priority = MAX(priority, excluded.priority)
+            """,
+            [(url, source, priority, now) for url, source, priority in rows],
+        )
+        after = conn.execute("SELECT COUNT(*) FROM scrape_queue").fetchone()[0]
+    return after - before
+
+
+def claim_scrape_page(source: str | None = None, min_priority: int = 0) -> dict | None:
+    """Atomically claim the highest-priority unclaimed page (``None`` when empty)."""
+    where, params = ["claimed_at IS NULL", "priority >= ?"], [min_priority]
+    if source and source != "both":
+        where.append("source = ?")
+        params.append(source)
+    with get_db(write=True) as conn:
+        row = conn.execute(
+            f"SELECT * FROM scrape_queue WHERE {' AND '.join(where)} "
+            "ORDER BY priority DESC, id ASC LIMIT 1",
+            params,
+        ).fetchone()
+        if not row:
+            return None
+        conn.execute(
+            "UPDATE scrape_queue SET claimed_at = ? WHERE id = ?", (utcnow_iso(), row["id"])
+        )
+        return dict(row)
+
+
+def complete_scrape_page(page_id: int) -> None:
+    with get_db(write=True) as conn:
+        conn.execute("DELETE FROM scrape_queue WHERE id = ?", (page_id,))
+
+
+def release_scrape_page(page_id: int) -> None:
+    """Give a claimed page back (e.g. on shutdown) without counting a retry."""
+    with get_db(write=True) as conn:
+        conn.execute("UPDATE scrape_queue SET claimed_at = NULL WHERE id = ?", (page_id,))
+
+
+def fail_scrape_page(page_id: int, max_retries: int) -> bool:
+    """
+    Record a failed attempt.  The page is re-queued **at the back** of its priority
+    group (so a failing host is not hammered in a tight loop) until ``max_retries``
+    is exceeded, then dropped.  Returns True while it will be retried.
+    """
+    with get_db(write=True) as conn:
+        row = conn.execute("SELECT * FROM scrape_queue WHERE id = ?", (page_id,)).fetchone()
+        if not row:
+            return False
+        conn.execute("DELETE FROM scrape_queue WHERE id = ?", (page_id,))
+        if row["retries"] + 1 > max_retries:
+            return False
+        conn.execute(
+            "INSERT INTO scrape_queue(url, source, priority, added_at, retries) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (row["url"], row["source"], row["priority"], utcnow_iso(), row["retries"] + 1),
+        )
+        return True
+
+
+def scrape_queue_size(source: str | None = None, min_priority: int = 0) -> int:
+    """Pages remaining (claimed + unclaimed), optionally for one source."""
+    where, params = ["priority >= ?"], [min_priority]
+    if source and source != "both":
+        where.append("source = ?")
+        params.append(source)
     with get_db() as conn:
-        if target_source in ("peapix", None, "both"):
-            peapix_count = conn.execute("SELECT COUNT(*) FROM scrape_queue WHERE source = 'peapix'").fetchone()[0]
-            if peapix_count == 0 or force:
-                rows = [("https://peapix.com/spotlight", "peapix", 100, now)]
-                for i in range(2, peapix_pages + 1):
-                    rows.append((f"https://peapix.com/spotlight/page-{i}", "peapix", 10, now))
-                conn.executemany(
-                    "INSERT OR IGNORE INTO scrape_queue(url, source, priority, added_at) VALUES(?,?,?,?)",
-                    rows,
-                )
-
-        if target_source in ("win10spotlight", None, "both"):
-            win10_count = conn.execute("SELECT COUNT(*) FROM scrape_queue WHERE source = 'win10spotlight'").fetchone()[0]
-            if win10_count == 0 or force:
-                rows = [("https://windows10spotlight.com/", "win10spotlight", 100, now)]
-                for i in range(2, win10_pages + 1):
-                    rows.append((f"https://windows10spotlight.com/page/{i}", "win10spotlight", 10, now))
-                conn.executemany(
-                    "INSERT OR IGNORE INTO scrape_queue(url, source, priority, added_at) VALUES(?,?,?,?)",
-                    rows,
-                )
+        return conn.execute(
+            f"SELECT COUNT(*) FROM scrape_queue WHERE {' AND '.join(where)}", params
+        ).fetchone()[0]
 
 
-def pop_scrape_page(source: Optional[str] = None) -> Optional[dict]:
-    """Remove and return the highest-priority unscraped page, optionally filtered by source."""
-    with get_db() as conn:
+def clear_scrape_queue(source: str | None = None) -> int:
+    with get_db(write=True) as conn:
         if source and source != "both":
-            row = conn.execute(
-                "SELECT * FROM scrape_queue WHERE source = ? ORDER BY priority DESC, id ASC LIMIT 1",
-                (source,),
-            ).fetchone()
+            cursor = conn.execute("DELETE FROM scrape_queue WHERE source = ?", (source,))
         else:
-            row = conn.execute(
-                "SELECT * FROM scrape_queue ORDER BY priority DESC, id ASC LIMIT 1"
-            ).fetchone()
-        if row:
-            conn.execute("DELETE FROM scrape_queue WHERE id = ?", (row["id"],))
-            return dict(row)
-    return None
+            cursor = conn.execute("DELETE FROM scrape_queue")
+        return cursor.rowcount
 
 
-def scrape_queue_size(source: Optional[str] = None) -> int:
-    """Return remaining scrape pages count, optionally filtered by source."""
-    with get_db() as conn:
-        if source and source != "both":
-            return conn.execute("SELECT COUNT(*) FROM scrape_queue WHERE source = ?", (source,)).fetchone()[0]
-        return conn.execute("SELECT COUNT(*) FROM scrape_queue").fetchone()[0]
+# ══════════════════════════════════════════════════════════════════════════
+# Suppressed URLs
+# ══════════════════════════════════════════════════════════════════════════
 
-
-# ── Download Queue ──────────────────────────────────────────────────────────
 
 def add_suppressed_url(url: str, reason: str = "duplicate_lower_quality") -> None:
-    """Record a URL as suppressed so it is never enqueued or downloaded again."""
+    """Record a URL so it is never enqueued or downloaded again."""
     if not url:
         return
-    with get_db() as conn:
+    with get_db(write=True) as conn:
         conn.execute(
-            """INSERT OR IGNORE INTO suppressed_urls (url, reason, created_at)
-               VALUES (?, ?, ?)""",
-            (url, reason, datetime.now(timezone.utc).isoformat()),
+            "INSERT OR IGNORE INTO suppressed_urls (url, reason, created_at) VALUES (?, ?, ?)",
+            (url, reason, utcnow_iso()),
         )
 
 
 def is_url_suppressed(url: str) -> bool:
-    """Return True if URL is marked as suppressed."""
     if not url:
         return False
     with get_db() as conn:
-        row = conn.execute("SELECT 1 FROM suppressed_urls WHERE url = ?", (url,)).fetchone()
-        return row is not None
+        return conn.execute("SELECT 1 FROM suppressed_urls WHERE url = ?", (url,)).fetchone() is not None
 
 
 def is_url_known(image_url: str) -> bool:
-    """Check if URL is already downloaded, queued, or suppressed."""
+    """True if the URL is already downloaded, queued or suppressed."""
     if not image_url:
         return False
     with get_db() as conn:
-        if conn.execute("SELECT 1 FROM suppressed_urls WHERE url = ?", (image_url,)).fetchone():
-            return True
-        if conn.execute("SELECT 1 FROM download_queue WHERE image_url = ?", (image_url,)).fetchone():
-            return True
-        if conn.execute("SELECT 1 FROM wallpapers WHERE source_url = ?", (image_url,)).fetchone():
-            return True
-        return False
+        return bool(
+            conn.execute(
+                "SELECT 1 WHERE EXISTS (SELECT 1 FROM suppressed_urls WHERE url = ?) "
+                "OR EXISTS (SELECT 1 FROM download_queue WHERE image_url = ?) "
+                "OR EXISTS (SELECT 1 FROM wallpapers WHERE source_url = ?)",
+                (image_url, image_url, image_url),
+            ).fetchone()
+        )
 
 
-def enqueue_download(item: dict) -> bool:
-    """Add an image URL to the download queue.  Returns False if already present, downloaded, or suppressed."""
+# ══════════════════════════════════════════════════════════════════════════
+# Download queue (claim based)
+# ══════════════════════════════════════════════════════════════════════════
+
+_QUEUE_COLUMNS = ("image_url", "page_url", "title", "source", "tags", "date_spotted")
+
+
+def enqueue_download(item: dict[str, Any]) -> bool:
+    """Queue an image.  Returns False if it is already known (downloaded/queued/suppressed)."""
     url = item.get("image_url")
     if not url or is_url_known(url):
         return False
-    item.setdefault("added_at", datetime.now(timezone.utc).isoformat())
-    item.setdefault("retries", 0)
-    with get_db() as conn:
-        try:
-            conn.execute(
-                """INSERT OR IGNORE INTO download_queue
-                       (image_url, page_url, title, source, tags, date_spotted, added_at, retries)
-                   VALUES (:image_url, :page_url, :title, :source, :tags, :date_spotted, :added_at, :retries)""",
-                item,
-            )
-            return conn.execute("SELECT changes()").fetchone()[0] > 0
-        except Exception:
+    row = {col: item.get(col, "") or "" for col in _QUEUE_COLUMNS}
+    row["tags"] = normalize_tags(row["tags"])
+    row["date_spotted"] = normalize_date(row["date_spotted"]) or row["date_spotted"]
+    row["added_at"] = item.get("added_at") or utcnow_iso()
+    row["retries"] = int(item.get("retries", 0))
+    with get_db(write=True) as conn:
+        cursor = conn.execute(
+            """
+            INSERT OR IGNORE INTO download_queue
+                (image_url, page_url, title, source, tags, date_spotted, added_at, retries)
+            VALUES (:image_url, :page_url, :title, :source, :tags, :date_spotted, :added_at, :retries)
+            """,
+            row,
+        )
+        return cursor.rowcount > 0
+
+
+def claim_download_item(source: str | None = None, since: str | None = None) -> dict | None:
+    """
+    Atomically claim the oldest unclaimed image (FIFO).
+
+    ``since`` (ISO timestamp) restricts the claim to items queued at or after that
+    moment – used by "quick update" runs so an old backlog is left alone.
+    """
+    where: list[str] = ["claimed_at IS NULL"]
+    params: list[Any] = []
+    if source and source != "both":
+        where.append("source = ?")
+        params.append(source)
+    if since:
+        where.append("added_at >= ?")
+        params.append(since)
+    with get_db(write=True) as conn:
+        row = conn.execute(
+            f"SELECT * FROM download_queue WHERE {' AND '.join(where)} ORDER BY id ASC LIMIT 1",
+            params,
+        ).fetchone()
+        if not row:
+            return None
+        conn.execute(
+            "UPDATE download_queue SET claimed_at = ? WHERE id = ?", (utcnow_iso(), row["id"])
+        )
+        return dict(row)
+
+
+def complete_download_item(item_id: int) -> None:
+    with get_db(write=True) as conn:
+        conn.execute("DELETE FROM download_queue WHERE id = ?", (item_id,))
+
+
+def release_download_item(item_id: int) -> None:
+    """Give a claimed image back without counting a retry (used on shutdown)."""
+    with get_db(write=True) as conn:
+        conn.execute("UPDATE download_queue SET claimed_at = NULL WHERE id = ?", (item_id,))
+
+
+def fail_download_item(item_id: int, max_retries: int) -> bool:
+    """
+    Count a failed attempt.  The item goes **to the back** of the queue (spacing the
+    retries out) until ``max_retries`` is exceeded, then it is dropped.
+    Returns True while the item will be retried.
+    """
+    with get_db(write=True) as conn:
+        row = conn.execute("SELECT * FROM download_queue WHERE id = ?", (item_id,)).fetchone()
+        if not row:
             return False
+        conn.execute("DELETE FROM download_queue WHERE id = ?", (item_id,))
+        if row["retries"] + 1 > max_retries:
+            return False
+        conn.execute(
+            """
+            INSERT INTO download_queue
+                (image_url, page_url, title, source, tags, date_spotted, added_at, retries)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (row["image_url"], row["page_url"], row["title"], row["source"], row["tags"],
+             row["date_spotted"], utcnow_iso(), row["retries"] + 1),
+        )
+        return True
+
+
+def download_queue_size(source: str | None = None, since: str | None = None) -> int:
+    """Images remaining (claimed + unclaimed), optionally for one source / since a moment."""
+    where: list[str] = []
+    params: list[Any] = []
+    if source and source != "both":
+        where.append("source = ?")
+        params.append(source)
+    if since:
+        where.append("added_at >= ?")
+        params.append(since)
+    clause = f"WHERE {' AND '.join(where)}" if where else ""
+    with get_db() as conn:
+        return conn.execute(f"SELECT COUNT(*) FROM download_queue {clause}", params).fetchone()[0]
+
+
+def release_all_claims() -> int:
+    """Return every in-flight queue row to the pending state; returns rows released."""
+    with get_db(write=True) as conn:
+        a = conn.execute("UPDATE scrape_queue SET claimed_at = NULL WHERE claimed_at IS NOT NULL")
+        b = conn.execute(
+            "UPDATE download_queue SET claimed_at = NULL WHERE claimed_at IS NOT NULL"
+        )
+        return a.rowcount + b.rowcount
 
 
 def clean_download_queue() -> int:
-    """Remove any download_queue items that are already in wallpapers or suppressed_urls."""
-    with get_db() as conn:
-        conn.execute("""
-            DELETE FROM download_queue
-            WHERE image_url IN (SELECT source_url FROM wallpapers WHERE source_url IS NOT NULL)
-        """)
-        c1 = conn.execute("SELECT changes()").fetchone()[0]
-        conn.execute("""
-            DELETE FROM download_queue
-            WHERE image_url IN (SELECT url FROM suppressed_urls)
-        """)
-        c2 = conn.execute("SELECT changes()").fetchone()[0]
-        total_removed = c1 + c2
-        if total_removed > 0:
-            log.info("Cleaned download queue: %d duplicate/suppressed items removed.", total_removed)
-        return total_removed
+    """Remove queued images that were downloaded or suppressed in the meantime."""
+    with get_db(write=True) as conn:
+        c1 = conn.execute(
+            "DELETE FROM download_queue WHERE image_url IN "
+            "(SELECT source_url FROM wallpapers WHERE source_url IS NOT NULL)"
+        ).rowcount
+        c2 = conn.execute(
+            "DELETE FROM download_queue WHERE image_url IN (SELECT url FROM suppressed_urls)"
+        ).rowcount
+    if c1 + c2:
+        log.info("Cleaned download queue: %d duplicate/suppressed items removed.", c1 + c2)
+    return c1 + c2
 
 
-def deduplicate_downloaded_wallpapers() -> int:
-    """
-    Go through all already downloaded wallpapers in the database.
-    Find perceptual duplicates (dist <= 4), keep the higher quality image,
-    and remove the lower quality one from disk and DB.
-    Add removed URL to suppressed_urls so it is never re-downloaded.
-    """
-    with get_db() as conn:
-        rows = conn.execute(
-            "SELECT id, source, filename, width, height, file_size, phash, source_url, page_url FROM wallpapers"
-        ).fetchall()
-
-    if len(rows) < 2:
-        return 0
-
-    import imagehash
-
-    chunks = defaultdict(list)
-    parsed = []
-    for idx, r in enumerate(rows):
-        h_str = r["phash"]
-        try:
-            h = imagehash.hex_to_hash(h_str)
-            parsed.append((r, h))
-            for c_idx in range(8):
-                chunk_key = (c_idx, h_str[c_idx * 8 : (c_idx + 1) * 8])
-                chunks[chunk_key].append(idx)
-        except Exception:
-            pass
-
-    candidate_pairs = set()
-    for chunk_key, idx_list in chunks.items():
-        if len(idx_list) > 1:
-            for i in range(len(idx_list)):
-                for j in range(i + 1, len(idx_list)):
-                    i1, i2 = (idx_list[i], idx_list[j]) if idx_list[i] < idx_list[j] else (idx_list[j], idx_list[i])
-                    candidate_pairs.add((i1, i2))
-
-    removed_ids = set()
-    removed_count = 0
-
-    for i1, i2 in candidate_pairs:
-        if i1 in removed_ids or i2 in removed_ids:
-            continue
-        r1, h1 = parsed[i1]
-        r2, h2 = parsed[i2]
-        dist = h1 - h2
-        if dist <= 4:
-            s1 = r1["width"] * r1["height"] * 1000 + r1["file_size"]
-            s2 = r2["width"] * r2["height"] * 1000 + r2["file_size"]
-            higher = r1 if s1 >= s2 else r2
-            lower = r2 if s1 >= s2 else r1
-            lower_idx = i2 if s1 >= s2 else i1
-
-            removed_ids.add(lower_idx)
-            removed_count += 1
-
-            # Delete lower quality files from disk
-            for base_dir in (settings.IMAGES_DIR, settings.IMAGES_DIR / "thumbs"):
-                target = base_dir / lower["filename"]
-                if target.exists() and not target.is_dir():
-                    try:
-                        target.unlink()
-                    except Exception:
-                        pass
-
-            # Suppress URL so it is never downloaded again
-            if lower["source_url"]:
-                add_suppressed_url(lower["source_url"], reason="duplicate_lower_quality")
-            if lower["page_url"]:
-                add_suppressed_url(lower["page_url"], reason="duplicate_lower_quality")
-
-            # Remove from DB
-            delete_wallpaper(lower["phash"])
-            increment_stat("duplicates_replaced")
-            log.info(
-                "Deduplication: Kept higher quality %s (%dx%d), removed lower %s (%dx%d)",
-                higher["filename"],
-                higher["width"],
-                higher["height"],
-                lower["filename"],
-                lower["width"],
-                lower["height"],
-            )
-
-    if removed_count > 0:
-        export_catalog_json()
-        log.info("Deduplicated already downloaded images: %d lower quality copies removed.", removed_count)
-
-    return removed_count
+# ══════════════════════════════════════════════════════════════════════════
+# Stats
+# ══════════════════════════════════════════════════════════════════════════
 
 
-def pop_download_item(source: Optional[str] = None) -> Optional[dict]:
-    """Remove and return the next download item (FIFO), optionally filtered by source."""
-    with get_db() as conn:
-        if source and source != "both":
-            row = conn.execute(
-                "SELECT * FROM download_queue WHERE source = ? ORDER BY id ASC LIMIT 1",
-                (source,),
-            ).fetchone()
-        else:
-            row = conn.execute(
-                "SELECT * FROM download_queue ORDER BY id ASC LIMIT 1"
-            ).fetchone()
-        if row:
-            conn.execute("DELETE FROM download_queue WHERE id = ?", (row["id"],))
-            return dict(row)
-    return None
-
-
-def re_enqueue_with_retry(item: dict, max_retries: int) -> None:
-    """Put a failed item back with incremented retry count, or drop it."""
-    item["retries"] = item.get("retries", 0) + 1
-    if item["retries"] <= max_retries:
-        item["added_at"] = datetime.now(timezone.utc).isoformat()
-        with get_db() as conn:
-            conn.execute(
-                """INSERT OR REPLACE INTO download_queue
-                       (image_url, page_url, title, source, tags, date_spotted, added_at, retries)
-                   VALUES (:image_url, :page_url, :title, :source, :tags, :date_spotted, :added_at, :retries)""",
-                item,
-            )
-
-
-def download_queue_size(source: Optional[str] = None) -> int:
-    """Return remaining download items count, optionally filtered by source."""
-    with get_db() as conn:
-        if source and source != "both":
-            return conn.execute("SELECT COUNT(*) FROM download_queue WHERE source = ?", (source,)).fetchone()[0]
-        return conn.execute("SELECT COUNT(*) FROM download_queue").fetchone()[0]
-
-
-
-
-# ── Stats ───────────────────────────────────────────────────────────────────
-
-def get_stats() -> dict:
+def get_stats() -> dict[str, str]:
     with get_db() as conn:
         rows = conn.execute("SELECT key, value FROM stats").fetchall()
     return {r["key"]: r["value"] for r in rows}
 
 
-def set_stat(key: str, value: str | int) -> None:
+def get_stat(key: str, default: str = "") -> str:
     with get_db() as conn:
-        conn.execute(
-            "INSERT OR REPLACE INTO stats(key, value) VALUES(?, ?)", (key, str(value))
-        )
+        row = conn.execute("SELECT value FROM stats WHERE key = ?", (key,)).fetchone()
+    return row["value"] if row else default
+
+
+def set_stat(key: str, value: str | int) -> None:
+    with get_db(write=True) as conn:
+        conn.execute("INSERT OR REPLACE INTO stats(key, value) VALUES (?, ?)", (key, str(value)))
 
 
 def increment_stat(key: str, by: int = 1) -> int:
-    with get_db() as conn:
+    with get_db(write=True) as conn:
         conn.execute(
-            "UPDATE stats SET value = CAST(value AS INTEGER) + ? WHERE key = ?",
-            (by, key),
+            "INSERT INTO stats(key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = CAST(value AS INTEGER) + ?",
+            (key, str(by), by),
         )
         row = conn.execute("SELECT value FROM stats WHERE key = ?", (key,)).fetchone()
     return int(row["value"]) if row else 0
 
 
+KNOWN_SOURCES = ("peapix", "win10spotlight")
+
+
 def get_source_stats() -> dict:
-    """Return available wallpaper counts and discovered/queue stats per source."""
+    """Per-source library, queue and scrape-page counts (drives the dashboard)."""
     with get_db() as conn:
-        wp_rows = conn.execute("SELECT source, COUNT(*) as cnt FROM wallpapers GROUP BY source").fetchall()
-        dl_rows = conn.execute("SELECT source, COUNT(*) as cnt FROM download_queue GROUP BY source").fetchall()
-        sq_rows = conn.execute("SELECT source, COUNT(*) as cnt FROM scrape_queue GROUP BY source").fetchall()
-        total_wp = conn.execute("SELECT COUNT(*) FROM wallpapers").fetchone()[0]
-
-    wp_map = {r["source"]: r["cnt"] for r in wp_rows}
-    dl_map = {r["source"]: r["cnt"] for r in dl_rows}
-    sq_map = {r["source"]: r["cnt"] for r in sq_rows}
-
+        wp = {r["source"]: r["cnt"] for r in conn.execute(
+            "SELECT source, COUNT(*) AS cnt FROM wallpapers GROUP BY source")}
+        dl = {r["source"]: r["cnt"] for r in conn.execute(
+            "SELECT source, COUNT(*) AS cnt FROM download_queue GROUP BY source")}
+        sq = {r["source"]: r["cnt"] for r in conn.execute(
+            "SELECT source, COUNT(*) AS cnt FROM scrape_queue GROUP BY source")}
+    total = sum(wp.values())
     sources = {}
-    known_sources = sorted(set(list(wp_map.keys()) + list(dl_map.keys()) + ["peapix", "win10spotlight"]))
-    for src in known_sources:
-        avail = wp_map.get(src, 0)
-        queued = dl_map.get(src, 0)
-        total_discovered = avail + queued
-        pct = round((avail / total_wp * 100), 1) if total_wp > 0 else 0.0
+    for src in sorted({*wp, *dl, *KNOWN_SOURCES}):
+        available, queued = wp.get(src, 0), dl.get(src, 0)
         sources[src] = {
-            "available": avail,
+            "available": available,
             "queued": queued,
-            "scrape_pages": sq_map.get(src, 0),
-            "total_discovered": total_discovered,
-            "pct_of_total": pct,
+            "scrape_pages": sq.get(src, 0),
+            "total_discovered": available + queued,
+            "pct_of_total": round(available / total * 100, 1) if total else 0.0,
         }
-
-    return {
-        "total_available": total_wp,
-        "sources": sources,
-    }
-
+    return {"total_available": total, "sources": sources}

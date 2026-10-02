@@ -1,11 +1,17 @@
-# Windows Spotlight Downloader – Python dependencies
-# Install with: pip install -r requirements.txt
+# Spotlight Studio – runtime dependencies
+# Install with:  pip install -r requirements.txt
+#
+# Version ranges are intentionally compatible (>=, <next-major) rather than hard pins:
+# the app is pure Python on top of widely used libraries.  For fully reproducible
+# installs create a lock file with `pip freeze > requirements.lock`.
+#
+# NOTE: `imagehash` (and therefore NumPy + SciPy, ~50 MB) is no longer required –
+# the 256-bit dHash is implemented in src/hashing.py with bit-identical output.
 
-aiohttp>=3.9
-beautifulsoup4>=4.12
-fastapi>=0.110
-imagehash>=4.3
+aiohttp>=3.9,<4
+beautifulsoup4>=4.12,<5
+fastapi>=0.110,<1
 Pillow>=10.0
-python-dotenv>=1.0
-uvicorn[standard]>=0.29
+python-dotenv>=1.0,<2
+uvicorn>=0.29,<1
 pywebview>=5.0; sys_platform == "win32"

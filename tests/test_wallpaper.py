@@ -1,0 +1,96 @@
+from __future__ import annotations
+
+import subprocess
+
+import pytest
+
+from src import wallpaper
+from src.wallpaper import UnsupportedPlatform, WallpaperError, set_desktop_wallpaper
+
+
+@pytest.fixture()
+def image(tmp_path):
+    path = tmp_path / "wall paper.jpg"
+    path.write_bytes(b"jpeg")
+    return path
+
+
+class Recorder:
+    def __init__(self, returncode=0, stderr=""):
+        self.calls, self.returncode, self.stderr = [], returncode, stderr
+
+    def __call__(self, cmd, **_kwargs):
+        self.calls.append(cmd)
+        return subprocess.CompletedProcess(cmd, self.returncode, stdout="", stderr=self.stderr)
+
+
+def test_missing_file_is_a_clear_error(tmp_path):
+    with pytest.raises(WallpaperError, match="does not exist"):
+        set_desktop_wallpaper(tmp_path / "nope.jpg")
+
+
+def test_windows_dispatch(image, monkeypatch):
+    seen = []
+    monkeypatch.setattr(wallpaper.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(wallpaper, "_set_windows", lambda path: seen.append(path))
+    set_desktop_wallpaper(image)
+    assert seen == [image.resolve()]
+
+
+def test_macos_uses_osascript_and_escapes_quotes(tmp_path, monkeypatch):
+    tricky = tmp_path / 'my "best" pic.jpg'
+    tricky.write_bytes(b"x")
+    rec = Recorder()
+    monkeypatch.setattr(wallpaper.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(wallpaper.subprocess, "run", rec)
+    set_desktop_wallpaper(tricky)
+    (cmd,) = rec.calls
+    assert cmd[0] == "osascript" and 'my \\"best\\" pic.jpg' in cmd[2]
+
+
+def test_gnome_sets_light_and_dark_uris(image, monkeypatch):
+    rec = Recorder()
+    monkeypatch.setattr(wallpaper.platform, "system", lambda: "Linux")
+    monkeypatch.setenv("XDG_CURRENT_DESKTOP", "GNOME")
+    monkeypatch.setattr(wallpaper.shutil, "which", lambda name: f"/usr/bin/{name}" if name == "gsettings" else None)
+    monkeypatch.setattr(wallpaper.subprocess, "run", rec)
+    set_desktop_wallpaper(image)
+    keys = [c[3] for c in rec.calls]
+    assert keys == ["picture-uri", "picture-uri-dark"]
+    assert all(c[:3] == ["gsettings", "set", "org.gnome.desktop.background"] for c in rec.calls)
+    assert rec.calls[0][4].startswith("file:///") and "wall%20paper.jpg" in rec.calls[0][4]
+
+
+def test_kde_prefers_plasma_tool(image, monkeypatch):
+    rec = Recorder()
+    monkeypatch.setattr(wallpaper.platform, "system", lambda: "Linux")
+    monkeypatch.setenv("XDG_CURRENT_DESKTOP", "KDE")
+    monkeypatch.setattr(wallpaper.shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(wallpaper.subprocess, "run", rec)
+    set_desktop_wallpaper(image)
+    assert rec.calls == [["plasma-apply-wallpaperimage", str(image.resolve())]]
+
+
+def test_unsupported_environments(image, monkeypatch):
+    monkeypatch.setattr(wallpaper.platform, "system", lambda: "Linux")
+    monkeypatch.setenv("XDG_CURRENT_DESKTOP", "i3")
+    monkeypatch.setattr(wallpaper.shutil, "which", lambda name: None)
+    with pytest.raises(UnsupportedPlatform):
+        set_desktop_wallpaper(image)
+    monkeypatch.setattr(wallpaper.platform, "system", lambda: "Plan9")
+    with pytest.raises(UnsupportedPlatform, match="Plan9"):
+        set_desktop_wallpaper(image)
+
+
+def test_command_failures_become_wallpaper_errors(image, monkeypatch):
+    monkeypatch.setattr(wallpaper.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(wallpaper.subprocess, "run", Recorder(returncode=1, stderr="not allowed"))
+    with pytest.raises(WallpaperError, match="not allowed"):
+        set_desktop_wallpaper(image)
+
+    def missing(*_a, **_k):
+        raise FileNotFoundError("osascript")
+
+    monkeypatch.setattr(wallpaper.subprocess, "run", missing)
+    with pytest.raises(WallpaperError, match="Could not run"):
+        set_desktop_wallpaper(image)
