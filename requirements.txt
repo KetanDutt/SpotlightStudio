@@ -9,7 +9,7 @@
 # the 256-bit dHash is implemented in src/hashing.py with bit-identical output.
 
 aiohttp>=3.9,<4
-beautifulsoup4>=4.12,<5
+beautifulsoup4>=4.15.0,<5
 fastapi>=0.110,<1
 Pillow>=10.0
 python-dotenv>=1.0,<2
