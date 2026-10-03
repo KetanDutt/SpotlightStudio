@@ -13,5 +13,5 @@ beautifulsoup4>=4.12,<5
 fastapi>=0.110,<1
 Pillow>=10.0
 python-dotenv>=1.0,<2
-uvicorn>=0.29,<1
+uvicorn>=0.54.0,<1
 pywebview>=5.0; sys_platform == "win32"
