@@ -1,53 +1,21 @@
 @echo off
-setlocal enabledelayedexpansion
-title Spotlight Studio — Desktop
-echo.
-echo  =====================================================
-echo   Spotlight Studio — Apple Liquid Glass Edition
-echo  =====================================================
-echo.
-
+setlocal EnableExtensions
+title Spotlight Studio
 cd /d "%~dp0"
 
-REM Check if Python is installed
-python --version >nul 2>&1
-if errorlevel 1 (
-    echo  ERROR: Python is not installed or not in your system PATH.
-    echo  Please install Python 3.10+ from https://www.python.org/
-    echo.
-    pause
-    exit /b 1
-)
+echo.
+echo  =====================================================
+echo   Spotlight Studio - Desktop
+echo  =====================================================
+echo.
 
-REM Check if virtual environment exists
-if not exist "venv\Scripts\activate.bat" (
-    echo  Virtual environment not found. Setting up venv...
-    python -m venv venv
-    if errorlevel 1 (
-        echo  ERROR: Failed to create virtual environment.
-        pause
-        exit /b 1
-    )
-    echo  Installing dependencies from requirements.txt...
-    call "venv\Scripts\activate.bat"
-    pip install --upgrade pip
-    pip install -r requirements.txt
-    if errorlevel 1 (
-        echo  ERROR: Failed to install dependencies.
-        pause
-        exit /b 1
-    )
-    echo  Setup completed successfully!
-    echo.
-)
+call scripts\setup_env.bat
+if errorlevel 1 ( pause & exit /b 1 )
 
-REM Activate venv and run main.py
-call "venv\Scripts\activate.bat"
-echo  Starting Spotlight Studio...
-python main.py
+"%VENV_PY%" main.py %*
 if errorlevel 1 (
     echo.
-    echo  Application stopped with an error code. Check data\downloader.log for details.
+    echo  The application stopped with an error. Details: data\downloader.log
     echo.
     pause
 )

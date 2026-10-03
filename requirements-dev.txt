@@ -1,0 +1,8 @@
+# Development / CI tooling:  pip install -r requirements-dev.txt
+-r requirements.txt
+
+pytest>=8.0
+httpx>=0.27      # FastAPI TestClient
+ruff>=0.5
+imagehash>=4.3   # reference for tests/test_hashing.py: proves src/hashing.py is bit-identical
+                 # (dev only – it drags in NumPy/SciPy, which the app itself no longer needs)

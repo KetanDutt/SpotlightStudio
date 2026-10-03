@@ -1,22 +1,18 @@
 """
-api.py – FastAPI application.
+api.py – FastAPI application: REST API, static files and the single-page UI.
 
-Endpoints
----------
-GET  /                              → Serve the dashboard HTML
-GET  /api/status                    → Live engine stats
-POST /api/control/start             → Start / resume the download engine
-POST /api/control/pause             → Pause the engine (queue persists)
-POST /api/control/stop              → Stop the engine (queue persists)
-GET  /api/wallpapers                → Paginated, filtered, sorted wallpaper list
-GET  /api/wallpapers/{id}           → Single wallpaper detail
-GET  /api/wallpapers/{id}/image     → Redirect to the full-resolution image file
-POST /api/wallpapers/{id}/set-wallpaper → Set image as Windows desktop wallpaper
-GET  /api/export/json               → Download all metadata as JSON
-GET  /api/export/csv                → Download all metadata as CSV
-GET  /api/health                    → System health check
-POST /api/catalog/sync              → Sync data/wallpapers.json
-GET  /api/stats/sources             → Per-source wallpaper stats
+The app is built by :func:`create_app` (tests create isolated instances); the module
+level :data:`app` is what ``uvicorn`` serves.
+
+Routes
+------
+UI           ``/``  ``/sw.js``  ``/manifest.webmanifest``  ``/static/*``  ``/images/*``
+             ``/data/wallpapers.json``  (only the catalog – never the DB or the log)
+Engine       ``/api/health``  ``/api/status``  ``/api/control/{start,pause,stop}``
+Library      ``/api/wallpapers``  ``/api/wallpapers/random``  ``/api/wallpapers/{id}``
+             ``/api/tags``  ``/api/catalog``  ``/api/export/{json,csv}``  ``/api/catalog/sync``
+Desktop      ``/api/wallpapers/{id}/set-wallpaper``  ``/api/wallpapers/{id}/image``
+Maintenance  ``/api/library/check``  ``/api/maintenance/{dedupe,thumbnails}``
 """
 from __future__ import annotations
 
@@ -24,343 +20,589 @@ import csv
 import io
 import json
 import logging
-import os
-import sys
-from pathlib import Path
+from collections.abc import Iterator
+from contextlib import asynccontextmanager
+from datetime import datetime, timezone
+from typing import Literal
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Path, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import (
     FileResponse,
-    HTMLResponse,
     JSONResponse,
+    RedirectResponse,
+    Response,
     StreamingResponse,
 )
-from fastapi.staticfiles import StaticFiles
-from contextlib import asynccontextmanager
+from pydantic import BaseModel
+from starlette.middleware.gzip import GZipMiddleware
+from starlette.staticfiles import StaticFiles
+from starlette.types import ASGIApp, Receive, Scope, Send
 
-from src.config import settings, Settings
+from src import maintenance, storage
+from src.config import ROOT, Settings, settings
 from src.database import (
+    build_catalog,
+    close_connection,
+    count_wallpapers,
     download_queue_size,
     export_catalog_json,
     get_all_wallpapers,
-    get_db,
+    get_random_wallpaper,
     get_source_stats,
     get_stats,
-    init_db,
+    get_tag_counts,
+    get_wallpaper,
+    iter_wallpapers,
+    library_signature,
     scrape_queue_size,
-    seed_scrape_queue,
 )
-from src.engine import engine
+from src.downloader import shutdown_cpu_pool
+from src.engine import DownloadEngine, EngineBusy, engine
+from src.security import HostCheckMiddleware, OriginCheckMiddleware, SecurityHeadersMiddleware
+from src.utils import csv_safe, is_lfs_pointer
+from src.wallpaper import UnsupportedPlatform, WallpaperError, set_desktop_wallpaper
 
 log = logging.getLogger("api")
 
-ROOT = Path(__file__).resolve().parents[1]
+SortField = Literal["downloaded_at", "date_spotted", "width", "height", "file_size", "title"]
+SourceFilter = Literal["both", "peapix", "win10spotlight"]
+QualityFilter = Literal["", "4k", "2k", "fhd", "hd", "sd"]
 
-
-# ── Lifespan (replaces deprecated on_event) ─────────────────────────────────
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # Startup
-    init_db()
-    seed_scrape_queue(settings.PEAPIX_TOTAL_PAGES, settings.WIN10_TOTAL_PAGES)
-    log.info("✓ Database initialised – scrape queue has %d pages", scrape_queue_size())
-    yield
-    # Shutdown
-    engine.stop()
-    log.info("Engine stopped.")
-
-
-# ── App ───────────────────────────────────────────────────────────────────────
-
-app = FastAPI(
-    title="Windows Spotlight Downloader",
-    description="Download, organise, and browse high-quality Windows Spotlight wallpapers.",
-    version=Settings.VERSION,
-    docs_url="/api/docs",
-    redoc_url="/api/redoc",
-    lifespan=lifespan,
+CSV_COLUMNS = (
+    "id", "phash", "filename", "title", "source", "source_url", "page_url",
+    "width", "height", "file_size", "tags", "date_spotted", "downloaded_at", "quality",
 )
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
-# ── Static mounts ─────────────────────────────────────────────────────────────
-
-(ROOT / "static").mkdir(parents=True, exist_ok=True)
-settings.IMAGES_DIR.mkdir(parents=True, exist_ok=True)
-(ROOT / "data").mkdir(parents=True, exist_ok=True)
-
-app.mount("/static", StaticFiles(directory=str(ROOT / "static")), name="static")
-app.mount("/images", StaticFiles(directory=str(settings.IMAGES_DIR)), name="images")
-app.mount("/data", StaticFiles(directory=str(ROOT / "data")), name="data")
+# ══════════════════════════════════════════════════════════════════════════
+# Response models (they drive the OpenAPI documentation)
+# ══════════════════════════════════════════════════════════════════════════
 
 
-# ── Pages ─────────────────────────────────────────────────────────────────────
-
-@app.get("/", response_class=HTMLResponse, include_in_schema=False)
-async def index():
-    root_index = ROOT / "index.html"
-    if root_index.exists():
-        return FileResponse(str(root_index))
-    return FileResponse(str(ROOT / "templates" / "index.html"))
-
-
-@app.get("/sw.js", include_in_schema=False)
-async def service_worker():
-    sw_file = ROOT / "sw.js"
-    if sw_file.exists():
-        return FileResponse(str(sw_file), media_type="application/javascript")
-    raise HTTPException(status_code=404, detail="Service worker not found")
-
+class WallpaperModel(BaseModel):
+    id: int
+    phash: str
+    filename: str
+    title: str
+    source: str
+    source_url: str
+    page_url: str
+    width: int
+    height: int
+    file_size: int
+    tags: str
+    date_spotted: str
+    downloaded_at: str
+    quality: str
 
 
-# ── Control ───────────────────────────────────────────────────────────────────
-
-@app.post("/api/control/start", tags=["Control"], summary="Start / resume download")
-def start_download(
-    source: str = Query("both", description="Download source provider: 'peapix', 'win10spotlight', or 'both'"),
-) -> dict:
-    """Start the download engine with the specified source (idempotent if already running)."""
-    engine.start(source=source)
-    return {
-        "status": engine.status,
-        "active_source": engine.active_source,
-    }
+class WallpaperPage(BaseModel):
+    total: int
+    page: int
+    per_page: int
+    pages: int
+    wallpapers: list[WallpaperModel]
 
 
-@app.post("/api/control/pause", tags=["Control"], summary="Pause download")
-def pause_download() -> dict:
-    """Pause the engine; the queue is preserved."""
-    engine.pause()
-    return {
-        "status": engine.status,
-        "active_source": engine.active_source,
-    }
+class HealthResponse(BaseModel):
+    status: str
+    version: str
+    engine_status: str
+    library_count: int
+    downloaded_count: int
+    scrape_queue_size: int
+    download_queue_size: int
+    lfs_pointers_detected: bool
+    time: str
 
 
-@app.post("/api/control/stop", tags=["Control"], summary="Stop download")
-def stop_download() -> dict:
-    """Stop the engine; the queue is preserved and can be resumed with start."""
-    engine.stop()
-    return {
-        "status": engine.status,
-        "active_source": engine.active_source,
-    }
+class ControlResponse(BaseModel):
+    action: str
+    result: str
+    status: str
+    active_source: str
+    mode: str
 
 
-# ── Status ────────────────────────────────────────────────────────────────────
-
-@app.get("/api/status", tags=["Status"], summary="Engine stats")
-def get_status() -> dict:
-    """Return live download statistics and engine state."""
-    stats = get_stats()
-    downloaded = int(stats.get("downloaded_count", 0))
-
-    if engine.active_source == "peapix":
-        total_estimated = settings.PEAPIX_TOTAL_PAGES * 40
-    elif engine.active_source == "win10spotlight":
-        total_estimated = settings.WIN10_TOTAL_PAGES * 4
-    else:
-        total_estimated = settings.PEAPIX_TOTAL_PAGES * 40 + settings.WIN10_TOTAL_PAGES * 4
-
-    target_src = None if engine.active_source == "both" else engine.active_source
-    scrape_remaining = scrape_queue_size(source=target_src)
-    dl_remaining = download_queue_size(source=target_src)
-
-    progress_pct = 0.0
-    if total_estimated > 0 and downloaded > 0:
-        progress_pct = min(100.0, round(downloaded / total_estimated * 100, 1))
-
-    return {
-        "engine_status": engine.status,
-        "active_source": engine.active_source,
-        "phase": stats.get("phase", "Idle"),
-        "scraped_count": int(stats.get("scraped_count", 0)),
-        "downloaded_count": downloaded,
-        "duplicates_skipped": int(stats.get("duplicates_skipped", 0)),
-        "duplicates_replaced": int(stats.get("duplicates_replaced", 0)),
-        "errors": int(stats.get("errors", 0)),
-        "scrape_queue_remaining": scrape_remaining,
-        "download_queue_remaining": dl_remaining,
-        "progress_pct": progress_pct,
-        "source_stats": get_source_stats(),
-        # Concurrency configuration (informational)
-        "config": {
-            "concurrent_downloads": settings.CONCURRENT_DOWNLOADS,
-            "concurrent_scrapers": settings.CONCURRENT_SCRAPERS,
-            "max_connections": settings.MAX_CONNECTIONS,
-            "max_connections_per_host": settings.MAX_CONNECTIONS_PER_HOST,
-        },
-    }
+class StatusResponse(BaseModel):
+    engine_status: str
+    active_source: str
+    mode: str
+    phase: str
+    progress_pct: int
+    rate_per_sec: float
+    breaker_active: bool
+    scraped_count: int
+    downloaded_count: int
+    duplicates_skipped: int
+    duplicates_replaced: int
+    errors: int
+    library_count: int
+    library_signature: str
+    scrape_queue_remaining: int
+    download_queue_remaining: int
+    run: dict
+    last_run: dict | None
+    source_stats: dict
+    config: dict
 
 
-@app.get("/api/stats/sources", tags=["Status"], summary="Source availability stats")
-def get_sources_status() -> dict:
-    """Return available and discovered/queue wallpaper counts grouped by source provider."""
-    return get_source_stats()
+class SetWallpaperResponse(BaseModel):
+    success: bool
+    path: str
 
 
-# ── Wallpapers ────────────────────────────────────────────────────────────────
-
-@app.get("/api/wallpapers", tags=["Wallpapers"], summary="List wallpapers")
-def list_wallpapers(
-    page: int = Query(1, ge=1, description="Page number"),
-    per_page: int = Query(48, ge=1, le=200, description="Items per page"),
-    search: str = Query("", description="Search title or tags"),
-    source: str = Query("", description="Filter by source (peapix | win10spotlight)"),
-    sort: str = Query("downloaded_at", description="Sort field"),
-    order: str = Query("DESC", description="ASC or DESC"),
-) -> dict:
-    wallpapers, total = get_all_wallpapers(
-        page=page, per_page=per_page,
-        search=search, source=source,
-        sort=sort, order=order,
-    )
-    pages = max(1, (total + per_page - 1) // per_page)
-    return {
-        "total": total,
-        "page": page,
-        "per_page": per_page,
-        "pages": pages,
-        "wallpapers": wallpapers,
-    }
+class CatalogSyncResponse(BaseModel):
+    success: bool
+    wallpapers_synced: int
+    path: str
 
 
-@app.get("/api/wallpapers/{wallpaper_id}", tags=["Wallpapers"], summary="Get one wallpaper")
-def get_wallpaper(wallpaper_id: int) -> dict:
-    with get_db() as conn:
-        row = conn.execute(
-            "SELECT * FROM wallpapers WHERE id = ?", (wallpaper_id,)
-        ).fetchone()
-    if not row:
-        raise HTTPException(status_code=404, detail="Wallpaper not found")
-    return dict(row)
+class TagCount(BaseModel):
+    tag: str
+    count: int
 
 
-# ── Export ────────────────────────────────────────────────────────────────────
-
-@app.get("/api/export/json", tags=["Export"], summary="Export metadata as JSON")
-def export_json() -> FileResponse:
-    """Download all wallpaper metadata as a JSON file."""
-    # Use the already-maintained static catalog file for efficiency
-    catalog_path = settings.DB_PATH.parent / "wallpapers.json"
-    if not catalog_path.exists():
-        export_catalog_json()
-    if not catalog_path.exists():
-        raise HTTPException(status_code=503, detail="Catalog not available")
-    return FileResponse(
-        str(catalog_path),
-        media_type="application/json",
-        filename="spotlight_wallpapers.json",
-    )
+# ══════════════════════════════════════════════════════════════════════════
+# Static file helpers
+# ══════════════════════════════════════════════════════════════════════════
 
 
-@app.get("/api/export/csv", tags=["Export"], summary="Export metadata as CSV")
-def export_csv() -> StreamingResponse:
-    """Download all wallpaper metadata as a CSV file."""
-    wallpapers, _ = get_all_wallpapers(page=1, per_page=999_999)
-    output = io.StringIO()
-    if wallpapers:
-        writer = csv.DictWriter(output, fieldnames=wallpapers[0].keys())
-        writer.writeheader()
-        writer.writerows(wallpapers)
-    output.seek(0)
-    return StreamingResponse(
-        output,
-        media_type="text/csv",
-        headers={"Content-Disposition": "attachment; filename=spotlight_wallpapers.csv"},
-    )
+class ImmutableStaticFiles(StaticFiles):
+    """Wallpaper files are content-addressed and never change → cache forever."""
+
+    async def get_response(self, path: str, scope: Scope) -> Response:
+        response = await super().get_response(path, scope)
+        if response.status_code == 200:
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        return response
 
 
-# ── Windows-specific: Set wallpaper ──────────────────────────────────────────
+class RevalidatingStaticFiles(StaticFiles):
+    """UI assets: always revalidate (cheap 304) so an update is never masked by a stale cache."""
 
-@app.post(
-    "/api/wallpapers/{wallpaper_id}/set-wallpaper",
-    tags=["Wallpapers"],
-    summary="Set as desktop wallpaper (Windows only)",
-)
-def set_desktop_wallpaper(wallpaper_id: int) -> dict:
-    """Set the specified wallpaper as the Windows desktop background."""
-    if sys.platform != "win32":
-        raise HTTPException(status_code=400, detail="Only supported on Windows.")
+    async def get_response(self, path: str, scope: Scope) -> Response:
+        response = await super().get_response(path, scope)
+        if response.status_code == 200:
+            response.headers["Cache-Control"] = "no-cache"
+        return response
 
-    with get_db() as conn:
-        row = conn.execute(
-            "SELECT filename FROM wallpapers WHERE id = ?", (wallpaper_id,)
-        ).fetchone()
-    if not row:
-        raise HTTPException(status_code=404, detail="Wallpaper not found")
 
-    target_path = settings.IMAGES_DIR / row["filename"]
-    if not target_path.exists() or target_path.is_dir():
-        flat_path = settings.IMAGES_DIR / Path(row["filename"]).name
-        if flat_path.exists() and not flat_path.is_dir():
-            target_path = flat_path
+class SelectiveGZipMiddleware:
+    """GZip everything except ``/images`` (already-compressed JPEGs)."""
+
+    def __init__(self, app: ASGIApp, minimum_size: int = 1024) -> None:
+        self.app = app
+        self.gzip = GZipMiddleware(app, minimum_size=minimum_size)
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "http" and not scope["path"].startswith("/images/"):
+            await self.gzip(scope, receive, send)
         else:
-            raise HTTPException(status_code=404, detail="Image file not found on disk.")
-    filepath = str(target_path.resolve())
+            await self.app(scope, receive, send)
 
-    try:
-        import ctypes
-        SPI_SETDESKWALLPAPER = 0x0014
-        SPIF_UPDATEINIFILE = 0x01
-        SPIF_SENDCHANGE = 0x02
-        result = ctypes.windll.user32.SystemParametersInfoW(
-            SPI_SETDESKWALLPAPER, 0, filepath,
-            SPIF_UPDATEINIFILE | SPIF_SENDCHANGE,
+
+# ══════════════════════════════════════════════════════════════════════════
+# Application factory
+# ══════════════════════════════════════════════════════════════════════════
+
+_DESCRIPTION = """
+REST API of **Spotlight Studio** – a Windows Spotlight wallpaper archive.
+
+* Browse / search the library: `GET /api/wallpapers`, `GET /api/tags`, `GET /api/catalog`
+* Control the crawler: `POST /api/control/{start,pause,stop}`, `GET /api/status`
+* Export the data: `GET /api/export/json`, `GET /api/export/csv`
+
+The API is meant for **local use**: it has no authentication and refuses cross-origin
+state-changing requests and unknown Host headers (see `docs/SECURITY.md`).
+"""
+
+
+def create_app(cfg: Settings = settings, eng: DownloadEngine = engine) -> FastAPI:
+    """Build the FastAPI application bound to ``cfg`` and ``eng``."""
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        maintenance.startup_tasks()
+        if not cfg.is_loopback_host and not cfg.ALLOWED_HOSTS:
+            log.warning(
+                "The server listens on %s without authentication. Anyone who can reach this "
+                "port can control the crawler. Restrict access with ALLOWED_HOSTS or a firewall.",
+                cfg.HOST,
+            )
+        yield
+        eng.shutdown(timeout=20)
+        shutdown_cpu_pool()
+        close_connection()
+
+    app = FastAPI(
+        title="Spotlight Studio API",
+        description=_DESCRIPTION,
+        version=cfg.VERSION,
+        docs_url="/api/docs",
+        redoc_url="/api/redoc",
+        openapi_url="/api/openapi.json",
+        lifespan=lifespan,
+    )
+
+    # Middleware: the LAST one added is the OUTERMOST.
+    app.add_middleware(SelectiveGZipMiddleware)
+    if cfg.CORS_ORIGINS:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=cfg.CORS_ORIGINS,
+            allow_methods=["GET", "POST"],
+            allow_headers=["Content-Type"],
         )
-        if not result:
-            raise RuntimeError("SystemParametersInfoW returned 0")
-        return {"success": True, "path": filepath}
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to set wallpaper: {exc}")
+    app.add_middleware(OriginCheckMiddleware, allowed_origins=cfg.CORS_ORIGINS)
+    app.add_middleware(HostCheckMiddleware, get_allowed=cfg.allowed_hosts)
+    app.add_middleware(SecurityHeadersMiddleware)
+
+    @app.exception_handler(EngineBusy)
+    async def _engine_busy(_request: Request, exc: EngineBusy) -> JSONResponse:
+        return JSONResponse({"detail": str(exc)}, status_code=409)
+
+    # ── Health & status ───────────────────────────────────────────────────
+
+    @app.get("/api/health", response_model=HealthResponse, tags=["System"], summary="Health check")
+    def health_check() -> dict:
+        """Liveness probe with the most important numbers."""
+        library = count_wallpapers()
+        pointers, inspected = storage.count_lfs_pointers(sample=10)
+        return {
+            "status": "healthy",
+            "version": cfg.VERSION,
+            "engine_status": eng.status,
+            "library_count": library,
+            "downloaded_count": library,
+            "scrape_queue_size": scrape_queue_size(),
+            "download_queue_size": download_queue_size(),
+            "lfs_pointers_detected": bool(inspected and pointers),
+            "time": datetime.now(timezone.utc).isoformat(),
+        }
+
+    @app.get("/api/status", response_model=StatusResponse, tags=["Engine"], summary="Engine status")
+    def get_status() -> dict:
+        """Live engine state, cumulative counters and queue sizes (polled by the UI)."""
+        stats = get_stats()
+        snap = eng.snapshot()
+        target = None if eng.active_source == "both" else eng.active_source
+        last_run = None
+        if stats.get("last_run_at"):
+            last_run = {
+                "at": stats.get("last_run_at"),
+                "mode": stats.get("last_run_mode", ""),
+                "source": stats.get("last_run_source", ""),
+                "result": stats.get("last_run_result", ""),
+                "downloaded": int(stats.get("last_run_downloaded", 0) or 0),
+                "duplicates": int(stats.get("last_run_duplicates", 0) or 0),
+                "errors": int(stats.get("last_run_errors", 0) or 0),
+                "repaired": int(stats.get("last_run_repaired", 0) or 0),
+                "seconds": int(stats.get("last_run_seconds", 0) or 0),
+            }
+        return {
+            "engine_status": snap["status"],
+            "active_source": snap["active_source"],
+            "mode": snap["mode"],
+            "phase": snap["phase"],
+            "progress_pct": snap["progress_pct"],
+            "rate_per_sec": snap["rate_per_sec"],
+            "breaker_active": snap["breaker_active"],
+            "scraped_count": int(stats.get("scraped_count", 0)),
+            "downloaded_count": int(stats.get("downloaded_count", 0)),
+            "duplicates_skipped": int(stats.get("duplicates_skipped", 0)),
+            "duplicates_replaced": int(stats.get("duplicates_replaced", 0)),
+            "errors": int(stats.get("errors", 0)),
+            "library_count": count_wallpapers(),
+            "library_signature": library_signature(),
+            "scrape_queue_remaining": scrape_queue_size(target),
+            "download_queue_remaining": download_queue_size(target),
+            "run": snap["run"],
+            "last_run": last_run,
+            "source_stats": get_source_stats(),
+            "config": {
+                "concurrent_downloads": cfg.CONCURRENT_DOWNLOADS,
+                "concurrent_scrapers": cfg.CONCURRENT_SCRAPERS,
+                "max_connections": cfg.MAX_CONNECTIONS,
+                "max_connections_per_host": cfg.MAX_CONNECTIONS_PER_HOST,
+                "quick_update_pages": cfg.QUICK_UPDATE_PAGES,
+            },
+        }
+
+    # ── Engine control ────────────────────────────────────────────────────
+
+    def _control(action: str, result: str) -> ControlResponse:
+        return ControlResponse(
+            action=action,
+            result=result,
+            status=eng.status,
+            active_source=eng.active_source,
+            mode=eng.mode,
+        )
+
+    @app.post("/api/control/start", response_model=ControlResponse, tags=["Engine"],
+              summary="Start / resume the crawler")
+    def control_start(
+        source: SourceFilter = Query("both", description="Which site(s) to crawl."),
+        mode: Literal["quick", "full", "repair"] = Query(
+            "full",
+            description="`quick` = newest pages only, `full` = every page, "
+            "`repair` = back-fill titles/tags of stored wallpapers.",
+        ),
+    ) -> ControlResponse:
+        """Start a run, resume a paused one, or switch the source of a running one."""
+        return _control("start", eng.start(source, mode))
+
+    @app.post("/api/control/pause", response_model=ControlResponse, tags=["Engine"],
+              summary="Pause the crawler")
+    def control_pause() -> ControlResponse:
+        """Stop dispatching new work.  Queues stay persisted in SQLite."""
+        eng.pause()
+        return _control("pause", "paused")
+
+    @app.post("/api/control/stop", response_model=ControlResponse, tags=["Engine"],
+              summary="Stop the crawler")
+    def control_stop() -> ControlResponse:
+        """Stop the run (`stopping` → `stopped`).  In-flight work is returned to the queue."""
+        eng.stop()
+        return _control("stop", "stopping")
+
+    # ── Library: listing & lookup ─────────────────────────────────────────
+
+    @app.get("/api/wallpapers", response_model=WallpaperPage, tags=["Wallpapers"],
+             summary="List wallpapers")
+    def list_wallpapers(
+        page: int = Query(1, ge=1),
+        per_page: int = Query(48, ge=1, le=200),
+        search: str = Query("", max_length=200,
+                            description="Space separated terms; all must match title, tag or date."),
+        source: str = Query("", max_length=40, description="`peapix` or `win10spotlight`."),
+        sort: SortField = Query("downloaded_at"),
+        order: Literal["ASC", "DESC", "asc", "desc"] = Query("DESC"),
+        tag: str = Query("", max_length=80, description="Exact tag."),
+        quality: QualityFilter = Query("", description="Resolution class."),
+    ) -> dict:
+        """Paginated, filtered and *deterministically ordered* wallpapers."""
+        rows, total = get_all_wallpapers(
+            page=page, per_page=per_page, search=search, source=source,
+            sort=sort, order=order, tag=tag, quality=quality,
+        )
+        return {
+            "total": total,
+            "page": page,
+            "per_page": per_page,
+            "pages": max(1, -(-total // per_page)),
+            "wallpapers": rows,
+        }
+
+    # NOTE: must be declared before ``/api/wallpapers/{wallpaper_id}``.
+    @app.get("/api/wallpapers/random", response_model=WallpaperModel, tags=["Wallpapers"],
+             summary="Random wallpaper")
+    def random_wallpaper(
+        search: str = Query("", max_length=200),
+        source: str = Query("", max_length=40),
+        tag: str = Query("", max_length=80),
+        quality: QualityFilter = Query(""),
+    ) -> dict:
+        """A random wallpaper, optionally restricted by the same filters as the list."""
+        row = get_random_wallpaper(search=search, source=source, tag=tag, quality=quality)
+        if not row:
+            raise HTTPException(status_code=404, detail="No wallpaper matches the filters.")
+        return row
+
+    @app.get("/api/wallpapers/{wallpaper_id}", response_model=WallpaperModel,
+             tags=["Wallpapers"], summary="Get one wallpaper")
+    def read_wallpaper(wallpaper_id: int = Path(..., ge=1)) -> dict:
+        row = get_wallpaper(wallpaper_id)
+        if not row:
+            raise HTTPException(status_code=404, detail="Wallpaper not found.")
+        return row
+
+    @app.get("/api/wallpapers/{wallpaper_id}/image", tags=["Wallpapers"],
+             summary="Redirect to the full-resolution image")
+    def wallpaper_image(wallpaper_id: int = Path(..., ge=1)) -> RedirectResponse:
+        row = get_wallpaper(wallpaper_id)
+        if not row:
+            raise HTTPException(status_code=404, detail="Wallpaper not found.")
+        return RedirectResponse(url=f"/images/{row['filename']}", status_code=302)
+
+    @app.get("/api/tags", response_model=list[TagCount], tags=["Wallpapers"],
+             summary="Most used tags")
+    def list_tags(
+        limit: int = Query(50, ge=1, le=500),
+        source: str = Query("", max_length=40),
+    ) -> list[dict]:
+        return [{"tag": t, "count": c} for t, c in get_tag_counts(source).most_common(limit)]
+
+    # ── Desktop integration ───────────────────────────────────────────────
+
+    @app.post("/api/wallpapers/{wallpaper_id}/set-wallpaper", response_model=SetWallpaperResponse,
+              tags=["Desktop"], summary="Set as desktop wallpaper")
+    def set_wallpaper(wallpaper_id: int = Path(..., ge=1)) -> dict:
+        """Apply the image as the desktop background (Windows; best effort on macOS/Linux)."""
+        row = get_wallpaper(wallpaper_id)
+        if not row:
+            raise HTTPException(status_code=404, detail="Wallpaper not found.")
+        try:
+            path = storage.image_path(row["filename"])
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="Invalid wallpaper path.") from exc
+        if not path.is_file():
+            raise HTTPException(status_code=404, detail="Image file is missing on disk.")
+        if is_lfs_pointer(path):
+            raise HTTPException(
+                status_code=409,
+                detail="This image is a Git LFS pointer. Run `git lfs install && git lfs pull`.",
+            )
+        try:
+            set_desktop_wallpaper(path)
+        except UnsupportedPlatform as exc:
+            raise HTTPException(status_code=501, detail=str(exc)) from exc
+        except WallpaperError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"success": True, "path": str(path)}
+
+    # ── Catalog & exports ─────────────────────────────────────────────────
+
+    catalog_cache: dict[str, tuple[bytes, str]] = {}
+
+    @app.get("/api/catalog", tags=["Catalog"], summary="Compact live catalog (ETag cached)")
+    def live_catalog(request: Request) -> Response:
+        """
+        The whole library as a compact JSON array (no perceptual hashes) – the same shape
+        as the static `data/wallpapers.json`.  Honors `If-None-Match`.
+        """
+        signature = library_signature()
+        cached = catalog_cache.get("entry")
+        if cached is None or cached[1] != signature:
+            payload, _count = build_catalog()
+            cached = (payload, signature)
+            catalog_cache["entry"] = cached
+        etag = f'W/"{cached[1]}"'
+        if request.headers.get("if-none-match") == etag:
+            return Response(status_code=304, headers={"ETag": etag, "Cache-Control": "no-cache"})
+        return Response(
+            cached[0], media_type="application/json",
+            headers={"ETag": etag, "Cache-Control": "no-cache"},
+        )
+
+    @app.get("/data/wallpapers.json", include_in_schema=False)
+    def static_catalog() -> Response:
+        """The static catalog file (the *only* file of ``data/`` that is public)."""
+        if not cfg.CATALOG_PATH.is_file():
+            export_catalog_json()
+        return FileResponse(cfg.CATALOG_PATH, media_type="application/json",
+                            headers={"Cache-Control": "no-cache"})
+
+    @app.post("/api/catalog/sync", response_model=CatalogSyncResponse, tags=["Catalog"],
+              summary="Regenerate data/wallpapers.json")
+    def catalog_sync() -> dict:
+        count = export_catalog_json()
+        try:
+            shown = str(cfg.CATALOG_PATH.relative_to(ROOT))
+        except ValueError:
+            shown = str(cfg.CATALOG_PATH)
+        return {"success": True, "wallpapers_synced": count, "path": shown.replace("\\", "/")}
+
+    @app.get("/api/export/json", tags=["Catalog"], summary="Download the full database as JSON")
+    def export_json() -> StreamingResponse:
+        """Every column of every wallpaper (streamed – constant memory)."""
+
+        def generate() -> Iterator[str]:
+            yield "["
+            first = True
+            for row in iter_wallpapers():
+                yield ("" if first else ",") + json.dumps(row, ensure_ascii=False)
+                first = False
+            yield "]"
+
+        return StreamingResponse(
+            generate(), media_type="application/json",
+            headers={"Content-Disposition": 'attachment; filename="spotlight_wallpapers.json"'},
+        )
+
+    @app.get("/api/export/csv", tags=["Catalog"], summary="Download the full database as CSV")
+    def export_csv() -> StreamingResponse:
+        """CSV with a UTF-8 BOM (Excel friendly); spreadsheet formulas are neutralised."""
+
+        def generate() -> Iterator[str]:
+            buffer = io.StringIO()
+            writer = csv.writer(buffer)
+            buffer.write("\ufeff")
+            writer.writerow(CSV_COLUMNS)
+            yield buffer.getvalue()
+            for row in iter_wallpapers():
+                buffer.seek(0)
+                buffer.truncate(0)
+                writer.writerow([csv_safe(row.get(col, "")) for col in CSV_COLUMNS])
+                yield buffer.getvalue()
+
+        return StreamingResponse(
+            generate(), media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": 'attachment; filename="spotlight_wallpapers.csv"'},
+        )
+
+    # ── Maintenance ───────────────────────────────────────────────────────
+
+    @app.get("/api/library/check", tags=["Maintenance"], summary="Library health report")
+    def library_check() -> dict:
+        """Read-only consistency report between the database and the files on disk."""
+        return maintenance.verify_library()
+
+    def _require_idle() -> None:
+        if eng.status != "stopped":
+            raise HTTPException(status_code=409, detail="Stop the crawler before running maintenance.")
+
+    @app.post("/api/maintenance/dedupe", tags=["Maintenance"], summary="Remove near-duplicates")
+    def maintenance_dedupe() -> dict:
+        _require_idle()
+        removed = maintenance.deduplicate_downloaded_wallpapers()
+        if removed:
+            export_catalog_json()
+        return {"removed": removed}
+
+    @app.post("/api/maintenance/thumbnails", tags=["Maintenance"],
+              summary="Rebuild missing thumbnails")
+    def maintenance_thumbnails() -> dict:
+        _require_idle()
+        return {"created": maintenance.create_missing_thumbnails()}
+
+    # ── UI & static assets ────────────────────────────────────────────────
+
+    @app.get("/", include_in_schema=False)
+    def index_page() -> Response:
+        page = ROOT / "index.html"
+        if not page.is_file():
+            return JSONResponse({"detail": "index.html is missing."}, status_code=404)
+        return FileResponse(page, media_type="text/html", headers={"Cache-Control": "no-cache"})
+
+    @app.get("/sw.js", include_in_schema=False)
+    def service_worker() -> Response:
+        return FileResponse(
+            ROOT / "sw.js", media_type="application/javascript",
+            headers={"Cache-Control": "no-cache", "Service-Worker-Allowed": "/"},
+        )
+
+    @app.get("/manifest.webmanifest", include_in_schema=False)
+    def manifest() -> Response:
+        return FileResponse(
+            ROOT / "manifest.webmanifest", media_type="application/manifest+json",
+            headers={"Cache-Control": "no-cache"},
+        )
+
+    @app.get("/favicon.ico", include_in_schema=False)
+    def favicon() -> Response:
+        icon = ROOT / "static" / "icons" / "favicon.svg"
+        if icon.is_file():
+            return FileResponse(icon, media_type="image/svg+xml")
+        return Response(status_code=204)
+
+    app.mount("/static", RevalidatingStaticFiles(directory=ROOT / "static", check_dir=False),
+              name="static")
+    app.mount("/images", ImmutableStaticFiles(directory=cfg.IMAGES_DIR, check_dir=False),
+              name="images")
+    return app
 
 
-# ── System & Utility Endpoints ────────────────────────────────────────────────
-
-@app.get("/api/health", tags=["System"], summary="System health check")
-def health_check() -> dict:
-    """
-    NOTE: Rate limiting is recommended for production.
-    """
-    """Return system operational status and queue counts."""
-    stats = get_stats()
-    return {
-        "status": "healthy",
-        "version": Settings.VERSION,
-        "engine_status": stats.get("status", "stopped"),
-        "downloaded_count": int(stats.get("downloaded_count", 0)),
-        "scrape_queue_size": scrape_queue_size(),
-        "download_queue_size": download_queue_size(),
-    }
-
-
-@app.post("/api/catalog/sync", tags=["System"], summary="Synchronize static catalog JSON")
-def sync_catalog() -> dict:
-    """Export all wallpapers to data/wallpapers.json for GitHub Pages & static web viewers."""
-    count = export_catalog_json()
-    return {
-        "success": True,
-        "wallpapers_synced": count,
-        "path": "data/wallpapers.json",
-    }
-
-
-from fastapi.responses import RedirectResponse
-
-@app.get("/api/wallpapers/{wallpaper_id}/image", tags=["Wallpapers"], summary="Get wallpaper image")
-def get_wallpaper_image(wallpaper_id: int) -> RedirectResponse:
-    """Redirect to the full-resolution wallpaper image file."""
-    with get_db() as conn:
-        row = conn.execute(
-            "SELECT filename FROM wallpapers WHERE id = ?", (wallpaper_id,)
-        ).fetchone()
-    if not row:
-        raise HTTPException(status_code=404, detail="Wallpaper not found")
-    return RedirectResponse(url=f"/images/{row['filename']}", status_code=302)
+app = create_app()

@@ -1,93 +1,223 @@
 """
-engine.py – high-throughput download engine.
+engine.py – the crawl orchestrator.
 
 Architecture
 ────────────
 
-  ┌─────────────────────────────────────────────────────────────────────┐
-  │  EngineThread  (dedicated daemon thread, own asyncio event loop)    │
-  │                                                                     │
-  │  ┌──────────────────────┐    ┌──────────────────────────────────┐   │
-  │  │  Scrape Pool         │    │  Download Pool                   │   │
-  │  │  CONCURRENT_SCRAPERS │    │  CONCURRENT_DOWNLOADS tasks      │   │
-  │  │  concurrent tasks    │    │  (each task = 1 HTTP request     │   │
-  │  │  (parse HTML,        │    │   + CPU work in thread pool)     │   │
-  │  │   enqueue URLs)      │    │                                  │   │
-  │  └──────────┬───────────┘    └──────────────┬───────────────────┘   │
-  │             │                               │                       │
-  │             └──► SQLite download_queue ◄────┘                       │
-  └─────────────────────────────────────────────────────────────────────┘
+  ┌──────────────────────────── EngineThread (own asyncio loop) ──────────────────────────┐
+  │                                                                                        │
+  │   scrape dispatcher ──► claim page ──► fetch+parse ──► enrich titles ──► enqueue URLs  │
+  │        (CONCURRENT_SCRAPERS)                                                │          │
+  │                                                                             ▼          │
+  │   download dispatcher ◄── claim item ◄──────────── SQLite download_queue ◄──┘          │
+  │        (CONCURRENT_DOWNLOADS)  └─► fetch → analyse (CPU pool) → dedupe → store         │
+  │                                                                                        │
+  │   supervisor: progress, phase, periodic catalog export, completion detection          │
+  └────────────────────────────────────────────────────────────────────────────────────────┘
 
-  ┌─────────────────────────────────────────────────────────────────────┐
-  │  ThreadPoolExecutor  (CPU_THREADS workers, shared process-wide)     │
-  │  • Pillow image decode                                              │
-  │  • imagehash.dhash computation                                      │
-  │  • Thumbnail resize + JPEG encode                                   │
-  │  • Disk write (full image + thumbnail)                              │
-  └─────────────────────────────────────────────────────────────────────┘
+Both dispatchers run **concurrently** – downloads start as soon as the first page
+yields wallpapers (the 2.1 engine waited for *all* ~1 350 gallery pages first).
 
-  FastAPI routes call engine.start() / pause() / stop() from uvicorn's
-  thread — all communication goes through threading.Lock +
-  loop.call_soon_threadsafe().
+Modes
+─────
+``quick``   scan the newest ``QUICK_UPDATE_PAGES`` pages of each source and fetch only
+            what is new.  Seconds instead of minutes – the mode to schedule daily.
+``full``    discover the real page count, scan every gallery page, resume any backlog.
+``repair``  no downloads: re-read gallery/post pages and fill in missing titles & tags
+            of wallpapers that are already stored.
 
-Concurrency controls (all tunable via .env)
-───────────────────────────────────────────
-  CONCURRENT_DOWNLOADS      default 32   — asyncio download tasks
-  CONCURRENT_SCRAPERS       default 4    — asyncio scrape tasks
-  MAX_CONNECTIONS           default 128  — total TCP connections in pool
-  MAX_CONNECTIONS_PER_HOST  default 48   — per-hostname TCP connections
-  CPU_THREADS               default 0    — thread pool workers (0 = auto)
+Reliability guarantees
+──────────────────────
+* Queue rows are **claimed**, not deleted, while in flight; Stop / crash / network
+  failure never loses work (claims are released and retried).
+* Failed items go to the back of the queue and are retried ``MAX_RETRIES`` times.
+* A **circuit breaker** pauses dispatching when many consecutive requests fail
+  (Wi-Fi dropped, site down) and does *not* burn retries meanwhile.
+* ``stop()`` drains gracefully: workers are cancelled, their claims released and
+  the catalog is exported before the thread ends.
+
+Thread-safety: ``start/pause/stop/snapshot`` may be called from any thread; they talk
+to the loop through ``call_soon_threadsafe``.
 """
 from __future__ import annotations
 
 import asyncio
 import logging
+import sys
 import threading
-from typing import Literal
+import time
+from collections import deque
+from dataclasses import dataclass, field
+from typing import Any, Literal
 
 import aiohttp
 
+from src import maintenance
 from src.config import settings
 from src.database import (
-    deduplicate_downloaded_wallpapers,
+    claim_download_item,
+    claim_scrape_page,
+    clean_download_queue,
+    complete_download_item,
+    complete_scrape_page,
     download_queue_size,
     enqueue_download,
+    enqueue_scrape_pages,
     export_catalog_json,
-    get_stats,
+    fail_download_item,
+    fail_scrape_page,
+    get_db,
+    get_wallpaper_by_page_url,
     increment_stat,
-    init_db,
-    pop_download_item,
-    pop_scrape_page,
+    is_url_known,
+    merge_wallpaper_metadata,
+    release_all_claims,
+    release_download_item,
+    release_scrape_page,
     scrape_queue_size,
-    seed_scrape_queue,
     set_stat,
 )
-from src.downloader import create_missing_thumbs, process_download
-from src.scrapers import scrape_peapix_gallery_page, scrape_win10spotlight_page
+from src.downloader import get_cpu_pool, process_download
+from src.scrapers import (
+    SOURCE_PEAPIX,
+    SOURCE_WIN10,
+    SOURCES,
+    ScrapeError,
+    discover_total_pages,
+    fetch_win10_post_title,
+    gallery_page_url,
+    scrape_gallery_page,
+)
+from src.utils import is_placeholder_title, utcnow_iso
 
 log = logging.getLogger("engine")
 
-Status = Literal["stopped", "running", "paused"]
+# Half-closed TLS connections only leak on interpreters without CPython PR #118960 (first released in 3.12.8
+# and 3.13.1).  aiohttp ignores the option elsewhere and emits a DeprecationWarning if it is passed anyway;
+# this mirrors aiohttp's own NEEDS_CLEANUP_CLOSED.
+_NEEDS_CLEANUP_CLOSED = sys.version_info < (3, 12, 8) or sys.version_info[:3] == (3, 13, 0)
 
-# Keep the download queue topped-up whenever it falls below this threshold.
-_QUEUE_LOW_WATER = settings.CONCURRENT_DOWNLOADS * 3
+Status = Literal["stopped", "running", "paused", "stopping"]
+VALID_SOURCES = ("peapix", "win10spotlight", "both")
+VALID_MODES = ("quick", "full", "repair")
+
+BREAKER_THRESHOLD = 10  # consecutive transient failures before dispatching pauses
+BREAKER_FIRST_PAUSE = 15.0  # seconds
+BREAKER_MAX_PAUSE = 120.0
+CATALOG_EXPORT_INTERVAL = 30.0  # seconds between periodic exports while crawling
+TITLE_FETCH_CONCURRENCY = 4
+
+
+class EngineBusy(RuntimeError):
+    """Raised when ``start()`` is called while the previous run is still shutting down."""
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Run statistics
+# ══════════════════════════════════════════════════════════════════════════
+
+
+@dataclass
+class RunStats:
+    """Counters of the *current* run (the persistent totals live in the ``stats`` table)."""
+
+    mode: str = "full"
+    source: str = "both"
+    started_at: float = 0.0
+    finished_at: float = 0.0
+    pages_total: int = 0
+    pages_done: int = 0
+    pages_failed: int = 0
+    items_total: int = 0  # wallpapers known to need processing (backlog + discovered)
+    items_done: int = 0
+    downloaded: int = 0
+    replaced: int = 0
+    duplicates: int = 0
+    errors: int = 0
+    repaired: int = 0
+    titles_enriched: int = 0
+    phase: str = "Idle"
+    result: str = ""  # completed | stopped | failed
+    _samples: deque = field(default_factory=lambda: deque(maxlen=128), repr=False)
+
+    def note_stored(self) -> None:
+        self._samples.append((time.monotonic(), self.downloaded + self.replaced))
+
+    def rate(self, window: float = 10.0) -> float:
+        """Wallpapers stored per second over the last ``window`` seconds."""
+        now = time.monotonic()
+        recent = [(t, n) for t, n in self._samples if now - t <= window]
+        if len(recent) < 2:
+            return 0.0
+        (t0, n0), (t1, n1) = recent[0], recent[-1]
+        return (n1 - n0) / (t1 - t0) if t1 > t0 else 0.0
+
+    def progress_pct(self, finished: bool) -> int:
+        if finished and self.result == "completed":
+            return 100
+        total = self.pages_total + self.items_total
+        if total <= 0:
+            return 0
+        return min(99, int((self.pages_done + self.items_done) * 100 / total))
+
+    def elapsed(self) -> float:
+        if not self.started_at:
+            return 0.0
+        return (self.finished_at or time.time()) - self.started_at
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "mode": self.mode,
+            "source": self.source,
+            "pages_total": self.pages_total,
+            "pages_done": self.pages_done,
+            "pages_failed": self.pages_failed,
+            "items_total": self.items_total,
+            "items_done": self.items_done,
+            "downloaded": self.downloaded,
+            "replaced": self.replaced,
+            "duplicates": self.duplicates,
+            "errors": self.errors,
+            "repaired": self.repaired,
+            "titles_enriched": self.titles_enriched,
+            "elapsed_seconds": round(self.elapsed(), 1),
+            "result": self.result,
+        }
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Engine
+# ══════════════════════════════════════════════════════════════════════════
 
 
 class DownloadEngine:
-    """
-    Thread-safe engine with Start / Pause / Stop controls callable from any thread.
-    """
+    """Thread-safe crawler with Start / Pause / Stop controls callable from any thread."""
 
     def __init__(self) -> None:
+        self._lock = threading.RLock()
         self._status: Status = "stopped"
-        self._active_source: str = "both"
-        self._lock = threading.Lock()
+        self._source = "both"
+        self._mode = "full"
         self._loop: asyncio.AbstractEventLoop | None = None
         self._thread: threading.Thread | None = None
         self._pause_event: asyncio.Event | None = None
-        self._stop_event:  asyncio.Event | None = None
+        self._stop_event: asyncio.Event | None = None
+        self._stop_requested = False
+        self._finished = threading.Event()
+        self._finished.set()
+        self._session: aiohttp.ClientSession | None = None
+        self._run = RunStats()
+        self._seeded: set[str] = set()
+        self._run_started_iso = ""
+        self._scrape_inflight = 0
+        self._download_inflight = 0
+        self._fail_streak = 0
+        self._breaker_until = 0.0
+        self._breaker_pause = BREAKER_FIRST_PAUSE
+        self._title_sem: asyncio.Semaphore | None = None
+        self._last_phase = ""
 
-    # ── Public control API ────────────────────────────────────────────────────
+    # ── Public control API ────────────────────────────────────────────────
 
     @property
     def status(self) -> Status:
@@ -95,286 +225,663 @@ class DownloadEngine:
 
     @property
     def active_source(self) -> str:
-        return self._active_source
+        return self._source
 
-    def start(self, source: str = "both") -> None:
-        """Start the engine, or resume from pause, with optional source filter ('peapix', 'win10spotlight', or 'both')."""
+    @property
+    def mode(self) -> str:
+        return self._mode
+
+    @property
+    def run(self) -> RunStats:
+        return self._run
+
+    def start(self, source: str = "both", mode: str = "full") -> str:
+        """
+        Start a run, resume a paused one, or switch the source of a running one.
+
+        Returns ``"started"``, ``"resumed"`` or ``"updated"``.
+        Raises :class:`EngineBusy` if the previous run is still shutting down.
+        """
+        src = (source or "both").lower().strip()
+        src = src if src in VALID_SOURCES else "both"
+        md = (mode or "full").lower().strip()
+        md = md if md in VALID_MODES else "full"
+
         with self._lock:
-            src = source.lower().strip() if source else "both"
-            if src not in ("peapix", "win10spotlight", "both"):
-                src = "both"
-            self._active_source = src
-            set_stat("active_source", self._active_source)
+            if self._status == "stopping":
+                thread = self._thread
+                if thread is not None and thread.is_alive():
+                    thread.join(timeout=15)
+                if self._status == "stopping":
+                    raise EngineBusy("The previous run is still shutting down.")
 
-            # Ensure the scrape queue contains pages for the selected source(s)
-            seed_scrape_queue(
-                settings.PEAPIX_TOTAL_PAGES,
-                settings.WIN10_TOTAL_PAGES,
-                target_source=self._active_source,
-            )
+            if self._status in ("running", "paused"):
+                changed = src != self._source
+                self._source = src
+                set_stat("active_source", src)
+                if self._status == "paused":
+                    self._status = "running"
+                    set_stat("status", "running")
+                    self._call_in_loop(self._pause_event.set if self._pause_event else None)
+                    log.info("Engine resumed (source=%s).", src)
+                    return "resumed"
+                if changed and self._loop is not None and md != "repair":
+                    asyncio.run_coroutine_threadsafe(self._seed(src), self._loop)
+                log.info("Engine source updated to: %s", src)
+                return "updated"
 
-            if self._status == "running":
-                log.info("Engine source updated to: %s", self._active_source)
-                return
-
-            if self._status == "paused":
-                self._status = "running"
-                set_stat("status", "running")
-                if self._pause_event and self._loop:
-                    self._loop.call_soon_threadsafe(self._pause_event.set)
-                log.info("Engine resumed with source filter: %s", self._active_source)
-                return
-
-            # stopped → fresh thread
+            # stopped → fresh run
+            self._source, self._mode = src, md
             self._status = "running"
+            self._stop_requested = False
+            self._run = RunStats(mode=md, source=src, started_at=time.time(), phase="Starting")
+            self._run_started_iso = utcnow_iso()
+            self._seeded = set()
+            self._scrape_inflight = self._download_inflight = 0
+            self._fail_streak = 0
+            self._breaker_until = 0.0
+            self._breaker_pause = BREAKER_FIRST_PAUSE
+            self._last_phase = ""
+            self._finished.clear()
             set_stat("status", "running")
-            self._thread = threading.Thread(
-                target=self._run_loop, daemon=True, name="EngineThread"
-            )
+            set_stat("phase", "Starting")
+            set_stat("active_source", src)
+            set_stat("active_mode", md)
+            self._thread = threading.Thread(target=self._run_loop, daemon=True, name="EngineThread")
             self._thread.start()
             log.info(
-                "Engine started (source=%s, downloads=%d, scrapers=%d, connections=%d/%d).",
-                self._active_source,
-                settings.CONCURRENT_DOWNLOADS,
-                settings.CONCURRENT_SCRAPERS,
-                settings.MAX_CONNECTIONS,
-                settings.MAX_CONNECTIONS_PER_HOST,
+                "Engine started (mode=%s, source=%s, downloads=%d, scrapers=%d).",
+                md, src, settings.CONCURRENT_DOWNLOADS, settings.CONCURRENT_SCRAPERS,
             )
+            return "started"
 
     def pause(self) -> None:
-        """Pause; the queues remain in SQLite for later resumption."""
+        """Stop dispatching new work; in-flight requests finish, queues stay in SQLite."""
         with self._lock:
             if self._status != "running":
                 return
             self._status = "paused"
             set_stat("status", "paused")
-            if self._pause_event and self._loop:
-                self._loop.call_soon_threadsafe(self._pause_event.clear)
-            try:
-                export_catalog_json()
-            except Exception:
-                pass
+            self._call_in_loop(self._pause_event.clear if self._pause_event else None)
             log.info("Engine paused.")
+        self._export_quietly()
 
     def stop(self) -> None:
-        """Stop; the queues remain in SQLite."""
+        """Stop the run.  Claimed work is released; the call returns immediately."""
         with self._lock:
-            if self._status == "stopped":
+            if self._status in ("stopped", "stopping"):
                 return
-            prev = self._status
-            self._status = "stopped"
-            set_stat("status", "stopped")
-            if self._stop_event and self._loop:
-                self._loop.call_soon_threadsafe(self._stop_event.set)
-            if self._pause_event and self._loop:
-                self._loop.call_soon_threadsafe(self._pause_event.set)
-            try:
-                export_catalog_json()
-            except Exception:
-                pass
-            log.info("Engine stopped (was %s).", prev)
+            self._status = "stopping"
+            set_stat("status", "stopping")
+            self._stop_requested = True
+            if self._loop is not None:
+                if self._stop_event:
+                    self._call_in_loop(self._stop_event.set)
+                if self._pause_event:
+                    self._call_in_loop(self._pause_event.set)
+            log.info("Engine stopping…")
 
-    # ── Internal async loop ───────────────────────────────────────────────────
+    def wait(self, timeout: float | None = None) -> bool:
+        """Block until the current run finished.  True when it has."""
+        return self._finished.wait(timeout)
+
+    def shutdown(self, timeout: float = 30.0) -> bool:
+        """Stop and wait – used when the application exits."""
+        self.stop()
+        return self.wait(timeout)
+
+    def snapshot(self) -> dict[str, Any]:
+        """Point-in-time view of the engine for ``/api/status``."""
+        run = self._run
+        status = self._status
+        finished = status == "stopped"
+        # Derive the label from the status so Pause/Stop show up instantly (the supervisor
+        # refreshes ``run.phase`` only every 250 ms).
+        phase = "Paused" if status == "paused" else "Stopping…" if status == "stopping" else run.phase
+        return {
+            "status": status,
+            "active_source": self._source,
+            "mode": self._mode,
+            "phase": phase,
+            "progress_pct": run.progress_pct(finished),
+            "rate_per_sec": round(run.rate(), 2),
+            "breaker_active": time.monotonic() < self._breaker_until,
+            "run": run.as_dict(),
+        }
+
+    # ── Internals: thread & loop plumbing ──────────────────────────────────
+
+    def _call_in_loop(self, fn) -> None:
+        loop = self._loop
+        if fn is not None and loop is not None and not loop.is_closed():
+            loop.call_soon_threadsafe(fn)
+
+    def _export_quietly(self) -> None:
+        try:
+            export_catalog_json()
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Catalog export failed: %s", exc)
 
     def _run_loop(self) -> None:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         self._loop = loop
+        result = "completed"
         try:
             loop.run_until_complete(self._main())
+            if self._stop_requested:
+                result = "stopped"
         except Exception:
             log.exception("Engine loop crashed.")
+            result = "failed"
         finally:
+            try:
+                loop.run_until_complete(loop.shutdown_asyncgens())
+            except Exception:  # noqa: BLE001
+                pass
             loop.close()
             self._loop = None
+            self._pause_event = self._stop_event = None
             try:
-                export_catalog_json()
-            except Exception:
-                pass
+                release_all_claims()
+            except Exception:  # noqa: BLE001
+                log.exception("Could not release queue claims.")
+            self._export_quietly()
             with self._lock:
-                if self._status != "stopped":
-                    self._status = "stopped"
-                    set_stat("status", "stopped")
+                run = self._run
+                run.finished_at = time.time()
+                run.result = result
+                run.phase = "Idle"
+                self._status = "stopped"
+                self._persist_summary(run)
+            self._finished.set()
+            log.info("Engine finished (%s).", result)
+
+    def _persist_summary(self, run: RunStats) -> None:
+        try:
+            set_stat("status", "stopped")
+            set_stat("phase", "Idle")
+            set_stat("last_run_at", utcnow_iso())
+            set_stat("last_run_mode", run.mode)
+            set_stat("last_run_source", run.source)
+            set_stat("last_run_result", run.result)
+            set_stat("last_run_downloaded", run.downloaded + run.replaced)
+            set_stat("last_run_duplicates", run.duplicates)
+            set_stat("last_run_errors", run.errors)
+            set_stat("last_run_repaired", run.repaired)
+            set_stat("last_run_seconds", int(run.elapsed()))
+        except Exception:  # noqa: BLE001
+            log.exception("Could not persist the run summary.")
+
+    def _target(self) -> str | None:
+        return None if self._source == "both" else self._source
+
+    def _min_priority(self) -> int:
+        return 100 if self._mode == "quick" else 0
+
+    def _since(self) -> str | None:
+        return self._run_started_iso if self._mode == "quick" else None
+
+    async def _sleep(self, seconds: float) -> None:
+        """Sleep that wakes up immediately when the engine is asked to stop."""
+        assert self._stop_event is not None
+        try:
+            await asyncio.wait_for(self._stop_event.wait(), timeout=seconds)
+        except asyncio.TimeoutError:
+            pass
+
+    def _stopping(self) -> bool:
+        return self._stop_event is None or self._stop_event.is_set()
+
+    # ── Internals: circuit breaker ─────────────────────────────────────────
+
+    def _note_success(self) -> None:
+        self._fail_streak = 0
+        self._breaker_pause = BREAKER_FIRST_PAUSE
+
+    def _note_transient_failure(self) -> bool:
+        """Record a network-ish failure.  True while the breaker is open (don't burn retries)."""
+        self._fail_streak += 1
+        if self._fail_streak < BREAKER_THRESHOLD:
+            return False
+        now = time.monotonic()
+        if now >= self._breaker_until:
+            self._breaker_until = now + self._breaker_pause
+            log.warning(
+                "Network looks unavailable (%d consecutive failures) – pausing %.0fs.",
+                self._fail_streak, self._breaker_pause,
+            )
+            self._breaker_pause = min(self._breaker_pause * 2, BREAKER_MAX_PAUSE)
+        return True
+
+    async def _wait_breaker(self) -> None:
+        while not self._stopping() and time.monotonic() < self._breaker_until:
+            await self._sleep(0.5)
+
+    # ── Main coroutine ─────────────────────────────────────────────────────
 
     async def _main(self) -> None:
-        """
-        Main async loop.
-
-        Two independent pools run concurrently:
-          • scrape_pool  – up to CONCURRENT_SCRAPERS pages parsed at once
-          • dl_pool      – up to CONCURRENT_DOWNLOADS images fetched at once
-
-        Both share the same aiohttp.ClientSession (and its connection pool).
-        """
         self._pause_event = asyncio.Event()
-        self._stop_event  = asyncio.Event()
-        self._pause_event.set()   # initially running
+        self._pause_event.set()
+        self._stop_event = asyncio.Event()
+        if self._stop_requested:
+            self._stop_event.set()
+        self._title_sem = asyncio.Semaphore(TITLE_FETCH_CONCURRENCY)
 
-        init_db()
-        seed_scrape_queue(
-            settings.PEAPIX_TOTAL_PAGES,
-            settings.WIN10_TOTAL_PAGES,
-            target_source=self._active_source,
-        )
+        release_all_claims()  # a previous crashed run may have left claims behind
 
-        # ── Shared HTTP session ────────────────────────────────────────────
         connector = aiohttp.TCPConnector(
             limit=settings.MAX_CONNECTIONS,
             limit_per_host=settings.MAX_CONNECTIONS_PER_HOST,
-            ssl=False,
-            ttl_dns_cache=600,          # cache DNS for 10 min
-            enable_cleanup_closed=True,
+            ssl=settings.VERIFY_SSL,
+            ttl_dns_cache=600,
+            enable_cleanup_closed=_NEEDS_CLEANUP_CLOSED,
         )
         timeout = aiohttp.ClientTimeout(
-            total=settings.TIMEOUT,
-            connect=10,
-            sock_read=settings.TIMEOUT,
+            total=settings.TIMEOUT, connect=10, sock_read=settings.TIMEOUT
+        )
+        async with aiohttp.ClientSession(
+            headers=settings.HEADERS, connector=connector, timeout=timeout, trust_env=True
+        ) as session:
+            self._session = session
+            try:
+                if self._mode == "repair":
+                    await self._repair(session)
+                else:
+                    await self._crawl(session)
+            finally:
+                self._session = None
+
+    # ── Crawl (quick / full) ───────────────────────────────────────────────
+
+    async def _crawl(self, session: aiohttp.ClientSession) -> None:
+        run = self._run
+        run.phase = "Preparing"
+        await self._seed(self._source)
+        run.items_total = download_queue_size(self._target(), self._since())
+
+        dispatchers = [
+            asyncio.create_task(self._scrape_dispatcher(session), name="scrape-dispatcher"),
+            asyncio.create_task(self._download_dispatcher(session), name="download-dispatcher"),
+        ]
+        try:
+            await self._supervise()
+        finally:
+            for task in dispatchers:
+                task.cancel()
+            await asyncio.gather(*dispatchers, return_exceptions=True)
+
+        if self._stopping():
+            return
+        # Post-processing after a *complete* run.
+        run.phase = "Cleaning up"
+        set_stat("phase", run.phase)
+        loop = asyncio.get_running_loop()
+        try:
+            if run.downloaded + run.replaced > 0 or self._mode == "full":
+                await loop.run_in_executor(None, maintenance.deduplicate_downloaded_wallpapers)
+            await loop.run_in_executor(None, maintenance.create_missing_thumbnails)
+            await loop.run_in_executor(None, clean_download_queue)
+        except Exception:  # noqa: BLE001
+            log.exception("Post-run maintenance failed.")
+        run.result = "completed"
+        log.info(
+            "🎉 Run complete (%s/%s): +%d new, %d replaced, %d duplicates, %d errors.",
+            self._mode, self._source, run.downloaded, run.replaced, run.duplicates, run.errors,
         )
 
-        async with aiohttp.ClientSession(
-            headers=settings.HEADERS,
-            connector=connector,
-            timeout=timeout,
-        ) as session:
+    async def _seed(self, source: str) -> None:
+        """Make sure the scrape queue holds the gallery pages this run needs."""
+        sources = SOURCES if source == "both" else (source,)
+        loop = asyncio.get_running_loop()
+        for src in sources:
+            if src in self._seeded:
+                continue
+            self._seeded.add(src)
+            if self._mode == "quick":
+                rows = [
+                    (gallery_page_url(src, n), src, 100)
+                    for n in range(1, settings.QUICK_UPDATE_PAGES + 1)
+                ]
+                enqueue_scrape_pages(rows)
+                self._run.pages_total += scrape_queue_size(src, 100)
+                continue
 
-            # Semaphores that cap the two pools
-            dl_sem     = asyncio.Semaphore(settings.CONCURRENT_DOWNLOADS)
-            scrape_sem = asyncio.Semaphore(settings.CONCURRENT_SCRAPERS)
+            backlog = scrape_queue_size(src)
+            if backlog > 0:
+                log.info("Resuming %d unfinished %s gallery pages.", backlog, src)
+                self._run.pages_total += backlog
+                continue
+            total = self._page_hint(src)
+            if settings.AUTO_DETECT_PAGES and self._session is not None:
+                self._run.phase = f"Discovering {src} pages"
+                total = await discover_total_pages(self._session, src, total)
+            rows = [(gallery_page_url(src, 1), src, 100)] + [
+                (gallery_page_url(src, n), src, 10) for n in range(2, total + 1)
+            ]
+            await loop.run_in_executor(None, enqueue_scrape_pages, rows)
+            self._run.pages_total += len(rows)
+            log.info("Queued %d %s gallery pages.", len(rows), src)
 
-            dl_tasks:     set[asyncio.Task] = set()
-            scrape_tasks: set[asyncio.Task] = set()
-            last_synced = int(get_stats().get("downloaded_count", 0))
-            post_scrape_tasks_done = False
+    @staticmethod
+    def _page_hint(source: str) -> int:
+        return settings.PEAPIX_TOTAL_PAGES if source == SOURCE_PEAPIX else settings.WIN10_TOTAL_PAGES
 
-            while not self._stop_event.is_set():
+    # ── Dispatchers ────────────────────────────────────────────────────────
 
-                # ── Respect pause ────────────────────────────────────────
+    async def _scrape_dispatcher(self, session: aiohttp.ClientSession) -> None:
+        assert self._pause_event is not None
+        sem = asyncio.Semaphore(settings.CONCURRENT_SCRAPERS)
+        tasks: set[asyncio.Task] = set()
+        try:
+            while not self._stopping():
                 await self._pause_event.wait()
-                if self._stop_event.is_set():
+                await self._wait_breaker()
+                if self._stopping():
                     break
-
-                target_src = None if self._active_source == "both" else self._active_source
-
-                # ── Scrape: exhaust the queue first ──────────────────────
-                if scrape_queue_size(source=target_src) > 0:
-                    set_stat("phase", "Scraping site sources")
-                while (
-                    len(scrape_tasks) < settings.CONCURRENT_SCRAPERS
-                    and scrape_queue_size(source=target_src) > 0
-                ):
-                    page = pop_scrape_page(source=target_src)
-                    if not page:
-                        break
-                    t = asyncio.create_task(
-                        self._scrape_one(session, scrape_sem, page),
-                        name=f"scrape-{page['id']}",
-                    )
-                    scrape_tasks.add(t)
-                    t.add_done_callback(scrape_tasks.discard)
-
-                # ── Transition to Download Phase ─────────────────────────
-                if scrape_queue_size(source=target_src) == 0 and len(scrape_tasks) == 0:
-                    if not post_scrape_tasks_done:
-                        set_stat("phase", "Deduplicating & creating thumbs")
-                        log.info("Scraping complete. Running post-scrape tasks...")
-                        # Run deduplication in thread pool to avoid blocking event loop
-                        loop = asyncio.get_running_loop()
-                        await loop.run_in_executor(None, deduplicate_downloaded_wallpapers)
-                        # Create missing thumbs
-                        await create_missing_thumbs()
-                        post_scrape_tasks_done = True
-                        log.info("Post-scrape tasks complete. Starting downloads...")
-
-                    # ── Download: saturate the concurrency limit ─────────────
-                    if download_queue_size(source=target_src) > 0 or len(dl_tasks) > 0:
-                        set_stat("phase", "Downloading images")
-                    while len(dl_tasks) < settings.CONCURRENT_DOWNLOADS:
-                        item = pop_download_item(source=target_src)
-                        if not item:
-                            break
-                        t = asyncio.create_task(
-                            self._download_one(session, dl_sem, item),
-                            name=f"dl-{item['id']}",
-                        )
-                        dl_tasks.add(t)
-                        t.add_done_callback(dl_tasks.discard)
-
-                # ── Periodic static catalog export (every 25 downloads) ──
-                cur_downloaded = int(get_stats().get("downloaded_count", 0))
-                if cur_downloaded - last_synced >= 25:
-                    last_synced = cur_downloaded
-                    try:
-                        export_catalog_json()
-                    except Exception:
-                        pass
-
-                # ── Done check ────────────────────────────────────────────
-                if (
-                    not dl_tasks
-                    and not scrape_tasks
-                    and download_queue_size(source=target_src) == 0
-                    and scrape_queue_size(source=target_src) == 0
-                ):
-                    log.info("🎉 All downloads complete for source '%s'!", self._active_source)
-                    with self._lock:
-                        self._status = "stopped"
-                        set_stat("status", "stopped")
-                        set_stat("phase", "Idle")
-                    break
-
-                await asyncio.sleep(settings.REQUEST_DELAY)
-
-            # ── Graceful shutdown ─────────────────────────────────────────
-            all_tasks = dl_tasks | scrape_tasks
-            for task in list(all_tasks):
+                await sem.acquire()
+                page = claim_scrape_page(self._target(), self._min_priority())
+                if page is None:
+                    sem.release()
+                    await self._sleep(0.25)
+                    continue
+                task = asyncio.create_task(self._scrape_one(session, page, sem))
+                tasks.add(task)
+                self._scrape_inflight = len(tasks)
+                task.add_done_callback(self._make_done_cb(tasks, "scrape"))
+        finally:
+            for task in tasks:
                 task.cancel()
-            if all_tasks:
-                await asyncio.gather(*all_tasks, return_exceptions=True)
+            await asyncio.gather(*tasks, return_exceptions=True)
+            self._scrape_inflight = 0
 
-    # ── Scrape worker ─────────────────────────────────────────────────────────
+    async def _download_dispatcher(self, session: aiohttp.ClientSession) -> None:
+        assert self._pause_event is not None
+        sem = asyncio.Semaphore(settings.CONCURRENT_DOWNLOADS)
+        tasks: set[asyncio.Task] = set()
+        try:
+            while not self._stopping():
+                await self._pause_event.wait()
+                await self._wait_breaker()
+                if self._stopping():
+                    break
+                await sem.acquire()
+                item = claim_download_item(self._target(), self._since())
+                if item is None:
+                    sem.release()
+                    await self._sleep(0.25)
+                    continue
+                task = asyncio.create_task(self._download_one(session, item, sem))
+                tasks.add(task)
+                self._download_inflight = len(tasks)
+                task.add_done_callback(self._make_done_cb(tasks, "download"))
+        finally:
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            self._download_inflight = 0
+
+    def _make_done_cb(self, tasks: set[asyncio.Task], kind: str):
+        def _done(task: asyncio.Task) -> None:
+            tasks.discard(task)
+            if kind == "scrape":
+                self._scrape_inflight = len(tasks)
+            else:
+                self._download_inflight = len(tasks)
+
+        return _done
+
+    # ── Scrape worker ──────────────────────────────────────────────────────
 
     async def _scrape_one(
-        self,
-        session: aiohttp.ClientSession,
-        sem: asyncio.Semaphore,
-        page: dict,
+        self, session: aiohttp.ClientSession, page: dict, sem: asyncio.Semaphore
     ) -> None:
-        async with sem:
-            url    = page["url"]
-            source = page["source"]
-            log.info("📄 Scraping [%s] %s", source, url)
+        run = self._run
+        finished = False
+        try:
             try:
-                if source == "peapix":
-                    items = await scrape_peapix_gallery_page(session, url)
-                else:
-                    items = await scrape_win10spotlight_page(session, url)
-            except Exception:
-                log.exception("Scrape error: %s", url)
+                items = await scrape_gallery_page(session, page["source"], page["url"])
+            except ScrapeError as exc:
+                breaker_open = self._note_transient_failure()
+                if breaker_open:
+                    release_scrape_page(page["id"])
+                    finished = True
+                    return
+                requeued = fail_scrape_page(page["id"], settings.MAX_RETRIES)
+                finished = True
+                if not requeued:
+                    run.pages_failed += 1
+                    run.pages_done += 1
+                    run.errors += 1
+                    increment_stat("errors")
+                    log.warning("Giving up on page %s: %s", page["url"], exc)
                 return
+            except Exception:  # parser bug etc. → treat like a failed attempt
+                log.exception("Scrape error: %s", page["url"])
+                requeued = fail_scrape_page(page["id"], settings.MAX_RETRIES)
+                finished = True
+                if not requeued:
+                    run.pages_failed += 1
+                    run.pages_done += 1
+                    run.errors += 1
+                    increment_stat("errors")
+                return
+            self._note_success()
 
-            new_count = sum(
-                1 for item in items if enqueue_download(item)
-            )
-            for _ in range(new_count):
-                increment_stat("scraped_count")
+            fresh = [it for it in items if not is_url_known(it["image_url"])]
+            await self._enrich_titles(session, fresh)
+            added = sum(1 for it in fresh if enqueue_download(it))
+            # No await between enqueue and complete: cancellation can not split them.
+            complete_scrape_page(page["id"])
+            finished = True
+            run.pages_done += 1
+            run.items_total += added
+            if added:
+                increment_stat("scraped_count", added)
+                log.info("📄 %s → %d new of %d", page["url"], added, len(items))
+            await asyncio.sleep(settings.REQUEST_DELAY)
+        except asyncio.CancelledError:
+            if not finished:
+                release_scrape_page(page["id"])
+            raise
+        finally:
+            sem.release()
 
-            log.info("  → %d new items queued (%d on page)", new_count, len(items))
+    async def _enrich_titles(self, session: aiohttp.ClientSession, items: list[dict]) -> None:
+        """Fetch the real title for listing entries that only show a file hash."""
+        todo = [it for it in items if it.get("needs_title") and it.get("page_url")]
+        if not todo:
+            return
+        assert self._title_sem is not None
 
-    # ── Download worker ───────────────────────────────────────────────────────
+        async def fetch(item: dict) -> None:
+            async with self._title_sem:  # type: ignore[union-attr]
+                title = await fetch_win10_post_title(session, item["page_url"])
+            if title:
+                item["title"] = title
+                self._run.titles_enriched += 1
+
+        await asyncio.gather(*(fetch(it) for it in todo))
+
+    # ── Download worker ────────────────────────────────────────────────────
 
     async def _download_one(
-        self,
-        session: aiohttp.ClientSession,
-        sem: asyncio.Semaphore,
-        item: dict,
+        self, session: aiohttp.ClientSession, item: dict, sem: asyncio.Semaphore
     ) -> None:
-        async with sem:
+        run = self._run
+        try:
             try:
-                await process_download(session, item)
+                outcome = await process_download(session, item, pool=get_cpu_pool())
+            except asyncio.CancelledError:
+                release_download_item(item["id"])
+                raise
             except Exception:
                 log.exception("Download crashed: %s", item.get("image_url"))
+                outcome = "failed"
+
+            if outcome == "failed":
+                if self._note_transient_failure():
+                    release_download_item(item["id"])  # outage: do not burn a retry
+                    return
+                requeued = fail_download_item(item["id"], settings.MAX_RETRIES)
+                run.errors += 1
                 increment_stat("errors")
+                if not requeued:
+                    run.items_done += 1
+                return
+
+            if outcome != "rejected":
+                self._note_success()
+            complete_download_item(item["id"])
+            run.items_done += 1
+            if outcome == "downloaded":
+                run.downloaded += 1
+                run.note_stored()
+            elif outcome == "replaced":
+                run.replaced += 1
+                run.note_stored()
+            elif outcome == "duplicate":
+                run.duplicates += 1
+            elif outcome == "rejected":
+                run.errors += 1
+                increment_stat("errors")
+        finally:
+            sem.release()
+
+    # ── Supervisor ─────────────────────────────────────────────────────────
+
+    def _set_phase(self, phase: str) -> None:
+        self._run.phase = phase
+        if phase != self._last_phase:
+            self._last_phase = phase
+            try:
+                set_stat("phase", phase)
+            except Exception:  # noqa: BLE001
+                pass
+
+    async def _supervise(self) -> None:
+        """Track progress and detect completion until finished or stopped."""
+        assert self._pause_event is not None
+        loop = asyncio.get_running_loop()
+        last_export = time.monotonic()
+        last_stored = 0
+        while not self._stopping():
+            paused = not self._pause_event.is_set()
+            scraping = self._scrape_inflight > 0 or scrape_queue_size(
+                self._target(), self._min_priority()
+            ) > 0
+            downloading = self._download_inflight > 0 or download_queue_size(
+                self._target(), self._since()
+            ) > 0
+
+            if paused:
+                self._set_phase("Paused")
+            elif self._time_in_breaker():
+                self._set_phase("Waiting for network")
+            elif scraping and downloading:
+                self._set_phase("Scraping & downloading")
+            elif scraping:
+                self._set_phase("Scraping gallery pages")
+            elif downloading:
+                self._set_phase("Downloading images")
+            else:
+                self._set_phase("Finishing")
+
+            if not paused and not scraping and not downloading:
+                if self._scrape_inflight == 0 and self._download_inflight == 0:
+                    return  # nothing queued, nothing in flight → run complete
+
+            stored = self._run.downloaded + self._run.replaced
+            if stored != last_stored and time.monotonic() - last_export >= CATALOG_EXPORT_INTERVAL:
+                last_stored, last_export = stored, time.monotonic()
+                await loop.run_in_executor(None, self._export_quietly)
+            await self._sleep(0.25)
+
+    def _time_in_breaker(self) -> bool:
+        return time.monotonic() < self._breaker_until
+
+    # ── Repair mode ────────────────────────────────────────────────────────
+
+    async def _repair(self, session: aiohttp.ClientSession) -> None:
+        """
+        Back-fill titles / tags / dates of wallpapers that are already stored.
+
+        * Peapix:  re-read every gallery page and merge metadata by ``page_url``.
+        * Win10:   fetch the post page of every wallpaper whose title is a placeholder.
+        """
+        run = self._run
+        assert self._pause_event is not None
+        run.phase = "Repairing metadata"
+        set_stat("phase", run.phase)
+        loop = asyncio.get_running_loop()
+        work: deque[tuple[str, Any]] = deque()
+        wanted = SOURCES if self._source == "both" else (self._source,)
+
+        if SOURCE_PEAPIX in wanted:
+            total = self._page_hint(SOURCE_PEAPIX)
+            if settings.AUTO_DETECT_PAGES:
+                total = await discover_total_pages(session, SOURCE_PEAPIX, total)
+            for n in range(1, total + 1):
+                work.append(("peapix", gallery_page_url(SOURCE_PEAPIX, n)))
+        if SOURCE_WIN10 in wanted:
+            def _placeholder_posts() -> list[tuple[int, str]]:
+                with get_db() as conn:
+                    rows = conn.execute(
+                        "SELECT id, title, page_url FROM wallpapers "
+                        "WHERE source = ? AND page_url != ''", (SOURCE_WIN10,)
+                    ).fetchall()
+                return [(r["id"], r["page_url"]) for r in rows if is_placeholder_title(r["title"])]
+
+            for row in await loop.run_in_executor(None, _placeholder_posts):
+                work.append(("win10", row))
+        run.pages_total = len(work)
+        log.info("Repair: %d pages/posts to inspect.", len(work))
+
+        async def worker() -> None:
+            while work and not self._stopping():
+                await self._pause_event.wait()  # type: ignore[union-attr]
+                await self._wait_breaker()
+                if self._stopping() or not work:
+                    return
+                kind, payload = work.popleft()
+                try:
+                    if kind == "peapix":
+                        for item in await scrape_gallery_page(session, SOURCE_PEAPIX, payload):
+                            row = get_wallpaper_by_page_url(item["page_url"])
+                            if row and merge_wallpaper_metadata(
+                                row["id"], title=item["title"], tags=item["tags"],
+                                date_spotted=item["date_spotted"],
+                            ):
+                                run.repaired += 1
+                    else:
+                        wallpaper_id, page_url = payload
+                        title = await fetch_win10_post_title(session, page_url)
+                        if title and merge_wallpaper_metadata(wallpaper_id, title=title):
+                            run.repaired += 1
+                    self._note_success()
+                except ScrapeError as exc:
+                    if self._note_transient_failure():
+                        work.append((kind, payload))  # outage: try again later
+                        continue
+                    run.errors += 1
+                    log.warning("Repair skipped %s: %s", payload, exc)
+                except Exception:
+                    run.errors += 1
+                    log.exception("Repair error for %s", payload)
+                run.pages_done += 1
+                await self._sleep(settings.REQUEST_DELAY)
+
+        workers = [asyncio.create_task(worker()) for _ in range(settings.CONCURRENT_SCRAPERS)]
+        try:
+            await asyncio.gather(*workers)
+        finally:
+            for task in workers:
+                task.cancel()
+            await asyncio.gather(*workers, return_exceptions=True)
+        if not self._stopping():
+            run.result = "completed"
+            log.info("🎉 Repair complete: %d wallpapers updated, %d errors.", run.repaired, run.errors)
 
 
-# ── Singleton ─────────────────────────────────────────────────────────────────
+# ── Singleton ─────────────────────────────────────────────────────────────
 engine = DownloadEngine()

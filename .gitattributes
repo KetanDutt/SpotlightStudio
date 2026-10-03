@@ -1,1 +1,11 @@
+# Wallpapers live in Git LFS – the repository itself only stores small pointer files.
 images/** filter=lfs diff=lfs merge=lfs -text
+
+# Windows batch files need CRLF, shell scripts need LF – whatever the checkout platform.
+*.bat text eol=crlf
+*.sh  text eol=lf
+
+# The database is binary (never diff / auto-merge it); both data files are generated,
+# so GitHub collapses them in pull-request diffs.
+data/wallpapers.db   binary linguist-generated=true
+data/wallpapers.json linguist-generated=true

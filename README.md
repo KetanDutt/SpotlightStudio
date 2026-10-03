@@ -1,233 +1,176 @@
-# 🍏 Spotlight Studio — Apple Liquid Glass Edition
+# Spotlight Studio
 
-A high-performance, multithreaded desktop application, web crawler, and static showcase that automatically downloads **all** Windows Spotlight wallpapers from [Peapix](https://peapix.com/spotlight) and [Windows10Spotlight](https://windows10spotlight.com/), saves them in the **highest available resolution** (up to 4K / UHD), deduplicates them using perceptual hashing (`dHash`), and presents them in a premium Apple Liquid Glass spatial interface.
+**An archive and gallery of Windows Spotlight wallpapers** — crawl them from Peapix and Windows10Spotlight, de-duplicate them by perceptual hash, keep the best resolution of every picture and browse the whole collection in a fast "Liquid Glass" web UI, either as a static GitHub Pages showcase or as a desktop app with crawler controls.
 
-[![Static Showcase](https://img.shields.io/badge/Web%20Showcase-GitHub%20Pages-38bdf8?style=flat-square)](index.html)
-[![Python](https://img.shields.io/badge/Python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.14-3b82f6?style=flat-square)](https://www.python.org/)
-[![Changelog](https://img.shields.io/badge/Changelog-v2.1.0-6366f1?style=flat-square)](CHANGELOG.md)
-[![License](https://img.shields.io/badge/License-MIT-10b981?style=flat-square)](LICENSE)
+[![CI](https://github.com/KetanDutt/SpotlightStudio/actions/workflows/ci.yml/badge.svg)](https://github.com/KetanDutt/SpotlightStudio/actions/workflows/ci.yml)
+![Version](https://img.shields.io/badge/version-2.2.0-38bdf8)
+![Python](https://img.shields.io/badge/python-3.10%2B-3776ab)
+![License](https://img.shields.io/badge/license-all%20rights%20reserved-lightgrey)
 
----
+![Spotlight Studio – gallery](docs/assets/screenshot-gallery.jpg)
 
-## ✨ Key Features
+| Viewer | Light theme | Mobile |
+|:---:|:---:|:---:|
+| <img src="docs/assets/screenshot-viewer.jpg" alt="Full-screen viewer with details, tags and actions" width="440"> | <img src="docs/assets/screenshot-light.jpg" alt="Light theme with a tag filter" width="440"> | <img src="docs/assets/screenshot-mobile.jpg" alt="Phone layout" width="170"> |
 
-- **💎 Apple Liquid Glass UI**:
-  - Translucent surfaces with deep backdrop filters (`blur(36px) saturate(200%)`), specular top edge highlights, and subtle ambient shadows.
-  - Floating top navigation island, spatial filter panel, and spring-eased micro-interactions.
-  - Deep obsidian gradient canvas with organic, low-contrast ambient spatial lighting.
-- **🚀 High-Throughput Multithreaded Engine**:
-  - Independent async pools: **32 concurrent downloads** + **4 parallel gallery scrapers** backed by an `aiohttp` connection pool with up to 128 TCP connections.
-  - CPU-intensive tasks (Pillow decode, 16-bit `dHash`, 480×270 Lanczos thumbnail generation, and disk I/O) are offloaded to a worker `ThreadPoolExecutor`, keeping the event loop 100% free for network streams.
-  - Sustained throughput of **7–10+ high-res images per second**.
-- **🌟 Maximum Quality (4K UHD & FHD)**:
-  - Peapix wallpapers are fetched directly at `_UHD.jpg` (3840×2160, 4K) with an automatic fallback chain (`_1920` → `_1280` → `_640`).
-  - Windows10Spotlight extracts the largest image from the `srcset` attribute (typically 1920px FHD).
-- **📂 Source-Partitioned Organization**:
-  - Images and thumbnails are organized directly by source:
-    `images/peapix/`, `images/win10spotlight/`, `images/thumbs/peapix/`, and `images/thumbs/win10spotlight/`.
-- **🔍 Perceptual Deduplication (`dHash`)**:
-  - Computes a 16-bit difference hash for every image.
-  - Automatically identifies duplicates across sites and upgrades to higher-resolution copies when found.
-- **🌐 Dual-Mode Deployment (Static Web + Desktop App)**:
-  - **GitHub Pages (Web Showcase)**: 100% static, client-side viewing, searching, and downloading powered by `data/wallpapers.json` with zero backend requirements.
-  - **Desktop App (Crawler Control Center)**: Native PyWebView window with full crawler controls (Start, Pause, Stop), rolling speed tracker (`⚡ /s`), and 1-click Windows desktop wallpaper integration.
-- **🏷️ Interactive Tag Filtering & Shuffle Discovery**:
-  - One-click tag chips (`#ocean`, `#mountain`, `#aurora`) instantly filter the collection.
-  - Built-in **Shuffle** button and keyboard shortcut (`R`) for random serendipitous wallpaper discovery.
-  - Copy direct full-resolution link to clipboard (`C`).
-- **⌨️ Keyboard Navigation Shortcuts**:
-  - `←` / `→` : Navigate previous/next wallpaper in lightbox
-  - `Esc` : Close lightbox / unfocus search
-  - `R` : Shuffle & view a random wallpaper
-  - `C` : Copy direct image link
-  - `/` : Instant focus search bar
-- **⚡ Progressive JPEG & Native HTTP/2 Streaming**:
-  - 100% of thumbnails re-encoded as optimized progressive JPEGs for sub-50ms visual paint.
-  - Above-the-fold image prioritization (`fetchpriority="high"`) and native HTTP/2 multi-stream loading.
-- **🔄 Git State Preservation**:
-  - SQLite database queues (`data/wallpapers.db`), static catalog (`data/wallpapers.json`), and wallpapers (`images/`) are tracked in git so anyone can clone the repo and resume downloading right where anyone left off.
+<sub>The screenshots are rendered with generated placeholder images, not with the real wallpapers.</sub>
 
 ---
 
-## 🚀 Quick Start
+## Highlights
 
-### 1. Requirements
-- **Windows 10 / 11** (for the native desktop window and wallpaper setting; server & scraper also run on Linux/macOS)
-- **Python 3.10+** (tested on Python 3.10, 3.11, 3.12, 3.14)
+| | |
+|---|---|
+| 🖼️ **~7,500 wallpapers** | 4K (Peapix) and Full HD (Windows10Spotlight), perceptually de-duplicated; the best resolution of each picture wins |
+| ⚡ **Fast** | 32 parallel downloads, one CPU job per image, atomic file writes; a 4 MB catalog (0.8 MB gzipped) that is parsed once and searched in memory in ~5 ms |
+| 🛡️ **Reliable** | queue items are *claimed*, never lost on stop/crash; automatic retries; a circuit breaker for network outages; page counts are auto-discovered |
+| 🔎 **Great browsing** | instant multi-term search, tag & resolution filters, favorites, shareable deep links (`#w=1234`), random wallpaper, keyboard shortcuts, light/dark theme |
+| 📱 **Installable PWA** | works on phones, offline-capable, accessible (keyboard, screen-reader, reduced-motion) |
+| 🔒 **Locked down** | strict CSP, Host/Origin checks on the local API, no XSS from scraped titles, CSV-injection-safe exports, DB and logs are never served |
 
-### 2. Instant Launch (Windows)
-- **Desktop Window (PyWebView)**: Double-click **`start_desktop.bat`**.
-  *(If the virtual environment is missing, the script will automatically create it and install all dependencies!)*
-- **Headless Server Mode**: Double-click **`start_server.bat`** and visit `http://127.0.0.1:8765/`.
+## Two ways to use it
 
-### 3. Manual Installation (Cross-Platform)
+| Mode | What you get | How |
+|---|---|---|
+| **Static showcase** | browse, search, favorite, download | deploy the repository to GitHub Pages ([guide](docs/DEPLOYMENT.md)) |
+| **Desktop / server** | everything above **plus** crawler controls, live progress, repair tools, *Set as wallpaper*, full exports | run the app locally |
+
+The same `index.html` serves both: it detects a Spotlight Studio backend on its own origin and unlocks the crawler console when one answers.
+
+## Quick start
+
+> **Git LFS:** the wallpapers are stored in [Git LFS](https://git-lfs.com/). Install it **before** cloning (`git lfs install`), or run `git lfs pull` afterwards — otherwise every image is a 130-byte pointer file. The app warns you if that happens.
+
+### Windows
+
+1. Install [Python 3.10+](https://www.python.org/downloads/) (tick *Add python.exe to PATH*).
+2. Double-click **`start_desktop.bat`** — it creates the virtual environment, installs the dependencies and opens the app window.
+
+| Launcher | Purpose |
+|---|---|
+| `start_desktop.bat` | native window (WebView2) – falls back to your browser automatically |
+| `start_server.bat` | headless server – open <http://127.0.0.1:8765/> |
+| `start_update.bat` | no UI: fetch what is new and exit – schedule it daily ([how](docs/DEPLOYMENT.md#automatic-updates)) |
+
+### Linux / macOS
 
 ```bash
-# 1. Clone repository
-git clone https://github.com/KetanDutt/WindowsSpotlightWallpapers.git
-cd WindowsSpotlightWallpapers
-
-# 2. Set up virtual environment
-python -m venv venv
-
-# Windows activate:
-.\venv\Scripts\activate
-# Linux/macOS activate:
-source venv/bin/activate
-
-# 3. Install dependencies
+git lfs install && git clone https://github.com/KetanDutt/SpotlightStudio.git && cd SpotlightStudio
+python3 -m venv .venv && . .venv/bin/activate
 pip install -r requirements.txt
-
-# 4. Run Desktop Window:
-python main.py
-
-# Or run Headless Server:
-python main.py --server --port 8765
+python main.py --server            # then open http://127.0.0.1:8765/
 ```
 
----
+(`python main.py` opens a native window where PyWebView is available and otherwise falls back to the browser. `make help` lists more shortcuts.)
 
-## 🌐 Deploy to GitHub Pages (Static Web Showcase)
+## Using it
 
-Deploy a public, interactive web showcase with zero server hosting costs:
+### The crawler (desktop / server mode)
 
-1. Push your repository to GitHub (ensure `data/wallpapers.json` and `images/` are committed).
-2. Go to **Settings** → **Pages** on your GitHub repository.
-3. Under **Build and deployment**:
-   - **Source**: `Deploy from a branch`
-   - **Branch**: `main`
-   - **Folder**: `/ (root)`
-4. Click **Save**. Within 1–2 minutes, your showcase will be live at:
-   `https://<your-username>.github.io/<your-repository-name>/`
+Open the **Crawler** panel in the sidebar, choose a **source** and a **mode**, press **Start**:
 
----
-
-## 🔄 Collaboration & Resuming Downloads
-
-Both the SQLite database (`data/wallpapers.db`), the static catalog (`data/wallpapers.json`), and downloaded wallpapers (`images/`) are tracked in git:
-- **Pick Up Where Anyone Left Off**: When anyone clones the repository, the database already knows which 1,378+ images are downloaded. Clicking **Start** in the desktop app continues downloading the remaining queue without rescraping.
-- **Updating the Web Catalog**: After downloading new wallpapers, simply commit and push:
-  ```bash
-  git add images/ data/
-  git commit -m "Update wallpapers catalog"
-  git push
-  ```
-  GitHub Pages will automatically update with the latest wallpapers!
-
----
-
-## ⚙️ Concurrency & Bandwidth Configuration
-
-All parameters are centralized in `.env`:
-
-```dotenv
-# Server Configuration
-HOST=127.0.0.1
-PORT=8765
-
-# Storage Directories
-IMAGES_DIR=images
-DB_PATH=data/wallpapers.db
-LOG_PATH=data/downloader.log
-
-# ── High-Throughput Concurrency Settings ──
-CONCURRENT_DOWNLOADS=32      # Simultaneous downloads (try 64 on 100+ Mbps)
-CONCURRENT_SCRAPERS=4        # Gallery pages scraped in parallel
-MAX_CONNECTIONS=128          # Total TCP socket connection pool
-MAX_CONNECTIONS_PER_HOST=48  # Max connections per host
-CPU_THREADS=0                # ThreadPool workers (0 = auto)
-
-# ── Reliability ──
-REQUEST_DELAY_SECONDS=0.1
-MAX_RETRIES=3
-REQUEST_TIMEOUT_SECONDS=30
-```
-
----
-
-## 📂 Project Architecture
-
-```
-WindowsSpotlightWallpapers/
-├── .env                     # Local environment settings
-├── .env.example             # Example configuration template
-├── .gitignore               # Clean Git ignore rules (tracks images & DB, ignores logs/venv)
-├── index.html               # Dual-mode Apple Liquid Glass UI (GitHub Pages & Desktop)
-├── sw.js                    # High-performance Service Worker (offline cache & instant load)
-├── main.py                  # Application entry point (CLI & PyWebView launcher)
-├── requirements.txt         # Pinned project dependencies
-├── start_desktop.bat        # Windows desktop 1-click launcher with auto-setup
-├── start_server.bat         # Headless browser mode 1-click launcher with auto-setup
-├── README.md                # Project documentation
-│
-├── docs/                    # Comprehensive Documentation Suite
-│   ├── ARCHITECTURE.md      # Detailed system design, concurrency model & deduplication
-│   ├── API.md               # REST API reference, endpoints, schemas & examples
-│   ├── DEPLOYMENT.md        # GitHub Pages setup, server hosting & scheduled task guide
-│   └── TROUBLESHOOTING.md   # Diagnostic guide for common issues & solutions
-│
-├── src/
-│   ├── __init__.py          # Package initialization
-│   ├── config.py            # Typed settings & environment loader
-│   ├── database.py          # SQLite schema, WAL mode, transaction management & queues
-│   ├── scrapers.py          # Async scrapers for Peapix & Windows10Spotlight
-│   ├── downloader.py        # Async downloader + ThreadPoolExecutor for PIL/dHash
-│   ├── engine.py            # Dual-pool download & scraping coordination engine
-│   └── api.py               # FastAPI REST endpoints & static file serving
-│
-├── templates/
-│   └── index.html           # Server-side HTML template (synced with root index.html)
-│
-├── images/                  # Wallpapers partitioned into source folders
-│   ├── peapix/              # Full-resolution 4K/UHD wallpapers from Peapix
-│   ├── win10spotlight/      # Full-resolution wallpapers from Windows10Spotlight
-│   └── thumbs/              # Fast 480×270 thumbnail cache organized by source
-│       ├── peapix/
-│       └── win10spotlight/
-│
-└── data/
-    ├── wallpapers.db        # SQLite database storing metadata & queue state
-    ├── wallpapers.json      # Lightweight static catalog for GitHub Pages
-    └── downloader.log       # Application logs (ignored in git)
-```
-
----
-
-## 🌐 REST API Endpoints Overview
-
-| Method | Endpoint | Description |
+| Mode | What it does | Typical time |
 |---|---|---|
-| `GET` | `/` | Serves the Liquid Glass single-page application |
-| `GET` | `/api/health` | Health check returning status and queue sizes |
-| `GET` | `/api/status` | Engine status, download counters, speed, and concurrency |
-| `POST` | `/api/control/start` | Starts or resumes background crawling & downloading |
-| `POST` | `/api/control/pause` | Pauses background workers safely |
-| `POST` | `/api/control/stop` | Stops the engine and synchronizes `wallpapers.json` |
-| `GET` | `/api/wallpapers` | Paginated, searchable, and sortable wallpaper catalog |
-| `GET` | `/api/wallpapers/{id}` | Fetches metadata for a single wallpaper |
-| `POST` | `/api/wallpapers/{id}/set-wallpaper` | Applies the image as Windows desktop wallpaper |
-| `POST` | `/api/catalog/sync` | Manually triggers `data/wallpapers.json` export |
-| `GET` | `/api/export/json` | Exports entire wallpaper database as JSON |
-| `GET` | `/api/wallpapers/{id}/image` | Redirects to the full-resolution wallpaper image |
-| `GET` | `/api/export/csv` | Exports entire wallpaper database as CSV |
-| `GET` | `/api/docs` | Interactive Swagger UI API documentation |
-| `GET` | `/api/redoc` | Interactive ReDoc documentation |
+| **Quick update** | scans the newest `QUICK_UPDATE_PAGES` (3) pages of each site and fetches only what is new | seconds |
+| **Full crawl** | discovers the real page count, scans every page, resumes any unfinished backlog | minutes |
+| **Repair metadata** | re-reads gallery/post pages to fill in missing **titles and tags** of wallpapers you already have (no image downloads) | minutes |
 
-*For complete API schemas and query parameter definitions, see [`docs/API.md`](docs/API.md).*
+Pause, resume and stop at any time — unfinished work stays in the queue. Progress, speed, queue size and a summary of the last run are shown live.
 
----
+### Command line
 
-## 📋 Changelog
+```bash
+python main.py                         # desktop window
+python main.py --server [--host 0.0.0.0 --port 8765]
+python main.py --crawl --mode quick    # one-shot update without UI (cron / Task Scheduler)
+python main.py --crawl --mode full --source peapix
+python main.py --crawl --mode repair   # back-fill titles and tags
+python main.py --check                 # database ⇄ files health report (exit code 2 if problems)
+python main.py --sync-catalog          # regenerate data/wallpapers.json
+```
 
-See [`CHANGELOG.md`](CHANGELOG.md) for a detailed version history.
+### Keyboard shortcuts
 
-## 🤝 Contributing
+`/` search · `R` random wallpaper · `F` favorite / favorites view · `←` `→` previous / next · `C` copy link · `D` download · `Enter` fullscreen · `Esc` close · `?` help
 
-Contributions are welcome! See [`CONTRIBUTING.md`](CONTRIBUTING.md) for development setup, code style, and PR guidelines.
+## Configuration
 
-## 📚 Documentation Links
+Copy `.env.example` to `.env` (the Windows launchers do it for you). Everything has a sensible default and invalid values fall back to it with a warning. The most useful settings:
 
-- 🏛️ **[System Architecture & Concurrency](docs/ARCHITECTURE.md)**: Deep dive into the dual async pools, CPU thread pool, and perceptual deduplication.
-- 🔌 **[REST API Specification](docs/API.md)**: Full endpoint reference, query parameters, schemas, and examples.
-- 🚀 **[Deployment Guide](docs/DEPLOYMENT.md)**: GitHub Pages configuration, server deployment, and Windows Task Scheduler setup.
-- 🛠️ **[Troubleshooting Guide](docs/TROUBLESHOOTING.md)**: Diagnostic steps for webview fallback, port conflicts, and permissions.
+| Setting | Default | |
+|---|---|---|
+| `CONCURRENT_DOWNLOADS` | `32` | parallel image downloads |
+| `QUICK_UPDATE_PAGES` | `3` | pages per site scanned by a quick update |
+| `HOST` / `PORT` | `127.0.0.1` / `8765` | bind address (non-loopback ⇒ read [the security notes](docs/SECURITY.md)) |
+| `VERIFY_SSL` | `true` | TLS certificate verification |
+
+Full reference: [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
+
+## Project layout
+
+```
+main.py                 entry point (desktop window · server · crawl · check)
+src/
+  config.py             validated settings from .env
+  database.py           SQLite layer: schema v2 migrations, claim-based queues, search, catalog
+  scrapers.py           Peapix + Windows10Spotlight parsers, page discovery, title enrichment
+  downloader.py         fetch → analyse (CPU pool) → de-duplicate → store
+  engine.py             crawl orchestrator (quick / full / repair, pause, stop, circuit breaker)
+  maintenance.py        dedupe sweep, thumbnail repair, health check, start-up tasks
+  hashing.py            256-bit dHash (bit-identical to imagehash, no NumPy/SciPy)
+  storage.py            file layout, atomic writes, Git-LFS pointer detection
+  api.py · security.py  FastAPI app, Host/Origin checks, CSP and security headers
+  wallpaper.py          set the desktop wallpaper (Windows, macOS, GNOME/KDE)
+index.html              the single-page UI shell
+static/                 css/app.css · js/core.js (pure logic) · js/app.js (UI) · icons/
+sw.js · manifest.webmanifest   PWA
+data/                   wallpapers.db (SQLite) · wallpapers.json (static catalog)
+images/                 wallpapers + thumbnails (Git LFS)
+tests/                  pytest suite (fake source site) + Node tests for core.js
+docs/                   architecture, API, configuration, deployment, security, …
+scripts/                setup_env.bat (launcher helper) · make_icons.py
+start_*.bat · Makefile  Windows launchers · developer shortcuts
+.github/                CI workflow, Dependabot, issue / PR templates
+```
+
+## How it works (in short)
+
+1. **Scrape** gallery pages (parsers are structure-agnostic: they rely on content patterns, not CSS class names).
+2. **Queue** every unknown image URL in SQLite.
+3. **Download** with up to 32 workers; decode, hash and thumbnail each image in *one* thread-pool job.
+4. **De-duplicate** with a 256-bit difference hash: near-duplicates (Hamming distance ≤ 4) keep the higher resolution and merge titles/tags.
+5. **Export** a compact `data/wallpapers.json` that the static site loads.
+
+Details and diagrams: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+## Development
+
+```bash
+pip install -r requirements-dev.txt
+pytest                                  # 200+ tests, fully offline (a fake Peapix/Win10 site)
+node --test tests/js/*.test.mjs         # unit tests of the front-end logic
+ruff check .
+```
+
+Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) and [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
+
+## Documentation
+
+| | |
+|---|---|
+| [Architecture](docs/ARCHITECTURE.md) | components, data flow, concurrency and reliability model |
+| [REST API](docs/API.md) | every endpoint with examples |
+| [Configuration](docs/CONFIGURATION.md) | all environment variables |
+| [Deployment](docs/DEPLOYMENT.md) | GitHub Pages, local/headless use, scheduled updates, upgrading |
+| [Front-end](docs/FRONTEND.md) | modules, URL parameters, CSP, service worker |
+| [Data formats](docs/DATA.md) | catalog JSON, database schema, normalisation rules |
+| [Security](docs/SECURITY.md) | threat model and hardening |
+| [Troubleshooting](docs/TROUBLESHOOTING.md) | common problems and fixes |
+| [Roadmap](docs/ROADMAP.md) | suggested improvements |
+| [Changelog](CHANGELOG.md) | release notes |
+
+## License & disclaimer
+
+© 2026 Ketan Dutt. **All rights reserved** — the repository is provided for viewing and evaluation; see [LICENSE](LICENSE) (contact in the license file for commercial use).
+
+Spotlight Studio is an unofficial project. It is not affiliated with or endorsed by Microsoft, Peapix or Windows10Spotlight. The wallpapers remain the property of their respective copyright holders.
