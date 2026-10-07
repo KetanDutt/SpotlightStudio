@@ -5,7 +5,7 @@ import React, { memo } from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import { radius, spacing } from '../../theme/tokens';
-import { useColors } from '../../theme/ThemeProvider';
+import { useTheme } from '../../theme/ThemeProvider';
 import type { Wallpaper } from '../../core/types';
 import { QUALITY_LABELS, fmtBytes, fmtDate, fmtWallpaperSize } from '../../core/utils';
 import { AppText } from '../ui/AppText';
@@ -20,7 +20,7 @@ export interface WallpaperRowProps {
 }
 
 export const WallpaperRow = memo(function WallpaperRow({ item, thumb, favorite, onPress, onToggleFavorite }: WallpaperRowProps) {
-  const colors = useColors();
+  const { colors, reduceMotion } = useTheme();
   const meta = [QUALITY_LABELS[item.q] ?? item.q, fmtWallpaperSize(item.raw.width, item.raw.height).split(' · ')[0], fmtBytes(item.raw.file_size)]
     .filter(Boolean)
     .join(' · ');
@@ -31,12 +31,12 @@ export const WallpaperRow = memo(function WallpaperRow({ item, thumb, favorite, 
       accessibilityLabel={`${item.title}, ${meta}`}
       onPress={() => onPress(item)}
       plain
-      style={[styles.row, { backgroundColor: colors.surface, borderColor: colors.stroke }]}
+      style={[styles.row, { backgroundColor: 'transparent', borderColor: colors.stroke }]}
     >
       <Image
         source={{ uri: thumb }}
         contentFit="cover"
-        transition={180}
+        transition={reduceMotion ? 0 : 180}
         cachePolicy="disk"
         recyclingKey={item.key}
         style={[styles.thumb, { backgroundColor: colors.fill }]}
@@ -78,7 +78,7 @@ const styles = StyleSheet.create({
     gap: spacing.md,
     padding: spacing.sm,
     borderRadius: radius.lg,
-    borderWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: StyleSheet.hairlineWidth,
   },
   thumb: {
     width: 92,
@@ -90,8 +90,8 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   heart: {
-    width: 36,
-    height: 36,
+    width: 44,
+    height: 44,
     alignItems: 'center',
     justifyContent: 'center',
   },

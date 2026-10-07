@@ -6,7 +6,7 @@
  */
 import { Ionicons } from '@expo/vector-icons';
 import React from 'react';
-import { ActivityIndicator, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 
 import { radius, spacing } from '../../theme/tokens';
 import { useColors } from '../../theme/ThemeProvider';
@@ -17,7 +17,14 @@ export function LoadingState({ message = 'Loading wallpapers…' }: { message?: 
   const colors = useColors();
   return (
     <View style={styles.wrap} accessibilityRole="progressbar" accessibilityLabel={message}>
-      <ActivityIndicator size="large" color={colors.accent} />
+      <View style={styles.loadingGrid} accessible={false}>
+        {Array.from({ length: 6 }, (_, index) => (
+          <View key={index} style={styles.skeletonTile}>
+            <View style={[styles.skeletonPhoto, { backgroundColor: colors.fillHover }]} />
+            <View style={[styles.skeletonLine, { backgroundColor: colors.fill }]} />
+          </View>
+        ))}
+      </View>
       <AppText variant="label" tone="muted">
         {message}
       </AppText>
@@ -67,7 +74,7 @@ export function ErrorState({ title = 'Something went wrong', message, onRetry, d
   const colors = useColors();
   return (
     <View style={styles.wrap}>
-      <View style={[styles.iconWrap, { backgroundColor: 'rgba(248, 113, 113, 0.14)', borderColor: 'rgba(248, 113, 113, 0.3)' }]}>
+      <View style={[styles.iconWrap, { backgroundColor: colors.dangerFill, borderColor: colors.stroke }]}>
         <Ionicons name="cloud-offline-outline" size={30} color={colors.danger} />
       </View>
       <AppText variant="subheading" align="center">
@@ -103,6 +110,10 @@ export function ProgressBar({ value, tone, label }: { value: number; tone?: stri
 }
 
 const styles = StyleSheet.create({
+  loadingGrid: { width: '100%', flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md },
+  skeletonTile: { width: '47%', gap: spacing.sm, marginBottom: spacing.md },
+  skeletonPhoto: { aspectRatio: 1.4, borderRadius: radius.md },
+  skeletonLine: { height: 12, width: '75%', borderRadius: radius.sm },
   wrap: {
     flex: 1,
     alignItems: 'center',

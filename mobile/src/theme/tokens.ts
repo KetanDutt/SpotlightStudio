@@ -1,7 +1,7 @@
 /**
  * Design tokens – the mobile twin of `static/css/app.css` ("Liquid Glass").
  *
- * The palette, gradients, radii and type scale are deliberately the *same values* as the
+ * The palette, semantic materials and motion vocabulary are shared with the
  * web app so the two clients look like one product.  Values live here only; components
  * read them through `useTheme()`.
  */
@@ -11,6 +11,14 @@ export type ThemeName = 'dark' | 'light';
 export interface Palette {
   /** App background (behind everything). */
   bg: string;
+  glassSecondary: string;
+  glassFloating: string;
+  accentFill: string;
+  dangerFill: string;
+  warnFill: string;
+  imageControl: string;
+  imageText: string;
+  imageFavorite: string;
   /** Elevated surface: cards, sheets, rows. */
   surface: string;
   /** Slightly stronger surface for pressed / selected states. */
@@ -43,61 +51,43 @@ export interface Palette {
 }
 
 export const DARK: Palette = {
-  bg: '#07080d',
-  surface: '#0e1119',
-  surfaceAlt: '#141a26',
-  glass: 'rgba(17, 21, 33, 0.66)',
-  glassStrong: 'rgba(12, 15, 25, 0.92)',
-  fill: 'rgba(255, 255, 255, 0.055)',
-  fillHover: 'rgba(255, 255, 255, 0.1)',
-  stroke: 'rgba(255, 255, 255, 0.09)',
-  strokeStrong: 'rgba(255, 255, 255, 0.17)',
-  text: '#f4f7fb',
-  textMuted: '#aab5c7',
-  textFaint: '#8795ab',
-  accent: '#4aa8ff',
-  onAccent: '#061320',
-  ok: '#34d399',
-  warn: '#fbbf24',
-  danger: '#f87171',
-  scrim: 'rgba(3, 4, 8, 0.6)',
-  viewer: 'rgba(3, 4, 8, 0.94)',
-  gradient: ['#38bdf8', '#3b82f6', '#6366f1'],
-  shadow: '#000000',
+  bg: '#151918', surface: '#202624', surfaceAlt: '#2a332d',
+  glass: 'rgba(32,39,35,0.82)', glassStrong: 'rgba(35,43,38,0.95)',
+  glassSecondary: 'rgba(37,46,41,0.45)', glassFloating: 'rgba(42,51,45,0.93)',
+  fill: 'rgba(222,236,227,0.045)', fillHover: 'rgba(222,236,227,0.085)',
+  stroke: 'rgba(232,242,234,0.08)', strokeStrong: 'rgba(232,242,234,0.15)',
+  text: '#eef2ef', textMuted: '#bac4be', textFaint: '#98a69d',
+  accent: '#b5d5c5', onAccent: '#203e31', accentFill: 'rgba(181,213,197,0.12)',
+  ok: '#accdbb', warn: '#dbbf8a', danger: '#edaaa7',
+  dangerFill: 'rgba(237,170,167,0.10)', warnFill: 'rgba(219,191,138,0.10)',
+  scrim: 'rgba(9,15,12,0.42)', viewer: 'rgba(15,21,18,0.96)',
+  gradient: ['#c3ddcf', '#bad8c9', '#b5d5c5'], shadow: '#09110c',
+  imageControl: 'rgba(19,30,23,0.78)', imageText: '#ffffff', imageFavorite: '#ffd3ce',
   dark: true,
 };
 
 export const LIGHT: Palette = {
-  bg: '#eef2f8',
-  surface: '#ffffff',
-  surfaceAlt: '#f4f7fb',
-  glass: 'rgba(255, 255, 255, 0.74)',
-  glassStrong: 'rgba(255, 255, 255, 0.94)',
-  fill: 'rgba(15, 23, 42, 0.05)',
-  fillHover: 'rgba(15, 23, 42, 0.09)',
-  stroke: 'rgba(15, 23, 42, 0.1)',
-  strokeStrong: 'rgba(15, 23, 42, 0.2)',
-  text: '#0e1626',
-  textMuted: '#475569',
-  textFaint: '#546378',
-  accent: '#1757c4',
-  onAccent: '#ffffff',
-  ok: '#065f46',
-  warn: '#92400e',
-  danger: '#b91c1c',
-  scrim: 'rgba(15, 23, 42, 0.35)',
-  viewer: 'rgba(238, 242, 248, 0.94)',
-  gradient: ['#2f9bf0', '#2563eb', '#4f46e5'],
-  shadow: '#1e293b',
+  bg: '#f5f5f1', surface: '#fcfcf9', surfaceAlt: '#eef1ea',
+  glass: 'rgba(253,254,250,0.78)', glassStrong: 'rgba(253,254,250,0.96)',
+  glassSecondary: 'rgba(250,252,247,0.5)', glassFloating: 'rgba(253,254,250,0.94)',
+  fill: 'rgba(34,57,43,0.035)', fillHover: 'rgba(34,57,43,0.065)',
+  stroke: 'rgba(35,57,44,0.07)', strokeStrong: 'rgba(35,57,44,0.14)',
+  text: '#252f29', textMuted: '#58675d', textFaint: '#5f6d63',
+  accent: '#3c6250', onAccent: '#ffffff', accentFill: 'rgba(60,98,80,0.08)',
+  ok: '#426a51', warn: '#886524', danger: '#a04742',
+  dangerFill: 'rgba(160,71,66,0.07)', warnFill: 'rgba(136,101,36,0.07)',
+  scrim: 'rgba(36,47,39,0.24)', viewer: 'rgba(241,245,239,0.97)',
+  gradient: ['#476f5b', '#416954', '#3c6250'], shadow: '#24392c',
+  imageControl: 'rgba(19,30,23,0.78)', imageText: '#ffffff', imageFavorite: '#ffd3ce',
   dark: false,
 };
 
 export const PALETTES: Record<ThemeName, Palette> = { dark: DARK, light: LIGHT };
 
 export const radius = {
-  sm: 10,
-  md: 14,
-  lg: 20,
+  sm: 8,
+  md: 12,
+  lg: 18,
   xl: 26,
   pill: 999,
 } as const;
@@ -115,12 +105,12 @@ export const spacing = {
 
 export const fontSize = {
   xxs: 10,
-  xs: 11.5,
+  xs: 12,
   sm: 13,
   md: 15,
   lg: 17.5,
-  xl: 22,
-  xxl: 28,
+  xl: 28,
+  xxl: 34,
 } as const;
 
 export const weight = {
@@ -134,7 +124,12 @@ export const weight = {
 export const TOUCH_TARGET = 44;
 
 export const durations = {
-  fast: 140,
-  normal: 240,
-  slow: 420,
+  fast: 150,
+  normal: 260,
+  slow: 380,
 } as const;
+
+/** BlurView intensity units, not CSS pixels; use only on structural surfaces. */
+export const material = { secondary: 12, primary: 28, floating: 40, tinted: 20 } as const;
+export const depth = { navigation: 10, overlay: 20, toast: 30 } as const;
+export const navigation = { height: 64, inset: 12, contentInset: 100 } as const;

@@ -32,7 +32,7 @@ export default function AboutScreen() {
   return (
     <View style={styles.fill}>
       <View style={[styles.header, { paddingTop: insets.top + spacing.sm }]}>
-        <IconButton icon="chevron-down" accessibilityLabel="Close" onPress={() => (router.canGoBack() ? router.back() : router.push('/'))} translucent />
+        <IconButton icon="chevron-down" accessibilityLabel="Close" onPress={() => (router.canGoBack() ? router.back() : router.push('/'))} />
         <AppText variant="heading">About</AppText>
         <View style={styles.headerSpacer} />
       </View>

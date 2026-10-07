@@ -1,0 +1,12 @@
+{
+  "name": "spotlight-studio-web-tests",
+  "private": true,
+  "description": "Development-only browser checks; the gallery has no npm runtime dependencies.",
+  "scripts": {
+    "test": "node --test tests/js/*.test.mjs",
+    "test:browser": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0"
+  }
+}

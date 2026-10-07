@@ -9,7 +9,9 @@
 import { Directory, DownloadTask, File, Paths } from 'expo-file-system';
 // `Asset`/`Album` are the current (non-deprecated) media-library API – the legacy
 // `createAssetAsync`/`getAlbumAsync` functions throw at runtime in SDK 57.
-import { Album, Asset, getPermissionsAsync, requestPermissionsAsync } from 'expo-media-library';
+import type { Album } from 'expo-media-library';
+// SDK 57's Next module has no web implementation. Load it only when a native
+// photo action is requested, never while mounting the cross-platform gallery.
 import * as Sharing from 'expo-sharing';
 import * as Clipboard from 'expo-clipboard';
 
@@ -18,6 +20,13 @@ import type { Wallpaper } from '../core/types';
 import { downloadFilename } from '../core/utils';
 
 export const ALBUM_NAME = 'Spotlight Studio';
+
+function mediaLibrary(): typeof import('expo-media-library') {
+  // Intentionally lazy: Metro and Jest both support this without evaluating the
+  // native-only module when the web gallery first mounts.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  return require('expo-media-library');
+}
 
 export interface DownloadedFile {
   uri: string;
@@ -140,6 +149,7 @@ export async function downloadWallpaper(
  */
 export async function ensureMediaPermission(): Promise<boolean> {
   try {
+    const { getPermissionsAsync, requestPermissionsAsync } = mediaLibrary();
     const current = await getPermissionsAsync(true, ['photo']);
     if (current.granted) return true;
     const asked = await requestPermissionsAsync(true, ['photo']);
@@ -154,6 +164,7 @@ export async function ensureMediaPermission(): Promise<boolean> {
 
 /** The app's album, created on first use. */
 export async function ensureAlbum(): Promise<Album | undefined> {
+  const { Album } = mediaLibrary();
   try {
     const existing = await Album.get(ALBUM_NAME);
     if (existing) return existing;
@@ -180,6 +191,7 @@ export async function saveToLibrary(item: Wallpaper): Promise<MediaResult<Downlo
   }
 
   try {
+    const { Asset } = mediaLibrary();
     const album = await ensureAlbum();
     const asset = await Asset.create(downloaded.value.uri, album);
     return ok({ ...downloaded.value, assetId: asset.id });

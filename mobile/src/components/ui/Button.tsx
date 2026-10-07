@@ -1,9 +1,8 @@
 /**
- * Buttons – primary (gradient), secondary (glass) and ghost, with an icon slot, a loading
+ * Buttons – primary (soft fill), secondary (glass) and ghost, with an icon slot, a loading
  * state and a disabled state.  Accessibility roles/labels are set here once.
  */
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 import React from 'react';
 import { ActivityIndicator, StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
 
@@ -33,7 +32,7 @@ export interface ButtonProps {
 }
 
 const SIZES: Record<ButtonSize, { height: number; paddingHorizontal: number; icon: number; variant: 'label' | 'body' | 'subheading' }> = {
-  sm: { height: 34, paddingHorizontal: spacing.md, icon: 15, variant: 'label' },
+  sm: { height: TOUCH_TARGET, paddingHorizontal: spacing.md, icon: 15, variant: 'label' },
   md: { height: TOUCH_TARGET, paddingHorizontal: spacing.lg, icon: 18, variant: 'body' },
   lg: { height: 54, paddingHorizontal: spacing.xl, icon: 20, variant: 'subheading' },
 };
@@ -59,11 +58,11 @@ export function Button({
 
   const background =
     variant === 'primary'
-      ? null
+      ? { backgroundColor: colors.accent }
       : variant === 'secondary'
         ? { backgroundColor: colors.fill, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.stroke }
         : variant === 'danger'
-          ? { backgroundColor: 'rgba(248, 113, 113, 0.12)', borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(248, 113, 113, 0.35)' }
+          ? { backgroundColor: colors.dangerFill, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.stroke }
           : null;
 
   const content = (
@@ -109,14 +108,6 @@ export function Button({
         style,
       ]}
     >
-      {variant === 'primary' ? (
-        <LinearGradient
-          colors={[...colors.gradient]}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={StyleSheet.absoluteFill}
-        />
-      ) : null}
       {content}
     </Touchable>
   );

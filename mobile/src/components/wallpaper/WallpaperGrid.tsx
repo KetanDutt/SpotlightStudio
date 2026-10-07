@@ -9,7 +9,8 @@ import { FlashList, type ListRenderItemInfo } from '@shopify/flash-list';
 import React, { useCallback, useMemo } from 'react';
 import { RefreshControl, StyleSheet, View, useWindowDimensions } from 'react-native';
 
-import { spacing } from '../../theme/tokens';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { navigation, spacing } from '../../theme/tokens';
 import { useColors } from '../../theme/ThemeProvider';
 import type { Wallpaper } from '../../core/types';
 import { WallpaperCard } from './WallpaperCard';
@@ -54,13 +55,13 @@ export function WallpaperGrid({
   testID,
 }: WallpaperGridProps) {
   const colors = useColors();
+  const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
 
   // Card width: screen minus the outer padding and the gutters between columns.
   const columnCount = view === 'grid' ? cols : 1;
   const cardWidth = useMemo(() => {
-    const gutters = spacing.sm * (columnCount - 1);
-    return Math.floor((width - contentPadding * 2 - gutters) / columnCount);
+    return Math.floor((width - contentPadding * 2) / columnCount - spacing.xs * 2);
   }, [columnCount, contentPadding, width]);
 
   const renderItem = useCallback(
@@ -106,7 +107,7 @@ export function WallpaperGrid({
       optimizeItemArrangement
       onEndReached={onEndReached}
       onEndReachedThreshold={0.6}
-      contentContainerStyle={{ paddingHorizontal: contentPadding, paddingBottom: spacing.xxxl }}
+      contentContainerStyle={{ paddingHorizontal: contentPadding, paddingBottom: navigation.contentInset + insets.bottom }}
       ListHeaderComponent={ListHeaderComponent}
       ListFooterComponent={ListFooterComponent}
       ListEmptyComponent={ListEmptyComponent}
@@ -132,6 +133,7 @@ export function WallpaperGrid({
 const styles = StyleSheet.create({
   gridItem: {
     padding: spacing.xs,
+    paddingBottom: spacing.lg,
     flex: 1,
   },
   listItem: {

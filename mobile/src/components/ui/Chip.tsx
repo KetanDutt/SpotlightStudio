@@ -1,9 +1,8 @@
 /**
  * Chip – the filter/tag pill used across the gallery.  Selected chips use the accent
- * gradient; the optional `onRemove` turns it into a removable "active filter" chip.
+ * tint; the optional `onRemove` turns it into a removable "active filter" chip.
  */
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 import React, { createElement } from 'react';
 import { StyleSheet, View } from 'react-native';
 
@@ -26,7 +25,7 @@ export interface ChipProps {
 
 export function Chip({ label, selected, count, icon, onPress, onRemove, disabled, size = 'md', testID }: ChipProps) {
   const colors = useColors();
-  const height = size === 'sm' ? 30 : 36;
+  const height = 44;
 
   return (
     <Touchable
@@ -45,35 +44,26 @@ export function Chip({ label, selected, count, icon, onPress, onRemove, disabled
           paddingEnd: spacing.md,
         },
         selected
-          ? { borderColor: 'transparent' }
+          ? { backgroundColor: colors.accentFill, borderColor: colors.strokeStrong, borderWidth: StyleSheet.hairlineWidth }
           : { backgroundColor: colors.fill, borderColor: colors.stroke, borderWidth: StyleSheet.hairlineWidth },
         disabled ? { opacity: 0.5 } : null,
       ]}
     >
-      {selected ? (
-        <LinearGradient
-          colors={[...colors.gradient]}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={StyleSheet.absoluteFill}
-        />
-      ) : null}
-
       {icon
         ? createElement(Ionicons, {
             name: icon,
             size: size === 'sm' ? 13 : 15,
-            color: selected ? colors.onAccent : colors.textMuted,
+            color: selected ? colors.accent : colors.textMuted,
             style: styles.icon,
           })
         : null}
 
-      <AppText variant={size === 'sm' ? 'caption' : 'label'} tone={selected ? 'onAccent' : 'default'} truncate>
+      <AppText variant={size === 'sm' ? 'caption' : 'label'} tone={selected ? 'accent' : 'default'} truncate>
         {label}
       </AppText>
 
       {count != null ? (
-        <AppText variant="caption" tone={selected ? 'onAccent' : 'faint'} style={styles.count}>
+        <AppText variant="caption" tone={selected ? 'accent' : 'faint'} style={styles.count}>
           {count.toLocaleString('en-US')}
         </AppText>
       ) : null}
@@ -89,7 +79,7 @@ export function Chip({ label, selected, count, icon, onPress, onRemove, disabled
             {createElement(Ionicons, {
               name: 'close-circle',
               size: size === 'sm' ? 14 : 16,
-              color: selected ? colors.onAccent : colors.textMuted,
+              color: selected ? colors.accent : colors.textMuted,
             })}
           </Touchable>
         </View>

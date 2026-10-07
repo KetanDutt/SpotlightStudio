@@ -1,6 +1,6 @@
 /** Horizontally scrolling tag chips (the most used tags of the library). */
 import React, { memo } from 'react';
-import { ScrollView, StyleSheet, View } from 'react-native';
+import { ScrollView, StyleSheet, View, useWindowDimensions } from 'react-native';
 
 import { spacing } from '../../theme/tokens';
 import { Chip } from '../ui/Chip';
@@ -16,10 +16,12 @@ export interface TagRailProps {
 }
 
 export const TagRail = memo(function TagRail({ tags, selected, onSelect, showAll = true, onOpenAll }: TagRailProps) {
+  const { fontScale } = useWindowDimensions();
   if (!tags.length) return null;
   return (
     <ScrollView
       horizontal
+      style={{ flexGrow: 0, flexShrink: 0, height: Math.max(60, Math.ceil(44 * fontScale + 16)) }}
       showsHorizontalScrollIndicator={false}
       contentContainerStyle={styles.content}
       keyboardShouldPersistTaps="handled"

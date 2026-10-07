@@ -5,7 +5,7 @@
  * The palette is memoised so screens re-render only when the resolved theme changes.
  */
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { useColorScheme } from 'react-native';
+import { AccessibilityInfo, useColorScheme } from 'react-native';
 
 import { getJson, KEYS, setJson } from '../services/storage';
 import type { Palette, ThemeName } from './tokens';
@@ -24,6 +24,8 @@ interface ThemeContextValue {
   /** Cycles light → dark → auto, for a one-tap toggle in the header. */
   toggle: () => void;
   ready: boolean;
+  reduceMotion: boolean;
+  reduceTransparency: boolean;
 }
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
@@ -32,6 +34,21 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const system = useColorScheme();
   const [preference, setPreferenceState] = useState<ThemePreference>('auto');
   const [ready, setReady] = useState(false);
+  const [reduceMotion, setReduceMotion] = useState(true);
+  const [reduceTransparency, setReduceTransparency] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    void AccessibilityInfo.isReduceMotionEnabled().then(value => {
+      if (alive) setReduceMotion(Boolean(value));
+    }).catch(() => {});
+    void AccessibilityInfo.isReduceTransparencyEnabled?.().then(value => {
+      if (alive) setReduceTransparency(Boolean(value));
+    }).catch(() => {});
+    const motion = AccessibilityInfo.addEventListener('reduceMotionChanged', setReduceMotion);
+    const transparency = AccessibilityInfo.addEventListener('reduceTransparencyChanged', setReduceTransparency);
+    return () => { alive = false; motion?.remove(); transparency?.remove(); };
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -61,8 +78,8 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const value = useMemo<ThemeContextValue>(
-    () => ({ colors: PALETTES[scheme], preference, scheme, setPreference, toggle, ready }),
-    [scheme, preference, setPreference, toggle, ready],
+    () => ({ colors: PALETTES[scheme], preference, scheme, setPreference, toggle, ready, reduceMotion, reduceTransparency }),
+    [scheme, preference, setPreference, toggle, ready, reduceMotion, reduceTransparency],
   );
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;

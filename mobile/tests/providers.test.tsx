@@ -19,10 +19,13 @@ jest.mock('expo-task-manager', () => ({
 
 import { act, render, screen, waitFor } from '@testing-library/react-native';
 import React from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Text, View } from 'react-native';
 
 import { CatalogProvider, useCatalog } from '../src/providers/CatalogProvider';
 import { PreferencesProvider, usePreferences } from '../src/providers/PreferencesProvider';
+import { KEYS } from '../src/services/storage';
+import { CACHE_POLICY } from '../src/core/config';
 import { ThemeProvider } from '../src/theme/ThemeProvider';
 
 const fs = jest.requireMock('expo-file-system') as ReturnType<typeof import('./mocks').fileSystemMock>;
@@ -39,13 +42,14 @@ function mockFetchOnce(rows: unknown, ok = true, status = 200) {
 }
 
 function CatalogProbe() {
-  const { catalog, meta, loading, error } = useCatalog();
+  const { catalog, meta, loading, error, refresh } = useCatalog();
   return (
     <View>
       <Text testID="count">{String(catalog?.total ?? -1)}</Text>
       <Text testID="origin">{meta.origin}</Text>
       <Text testID="loading">{String(loading)}</Text>
       <Text testID="error">{error ?? ''}</Text>
+      <Text testID="refresh" onPress={refresh}>Refresh</Text>
     </View>
   );
 }
@@ -70,7 +74,8 @@ function FavoriteProbe() {
   );
 }
 
-beforeEach(() => {
+beforeEach(async () => {
+  await AsyncStorage.clear();
   fs.__reset();
   jest.clearAllMocks();
 });
@@ -118,6 +123,37 @@ describe('CatalogProvider', () => {
 
     await waitFor(() => expect(screen.getByTestId('count').props.children).toBe('6'));
     expect(screen.getByTestId('origin').props.children).toBe('bundled');
+  });
+
+  it('uses a fresh disk cache after a cold launch without fetching', async () => {
+    const file = new fs.File(new fs.Directory(fs.Paths.cache, 'spotlight-studio'), 'wallpapers.json');
+    file.write(JSON.stringify(require('./fixtures').RAW_ROWS.slice(0, 2)));
+    await AsyncStorage.setItem(KEYS.lastCatalogAt, JSON.stringify(Date.now()));
+    mockFetchOnce(require('./fixtures').RAW_ROWS);
+    await render(<CatalogProvider><CatalogProbe /></CatalogProvider>);
+    await waitFor(() => expect(screen.getByTestId('count').props.children).toBe('2'));
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it('refreshes an expired disk cache instead of treating it as fresh', async () => {
+    const file = new fs.File(new fs.Directory(fs.Paths.cache, 'spotlight-studio'), 'wallpapers.json');
+    file.write(JSON.stringify(require('./fixtures').RAW_ROWS.slice(0, 2)));
+    await AsyncStorage.setItem(KEYS.lastCatalogAt, JSON.stringify(Date.now() - CACHE_POLICY.catalogMaxAgeMs - 1000));
+    mockFetchOnce(require('./fixtures').RAW_ROWS);
+    await render(<CatalogProvider><CatalogProbe /></CatalogProvider>);
+    await waitFor(() => expect(screen.getByTestId('count').props.children).toBe('6'));
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('coalesces simultaneous manual refreshes', async () => {
+    mockFetchOnce(require('./fixtures').RAW_ROWS);
+    await render(<CatalogProvider><CatalogProbe /></CatalogProvider>);
+    await waitFor(() => expect(screen.getByTestId('loading').props.children).toBe('false'));
+    jest.mocked(global.fetch).mockClear();
+    await act(async () => {
+      await Promise.all([screen.getByTestId('refresh').props.onPress(), screen.getByTestId('refresh').props.onPress()]);
+    });
+    expect(global.fetch).toHaveBeenCalledTimes(1);
   });
 
   it('drops malformed rows instead of rendering blank cards', async () => {

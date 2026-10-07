@@ -34,6 +34,7 @@ import {
   topTags,
 } from '../../src/core/utils';
 import type { CatalogState, Wallpaper } from '../../src/core/types';
+import { useColors } from '../../src/theme/ThemeProvider';
 import { spacing } from '../../src/theme/tokens';
 import { useDebouncedValue } from '../../src/hooks/useDebouncedValue';
 import { useCatalog } from '../../src/providers/CatalogProvider';
@@ -42,6 +43,7 @@ import { usePreferences } from '../../src/providers/PreferencesProvider';
 const PAGE_SIZE = 60;
 
 export default function BrowseScreen() {
+  const colors = useColors();
   const router = useRouter();
   const params = useLocalSearchParams<Record<string, string>>();
   const insets = useSafeAreaInsets();
@@ -176,14 +178,14 @@ export default function BrowseScreen() {
           subtitle={`${fmtInt(filtered.length)} of ${fmtInt(catalog?.total ?? 0)} wallpapers`}
           actions={
             <>
-              <IconButton icon="search" accessibilityLabel="Search wallpapers" onPress={() => router.push('/search')} translucent testID="open-search" />
-              <IconButton icon="shuffle" accessibilityLabel="Open a random wallpaper" onPress={random} translucent />
+              <IconButton icon="search" accessibilityLabel="Search wallpapers" onPress={() => router.push('/search')} testID="open-search" />
+              <IconButton icon="shuffle" accessibilityLabel="Open a random wallpaper" onPress={random} />
               <IconButton
                 icon="options-outline"
                 accessibilityLabel="Filters and sorting"
                 onPress={() => setFilterOpen(true)}
                 active={Boolean(filters.source || filters.quality || filters.tag || filters.sort !== DEFAULT_STATE.sort)}
-                translucent
+
               />
             </>
           }
@@ -242,7 +244,7 @@ export default function BrowseScreen() {
 
       {error && catalog ? (
         <View style={styles.banner}>
-          <Ionicons name="cloud-offline-outline" size={15} color="#fbbf24" />
+          <Ionicons name="cloud-offline-outline" size={15} color={colors.warn} />
           <AppText variant="caption" tone="warn" numberOfLines={2} style={styles.bannerText}>
             {error}
           </AppText>
@@ -307,6 +309,7 @@ const styles = StyleSheet.create({
   fill: { flex: 1 },
   controls: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     alignItems: 'center',
     gap: spacing.sm,
   },
@@ -325,7 +328,6 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
     padding: spacing.md,
     borderRadius: 12,
-    backgroundColor: 'rgba(251, 191, 36, 0.12)',
   },
   bannerText: { flex: 1 },
   footer: { paddingVertical: spacing.xl },

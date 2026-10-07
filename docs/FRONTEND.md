@@ -1,5 +1,7 @@
 # Front-end
 
+The current visual specification, shared tokens and cross-platform consistency audit are in [DESIGN.md](DESIGN.md).
+
 The UI is a dependency-free single-page app: **no framework, no bundler, no build step.**
 (The native client in `mobile/` is the opposite extreme — React Native and a bundler; it is
 documented separately in [MOBILE.md](MOBILE.md) and reuses this UI's pure logic.)
@@ -110,3 +112,18 @@ Skip link, landmarks (`header`, `nav`, `main`, `aside`, `footer`), real `<button
 ## Tests
 
 `node --test tests/js/*.test.mjs` covers placeholder detection, folding/tokenising, formatting, catalog building and generated titles, all sort orders, every filter, the filter key (a regression test for a favorites-view bug), pagination and page-number lists, URL encode/decode (including hostile input), image URL derivation, safe URL checking, CSV injection, and a 7,500-item performance guard.
+
+## 2.3 user-data and offline behavior
+
+The actions menu supports arrow keys, Home/End and Escape with focus return. Favorites can
+be backed up/restored as documented in [DATA.md](DATA.md#browser-favorites-backup-version-1);
+imports merge, saved state is shape-checked, storage failures are visible, and storage events
+synchronize open tabs. Read-only server capabilities hide controls and display a notice.
+The offline banner reports browser connectivity, not a guarantee that uncached images exist.
+
+Service-worker cache writes are awaited and quota failures do not discard successful network
+responses. HTTP 5xx can use the last cached shell/catalog. Only explicitly versioned shell
+assets are cache-first; arbitrary query URLs are not cached. Images are still not precached.
+
+`npm run test:browser` covers actual DOM interactions in Chromium with synthetic fixtures.
+See [DEVELOPMENT.md](DEVELOPMENT.md#browser-smoke-tests).

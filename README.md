@@ -1,9 +1,9 @@
 # Spotlight Studio
 
-**An archive and gallery of Windows Spotlight wallpapers** — crawl them from Peapix and Windows10Spotlight, de-duplicate them by perceptual hash, keep the best resolution of every picture and browse the whole collection in a fast "Liquid Glass" web UI, either as a static GitHub Pages showcase or as a desktop app with crawler controls.
+**An archive and gallery of Windows Spotlight wallpapers** — crawl them from Peapix and Windows10Spotlight, de-duplicate them by perceptual hash, keep the best resolution of every picture and browse the whole collection in the restrained **Still Glass** interface, either as a static GitHub Pages showcase or as a desktop app with crawler controls.
 
 [![CI](https://github.com/KetanDutt/SpotlightStudio/actions/workflows/ci.yml/badge.svg)](https://github.com/KetanDutt/SpotlightStudio/actions/workflows/ci.yml)
-![Version](https://img.shields.io/badge/version-2.2.0-38bdf8)
+![Version](https://img.shields.io/badge/version-2.4.0-739b8b)
 ![Python](https://img.shields.io/badge/python-3.10%2B-3776ab)
 ![License](https://img.shields.io/badge/license-all%20rights%20reserved-lightgrey)
 
@@ -11,7 +11,7 @@
 
 | Viewer | Light theme | Mobile |
 |:---:|:---:|:---:|
-| <img src="docs/assets/screenshot-viewer.jpg" alt="Full-screen viewer with details, tags and actions" width="440"> | <img src="docs/assets/screenshot-light.jpg" alt="Light theme with a tag filter" width="440"> | <img src="docs/assets/screenshot-mobile.jpg" alt="Phone layout" width="170"> |
+| <img src="docs/assets/screenshot-viewer.jpg" alt="Full-screen viewer with details, tags and actions" width="440"> | <img src="docs/assets/screenshot-light.jpg" alt="Still Glass light theme" width="440"> | <img src="docs/assets/screenshot-mobile.jpg" alt="Phone layout" width="170"> |
 
 <sub>The screenshots are rendered with generated placeholder images, not with the real wallpapers.</sub>
 
@@ -29,11 +29,35 @@
 | 🤖 **Android / iOS app** | Expo client: offline search, favourites, history, **set the wallpaper on Android** (home/lock/both) with automatic rotation; on iOS it saves to Photos and guides you through the Shortcuts step ([details](docs/MOBILE.md#setting-a-wallpaper)) |
 | 🔒 **Locked down** | strict CSP, Host/Origin checks on the local API, no XSS from scraped titles, CSV-injection-safe exports, DB and logs are never served |
 
+## What’s new in 2.4 — Still Glass
+
+- **A cohesive visual system:** warm neutrals, muted sage, photo-first captions,
+  floating navigation, quieter forms and lists, and intentional light/dark palettes.
+- **Across the product:** web gallery/list, crawler, viewer, menus, dialogs, toasts and
+  API reference; mobile browsing, search, favourites, history, directory, tags,
+  settings, detail, action/filter sheets and shared loading/error/empty states.
+- **Accessible interactions:** keyboard-contained filters, clear focus, 44px primary
+  touch controls, semantic text contrast checks, reduced motion/transparency,
+  and cancellable enter/exit transitions.
+- **Reusable foundations:** centralized web/native tokens, a shared native material
+  component, and coordinated app icons. No per-photo blur or animated blur effects.
+- **Existing capabilities retained:** favorites backup/restore, cross-tab sync,
+  read-only hosting, safe downloads, offline support and all 2.3 hardening remain.
+
+See the [design system and consistency audit](docs/DESIGN.md) for materials, motion,
+component coverage, checks and platform boundaries.
+
+**Release status:** automated checks pass locally, but production sign-off still needs
+real-device/native testing, real-library verification and mobile dependency-advisory
+resolution. See the [review and outstanding risks](docs/REVIEW.md) and
+[release checklist](docs/RELEASE_CHECKLIST.md). Writable remote servers still need an
+authenticated proxy/VPN; Host checks are not authentication.
+
 ## Three ways to use it
 
 | Mode | What you get | How |
 |---|---|---|
-| **Static showcase** | browse, search, favorite, download | deploy the repository to GitHub Pages ([guide](docs/DEPLOYMENT.md)) |
+| **Static showcase** | browse, search, favorite, download | publish the allow-listed static build to GitHub Pages ([guide](docs/DEPLOYMENT.md)) |
 | **Desktop / server** | everything above **plus** crawler controls, live progress, repair tools, *Set as wallpaper*, full exports | run the app locally |
 | **Mobile app** | the same catalog on Android/iOS with favourites, history and offline search — and real *set wallpaper* plus background rotation on Android | `cd mobile && npm ci && npm start` ([guide](docs/MOBILE.md)) |
 
@@ -59,6 +83,7 @@ The same `index.html` serves the two browser modes: it detects a Spotlight Studi
 ```bash
 git lfs install && git clone https://github.com/KetanDutt/SpotlightStudio.git && cd SpotlightStudio
 python3 -m venv .venv && . .venv/bin/activate
+python -m pip install --upgrade pip setuptools
 pip install -r requirements.txt
 python main.py --server            # then open http://127.0.0.1:8765/
 ```
@@ -95,6 +120,14 @@ python main.py --sync-catalog          # regenerate data/wallpapers.json
 
 `/` search · `R` random wallpaper · `F` favorite / favorites view · `←` `→` previous / next · `C` copy link · `D` download · `Enter` fullscreen · `Esc` close · `?` help
 
+### Favorites backup
+
+Use **More options → Back up favorites** to download `spotlight-favorites.json`.
+**Restore favorites** merges a version-1 backup without deleting existing favorites.
+Backups contain relative image filenames, not image bytes. Limits: 2 MB import / 20,000
+favorites. Unknown keys are retained for later catalogs. Storage is local to each browser;
+backup before clearing site data. Mobile exports have a separate format.
+
 ## Configuration
 
 Copy `.env.example` to `.env` (the Windows launchers do it for you). Everything has a sensible default and invalid values fall back to it with a warning. The most useful settings:
@@ -104,6 +137,7 @@ Copy `.env.example` to `.env` (the Windows launchers do it for you). Everything 
 | `CONCURRENT_DOWNLOADS` | `32` | parallel image downloads |
 | `QUICK_UPDATE_PAGES` | `3` | pages per site scanned by a quick update |
 | `HOST` / `PORT` | `127.0.0.1` / `8765` | bind address (non-loopback ⇒ read [the security notes](docs/SECURITY.md)) |
+| `READ_ONLY` | `false` | disable all HTTP mutations for a public gallery |
 | `VERIFY_SSL` | `true` | TLS certificate verification |
 
 Full reference: [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
@@ -128,10 +162,10 @@ static/                 css/app.css · js/core.js (pure logic) · js/app.js (UI)
 sw.js · manifest.webmanifest   PWA
 data/                   wallpapers.db (SQLite) · wallpapers.json (static catalog)
 images/                 wallpapers + thumbnails (Git LFS)
-tests/                  pytest suite (fake source site) + Node tests for core.js
+tests/                  pytest + Node core/service-worker tests + hermetic Playwright smoke tests
 mobile/                 Expo (React Native) app for Android & iOS – browse, search, set wallpaper
 docs/                   architecture, API, configuration, deployment, mobile, security, …
-scripts/                setup_env.bat (launcher helper) · make_icons.py
+scripts/                setup_env.bat · make_icons.py · build_site.py (safe static publication)
 start_*.bat · Makefile  Windows launchers · developer shortcuts
 .github/                CI workflow, Dependabot, issue / PR templates
 ```
@@ -176,6 +210,21 @@ Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) and [docs/D
 | [Troubleshooting](docs/TROUBLESHOOTING.md) | common problems and fixes |
 | [Roadmap](docs/ROADMAP.md) | suggested improvements |
 | [Changelog](CHANGELOG.md) | release notes |
+
+## Release documentation
+
+[Documentation index](docs/README.md) · [Project review](docs/REVIEW.md) ·
+[Release and rollback checklist](docs/RELEASE_CHECKLIST.md)
+
+```bash
+# Build the public site (no Python dependencies needed for this command)
+python scripts/build_site.py            # publish dist/site only
+
+# Optional real-browser checks; activate the Python virtualenv first
+npm ci
+npx playwright install --with-deps chromium
+npm run test:browser                    # uses disposable fixture data, not your library
+```
 
 ## License & disclaimer
 

@@ -36,8 +36,9 @@ import { fireEvent, render } from '@testing-library/react-native';
 import React from 'react';
 import { View } from 'react-native';
 
-import { ToastProvider } from '../src/components/feedback/ToastProvider';
+import { ToastProvider, useToast } from '../src/components/feedback/ToastProvider';
 import { Badge } from '../src/components/ui/Badge';
+import { Sheet } from '../src/components/ui/Sheet';
 import { Button } from '../src/components/ui/Button';
 import { Chip } from '../src/components/ui/Chip';
 import { Row, SectionCard, SwitchRow } from '../src/components/ui/SectionCard';
@@ -236,3 +237,19 @@ async function waitForCall(mock: jest.Mock, mode?: string, times = 1, expectCall
     expectCall ? `Expected ${times} native call(s) with mode ${mode}` : 'Expected no native call',
   );
 }
+
+
+describe('Sheet feedback layer', () => {
+  function SheetFeedback() {
+    const { show } = useToast();
+    return <Sheet visible onClose={() => {}} title="Actions">
+      <Button title="Show feedback" onPress={() => show('The action completed')} />
+    </Sheet>;
+  }
+  it('renders one feedback layer inside the modal instead of behind it', async () => {
+    const view = await renderWithProviders(<SheetFeedback />);
+    await fireEvent.press(view.getByText('Show feedback'));
+    expect(await view.findByText('The action completed')).toBeTruthy();
+    expect(view.getAllByRole('alert')).toHaveLength(1);
+  });
+});

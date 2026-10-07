@@ -252,3 +252,31 @@ def test_scrape_pages_end_to_end(site):
     assert px[0]["date_spotted"] == "2026-09-01"
     assert len(w10) == 3 and gone == []
     assert any(i["needs_title"] for i in w10) and any(not i["needs_title"] for i in w10)
+
+
+def test_html_read_has_size_cap_even_without_content_length(monkeypatch):
+    monkeypatch.setattr(scrapers, "MAX_HTML_BYTES", 10)
+
+    class Content:
+        async def iter_chunked(self, size):
+            yield b"123456"
+            yield b"789012"
+
+    class Response:
+        status = 200
+        content_length = None
+        charset = "utf-8"
+        content = Content()
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+    class Session:
+        def get(self, url):
+            return Response()
+
+    with pytest.raises(ScrapeError, match="exceeds"):
+        asyncio.run(fetch_html(Session(), "http://example.test"))

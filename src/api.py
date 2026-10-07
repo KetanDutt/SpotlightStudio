@@ -17,9 +17,11 @@ Maintenance  ``/api/library/check``  ``/api/maintenance/{dedupe,thumbnails}``
 from __future__ import annotations
 
 import csv
+import hashlib
 import io
 import json
 import logging
+import threading
 from collections.abc import Iterator
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -48,6 +50,7 @@ from src.database import (
     download_queue_size,
     export_catalog_json,
     get_all_wallpapers,
+    get_db,
     get_random_wallpaper,
     get_source_stats,
     get_stats,
@@ -59,7 +62,12 @@ from src.database import (
 )
 from src.downloader import shutdown_cpu_pool
 from src.engine import DownloadEngine, EngineBusy, engine
-from src.security import HostCheckMiddleware, OriginCheckMiddleware, SecurityHeadersMiddleware
+from src.security import (
+    HostCheckMiddleware,
+    OriginCheckMiddleware,
+    ReadOnlyMiddleware,
+    SecurityHeadersMiddleware,
+)
 from src.utils import csv_safe, is_lfs_pointer
 from src.wallpaper import UnsupportedPlatform, WallpaperError, set_desktop_wallpaper
 
@@ -225,10 +233,11 @@ def create_app(cfg: Settings = settings, eng: DownloadEngine = engine) -> FastAP
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
         maintenance.startup_tasks()
-        if not cfg.is_loopback_host and not cfg.ALLOWED_HOSTS:
+        if not cfg.is_loopback_host and not cfg.READ_ONLY:
             log.warning(
                 "The server listens on %s without authentication. Anyone who can reach this "
-                "port can control the crawler. Restrict access with ALLOWED_HOSTS or a firewall.",
+                "port can control the crawler. Use READ_ONLY for a public gallery, or restrict access "
+                "with an authenticated reverse proxy/firewall. ALLOWED_HOSTS is not authentication.",
                 cfg.HOST,
             )
         yield
@@ -240,8 +249,8 @@ def create_app(cfg: Settings = settings, eng: DownloadEngine = engine) -> FastAP
         title="Spotlight Studio API",
         description=_DESCRIPTION,
         version=cfg.VERSION,
-        docs_url="/api/docs",
-        redoc_url="/api/redoc",
+        docs_url=None,
+        redoc_url=None,
         openapi_url="/api/openapi.json",
         lifespan=lifespan,
     )
@@ -255,6 +264,7 @@ def create_app(cfg: Settings = settings, eng: DownloadEngine = engine) -> FastAP
             allow_methods=["GET", "POST"],
             allow_headers=["Content-Type"],
         )
+    app.add_middleware(ReadOnlyMiddleware, enabled=lambda: cfg.READ_ONLY)
     app.add_middleware(OriginCheckMiddleware, allowed_origins=cfg.CORS_ORIGINS)
     app.add_middleware(HostCheckMiddleware, get_allowed=cfg.allowed_hosts)
     app.add_middleware(SecurityHeadersMiddleware)
@@ -322,6 +332,7 @@ def create_app(cfg: Settings = settings, eng: DownloadEngine = engine) -> FastAP
             "last_run": last_run,
             "source_stats": get_source_stats(),
             "config": {
+                "read_only": cfg.READ_ONLY,
                 "concurrent_downloads": cfg.CONCURRENT_DOWNLOADS,
                 "concurrent_scrapers": cfg.CONCURRENT_SCRAPERS,
                 "max_connections": cfg.MAX_CONNECTIONS,
@@ -465,7 +476,8 @@ def create_app(cfg: Settings = settings, eng: DownloadEngine = engine) -> FastAP
 
     # ── Catalog & exports ─────────────────────────────────────────────────
 
-    catalog_cache: dict[str, tuple[bytes, str]] = {}
+    catalog_cache: dict[str, tuple[bytes, str, str]] = {}
+    catalog_lock = threading.Lock()
 
     @app.get("/api/catalog", tags=["Catalog"], summary="Compact live catalog (ETag cached)")
     def live_catalog(request: Request) -> Response:
@@ -473,14 +485,21 @@ def create_app(cfg: Settings = settings, eng: DownloadEngine = engine) -> FastAP
         The whole library as a compact JSON array (no perceptual hashes) – the same shape
         as the static `data/wallpapers.json`.  Honors `If-None-Match`.
         """
-        signature = library_signature()
-        cached = catalog_cache.get("entry")
-        if cached is None or cached[1] != signature:
-            payload, _count = build_catalog()
-            cached = (payload, signature)
-            catalog_cache["entry"] = cached
-        etag = f'W/"{cached[1]}"'
-        if request.headers.get("if-none-match") == etag:
+        # One builder at a time, and revision + payload from one SQLite snapshot.
+        # Hash the representation: replacing a DB with the same revision must not
+        # accidentally reuse an old browser ETag after a server restart.
+        with catalog_lock, get_db():
+            signature = library_signature()
+            cached = catalog_cache.get("entry")
+            if cached is None or cached[1] != signature:
+                payload, _count = build_catalog()
+                etag = f'W/"{hashlib.sha256(payload).hexdigest()}"'
+                cached = (payload, signature, etag)
+                catalog_cache["entry"] = cached
+        etag = cached[2]
+        validators = [v.strip().removeprefix("W/") for v in
+                      request.headers.get("if-none-match", "").split(",")]
+        if "*" in validators or etag.removeprefix("W/") in validators:
             return Response(status_code=304, headers={"ETag": etag, "Cache-Control": "no-cache"})
         return Response(
             cached[0], media_type="application/json",
@@ -550,25 +569,30 @@ def create_app(cfg: Settings = settings, eng: DownloadEngine = engine) -> FastAP
         """Read-only consistency report between the database and the files on disk."""
         return maintenance.verify_library()
 
-    def _require_idle() -> None:
-        if eng.status != "stopped":
-            raise HTTPException(status_code=409, detail="Stop the crawler before running maintenance.")
-
     @app.post("/api/maintenance/dedupe", tags=["Maintenance"], summary="Remove near-duplicates")
     def maintenance_dedupe() -> dict:
-        _require_idle()
-        removed = maintenance.deduplicate_downloaded_wallpapers()
-        if removed:
-            export_catalog_json()
+        with eng.maintenance_guard():
+            removed = maintenance.deduplicate_downloaded_wallpapers()
+            if removed:
+                export_catalog_json()
         return {"removed": removed}
 
     @app.post("/api/maintenance/thumbnails", tags=["Maintenance"],
               summary="Rebuild missing thumbnails")
     def maintenance_thumbnails() -> dict:
-        _require_idle()
-        return {"created": maintenance.create_missing_thumbnails()}
+        with eng.maintenance_guard():
+            return {"created": maintenance.create_missing_thumbnails()}
 
     # ── UI & static assets ────────────────────────────────────────────────
+
+    @app.get("/api/docs", include_in_schema=False)
+    def api_docs() -> Response:
+        return FileResponse(ROOT / "static" / "api-docs.html", media_type="text/html",
+                            headers={"Cache-Control": "no-cache"})
+
+    @app.get("/api/redoc", include_in_schema=False)
+    def legacy_api_docs() -> Response:
+        return RedirectResponse("/api/docs", status_code=307)
 
     @app.get("/", include_in_schema=False)
     def index_page() -> Response:

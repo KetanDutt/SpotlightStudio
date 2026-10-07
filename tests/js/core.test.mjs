@@ -228,3 +228,23 @@ test("performance: a 7.5k item catalog builds and filters quickly", () => {
   assert.ok(list.length > 0);
   assert.ok(elapsed < 1500, `took ${elapsed.toFixed(0)}ms`);
 });
+
+ test("favorite backups round trip, merge-compatible keys and reject malformed data", () => {
+  const keys = ["peapix/a.jpg", "win10spotlight/b.jpg"];
+  assert.deepEqual(core.parseFavoritesBackup(JSON.parse(JSON.stringify(core.favoritesBackup(new Set(keys))))), keys);
+  assert.deepEqual(core.normalizeFavorites([...keys, keys[0], null, 3, "../secret", "https://evil/a"]), keys);
+  for (const value of [null, {}, 42, "oops"]) assert.deepEqual(core.normalizeFavorites(value), []);
+  for (const value of [null, {}, { version: 2, format: "spotlight-favorites", favorites: keys },
+    { version: 1, format: "spotlight-favorites", favorites: ["../a"] },
+    { version: 1, format: "spotlight-favorites", favorites: Array(20001).fill("a.jpg") }]) {
+    assert.throws(() => core.parseFavoritesBackup(value), /backup/);
+  }
+});
+
+
+test("catalog tolerates malformed rows and refuses traversal/duplicate keys", () => {
+  const catalog = core.buildCatalog([null, {}, row(1), row(1), row(2, { filename: "../data/secrets" }),
+    row(3, { filename: row(1).filename }), row(4, { id: "4" }), row(5)]);
+  assert.equal(catalog.total, 2);
+  assert.deepEqual(catalog.items.map(item => item.id), [1, 5]);
+});

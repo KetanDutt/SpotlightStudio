@@ -31,8 +31,10 @@ engine owns the claim lifecycle.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import io
 import logging
+import os
 import re
 import weakref
 from concurrent.futures import ThreadPoolExecutor
@@ -49,6 +51,7 @@ from src.database import (
     add_suppressed_url,
     delete_wallpaper,
     find_duplicate_wallpaper,
+    get_db,
     increment_stat,
     merge_wallpaper_metadata,
     upsert_wallpaper,
@@ -83,7 +86,7 @@ def get_cpu_pool() -> ThreadPoolExecutor:
     global _cpu_pool
     if _cpu_pool is None:
         _cpu_pool = ThreadPoolExecutor(
-            max_workers=settings.CPU_THREADS or None, thread_name_prefix="cpu-worker"
+            max_workers=settings.CPU_THREADS or min(4, os.cpu_count() or 1), thread_name_prefix="cpu-worker"
         )
     return _cpu_pool
 
@@ -342,46 +345,69 @@ async def process_download(
                 log.debug("⊘ Duplicate (kept existing): %s", url)
                 return "duplicate"
 
-            # The new copy is strictly better: carry the old metadata over, drop the old files.
+            # Carry metadata forward, but keep the old row/files until storage succeeds.
             title = choose_title(existing["title"], title)
             tags = merge_tags(existing["tags"], tags)
             date_spotted = existing["date_spotted"] or date_spotted
             item = {**item, "page_url": item.get("page_url") or existing["page_url"]}
-            storage.delete_wallpaper_files(existing["filename"])
-            for old_url in (existing.get("source_url"), existing.get("page_url")):
-                if old_url and old_url != fetched.url:
-                    add_suppressed_url(old_url, reason="duplicate_lower_quality")
-            delete_wallpaper(existing["phash"])
-            increment_stat("duplicates_replaced")
             replaced = True
-            log.info("↑ Replaced with higher quality: %s", existing["filename"])
 
-        # ── 4. store files, then the DB row ───────────────────────────────────
-        filename = storage.url_to_filename(source, fetched.url, storage.extension_for_format(info.fmt))
+        # New downloads are addressed by *bytes*, not URL: an upstream URL can
+        # change content. Legacy URL-addressed filenames continue to work.
+        digest = hashlib.sha256(fetched.data).hexdigest()
+        filename = f"{storage.clean_source(source)}/{digest}.{storage.extension_for_format(info.fmt)}"
+        record = {
+            "phash": info.phash,
+            "filename": filename,
+            "title": (title or "").strip(),
+            "source": source,
+            "source_url": fetched.url,
+            "page_url": item.get("page_url", ""),
+            "width": info.width,
+            "height": info.height,
+            "file_size": file_size,
+            "tags": tags,
+            "date_spotted": date_spotted,
+            "downloaded_at": utcnow_iso(),
+            "quality": quality_label(info.width),
+        }
+
+        def commit_download() -> None:
+            # One worker owns both writes and the DB transaction. Cancellation
+            # must not delete a file while an executor job is still writing it.
+            try:
+                storage.write_image(filename, fetched.data)
+                storage.write_thumbnail(filename, info.thumb)
+                with get_db(write=True) as conn:
+                    if replaced:
+                        delete_wallpaper(existing["phash"])
+                    upsert_wallpaper(record)
+                    if replaced:
+                        # Preserve deep links when upgrading the same photograph.
+                        conn.execute("UPDATE wallpapers SET id = ? WHERE phash = ?",
+                                     (existing["id"], info.phash))
+                        for old_url in (existing.get("source_url"), existing.get("page_url")):
+                            if old_url and old_url != fetched.url:
+                                add_suppressed_url(old_url, reason="duplicate_lower_quality")
+                        increment_stat("duplicates_replaced")
+                    increment_stat("downloaded_count")
+            except BaseException:
+                if not existing or filename != existing["filename"]:
+                    storage.delete_wallpaper_files(filename)
+                raise
+            if replaced and filename != existing["filename"]:
+                storage.delete_wallpaper_files(existing["filename"])
+
+        job = loop.run_in_executor(pool, commit_download)
         try:
-            await loop.run_in_executor(pool, storage.write_image, filename, fetched.data)
-            await loop.run_in_executor(pool, storage.write_thumbnail, filename, info.thumb)
-            upsert_wallpaper(
-                {
-                    "phash": info.phash,
-                    "filename": filename,
-                    "title": (title or "").strip(),
-                    "source": source,
-                    "source_url": fetched.url,
-                    "page_url": item.get("page_url", ""),
-                    "width": info.width,
-                    "height": info.height,
-                    "file_size": file_size,
-                    "tags": tags,
-                    "date_spotted": date_spotted,
-                    "downloaded_at": utcnow_iso(),
-                    "quality": quality_label(info.width),
-                }
-            )
-        except BaseException:
-            storage.delete_wallpaper_files(filename)  # never leave orphans behind
-            raise
-        increment_stat("downloaded_count")
+            await asyncio.shield(job)
+        except asyncio.CancelledError:
+            # Keep the dedupe lock until the commit finishes; the engine may
+            # release the queue claim afterwards, safely retrying known content.
+            try:
+                await job
+            finally:
+                raise
 
     log.info(
         "✓ %s  %dx%d  %s  %.2f MB%s",

@@ -34,7 +34,12 @@ The Python suite never touches the network or your data:
 * `test_consistency.py` guards project-wide invariants: versions agree everywhere, the CSP meta equals the server policy, `index.html` has no inline script/style/handlers, every `$("id")` used by `app.js` exists, the service-worker precache list and manifest icons exist, every environment variable is documented, markdown links resolve.
 
 ### Testing the UI in a browser
-There is no browser dependency in the repository. Useful recipe: run the app against a scratch data folder containing a copy of the catalog and generated images, then drive it with Playwright/Puppeteer (headless Chromium). Everything that matters for behaviour lives in `core.js` (unit-tested) — `app.js` only wires DOM and network.
+The web client has no runtime framework dependency. Root `package.json` supplies
+Playwright for real-browser tests: `npm ci`, `npx playwright install chromium`, then
+`PYTHON=.venv/bin/python npm run test:browser`. The suite starts an isolated fixture
+server and never writes to the real archive. Pure data behavior lives in `core.js`;
+`app.js` also owns focus, history, dialog lifecycles and DOM/network integration.
+See [DESIGN.md](DESIGN.md) for tokens and the visual regression checklist.
 
 ## Code map
 
@@ -70,3 +75,30 @@ The mobile app is versioned independently of the Python package (`mobile/package
 ## Style of commits and pull requests
 
 Present-tense imperative subject (`Add retry back-off`), a body that explains *why*, tests with every behaviour change, docs updated for anything user-visible. See [CONTRIBUTING.md](../CONTRIBUTING.md).
+
+## Browser smoke tests
+
+Activate the Python virtualenv and install runtime requirements, then:
+
+```bash
+npm ci
+npx playwright install --with-deps chromium
+npm run test:browser
+```
+
+`playwright.config.cjs` starts `tests/browser/serve.py` on port 8877 with a temporary database
+and synthetic images. It never writes the real library and does not require Git LFS. Stop
+anything already using that port. Set `PYTHON` to your virtualenv interpreter if necessary
+(`make browser` does this on POSIX). `CHROMIUM_PATH` optionally selects a preinstalled browser.
+Failure traces are ignored under `test-results/`; CI uploads them for seven days. Root npm
+packages are development-only, not gallery dependencies.
+
+`node --test tests/js/*.test.mjs` includes favorites-validation and service-worker cache tests
+without a browser installation. `make site` builds the allow-listed static artifact.
+
+## Dependency hygiene
+
+Upgrade pip/setuptools in new environments before installing/auditing dependencies.
+Run `pip-audit --vulnerability-service pypi` with separately installed audit tooling, and
+`npm audit` in both root and `mobile/`. Review advisories rather than forcing incompatible
+Expo upgrades. Known outstanding findings are recorded in [REVIEW.md](REVIEW.md).

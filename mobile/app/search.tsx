@@ -120,7 +120,7 @@ export default function SearchScreen() {
   return (
     <View style={styles.fill}>
       <View style={[styles.header, { paddingTop: insets.top + spacing.sm, borderBottomColor: colors.stroke }]}>
-        <IconButton icon="chevron-back" accessibilityLabel="Back" onPress={back} translucent testID="search-back" />
+        <IconButton icon="chevron-back" accessibilityLabel="Back" onPress={back} testID="search-back" />
         <View style={styles.headerField}>
           <TextField
             autoFocus

@@ -81,3 +81,13 @@ def test_lists_and_urls_are_cleaned(monkeypatch):
     assert cfg.CORS_ORIGINS == ["https://a.example", "https://b.example"]
     assert cfg.PEAPIX_BASE_URL == "http://x"
     assert isinstance(cfg.LOG_PATH, Path)
+
+
+@pytest.mark.parametrize("value", ["nan", "inf", "-inf", "NaN"])
+def test_non_finite_numbers_use_default(monkeypatch, value):
+    assert fresh(monkeypatch, REQUEST_DELAY_SECONDS=value).REQUEST_DELAY == 0.1
+
+
+def test_read_only_is_opt_in(monkeypatch):
+    assert fresh(monkeypatch, READ_ONLY="true").READ_ONLY is True
+    assert fresh(monkeypatch, READ_ONLY="false").READ_ONLY is False

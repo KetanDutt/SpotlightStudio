@@ -74,7 +74,7 @@ Spotlight Studio has three parts that share one SQLite database and one set of i
 | Transient HTTP error (timeout, 5xx, 429) | the item is retried up to `MAX_RETRIES`, each time **at the back** of the queue. A Peapix UHD download is *not* silently replaced by a lower resolution — except on the very last retry, so slow links still get an image. |
 | Permanent error (404/403/410, corrupt image, too small, too large) | dropped immediately and counted as an error |
 | Network down / site down | a **circuit breaker** opens after 10 consecutive transient failures, pauses dispatching with back-off (15 s → 120 s) and does *not* consume retries |
-| Crash between writing files and the DB row | files are cleaned up; temp files use `*.part` + `os.replace`, so a half-written JPEG never exists |
+| Failure between writing files and the DB row | handled failures clean new files; the original survives. Hard kills can leave orphans (`--check` reports them). Atomic writes avoid publishing partial JPEGs. |
 | Page count drift | discovery falls back to `max(configured hint, marker read from page 1)` and never trusts an implausible result (e.g. a site that serves its last page for every number) |
 | Stale state after a kill | `reset_runtime_state()` at start-up resets `status`/`phase` and releases claims |
 
@@ -89,7 +89,7 @@ Spotlight Studio has three parts that share one SQLite database and one set of i
 ## Storage
 
 ```
-images/peapix/<sha256(url)[:32]>.jpg          full image          (content-addressed → immutable)
+images/peapix/<sha256(bytes)>.jpg          full image          (content-addressed → immutable)
 images/win10spotlight/<…>.jpg
 images/thumbs/<source>/<same name>.jpg        480×270 progressive JPEG
 data/wallpapers.db                            SQLite (committed in DELETE journal mode; -wal/-shm are git-ignored)
@@ -130,3 +130,16 @@ Rendering costs were cut by removing `backdrop-filter` from every card, replacin
 | Images via `github.com/<owner>/<repo>/blob/…?raw=true` on Pages | GitHub Pages cannot serve Git-LFS objects; the base is derived from the Pages URL so forks work |
 | No ORM, plain SQL | a handful of tables, full control over transactions, trivial to read |
 | Local-first security | the API has no authentication by design; it protects itself with Host/Origin checks instead — see [SECURITY.md](SECURITY.md) |
+
+## 2.3 consistency refinements
+
+The replacement storage job writes new files, then swaps the row/suppression records/counters
+in one SQLite transaction, preserves the original public ID, and removes old files only after
+commit. Cancellation drains this executor job while retaining the dedupe lock. This does not
+make the filesystem and database one crash-atomic transaction; see [REVIEW.md](REVIEW.md).
+
+`DownloadEngine.maintenance_guard()` reserves the idle engine across maintenance work so
+concurrent starts and repairs receive `EngineBusy`. It is an in-process guard, not a lock
+against another server or CLI process. Automatic Pillow concurrency is capped at four workers.
+Catalog serialization uses a process-local mutex and a consistent SQLite read snapshot; ETags
+hash the actual bytes. Public HTTP read-only mode is enforced in middleware, not only the UI.

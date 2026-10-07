@@ -10,7 +10,7 @@
     "icon": "./assets/icon.png",
     "assetBundlePatterns": ["**/*"],
     "githubUrl": "https://github.com/KetanDutt/SpotlightStudio",
-    "primaryColor": "#38bdf8",
+    "primaryColor": "#3c6250",
     "platforms": ["android", "ios", "web"],
     "ios": {
       "supportsTablet": true,
@@ -35,7 +35,7 @@
       "edgeToEdgeEnabled": true,
       "adaptiveIcon": {
         "foregroundImage": "./assets/android-icon-foreground.png",
-        "backgroundColor": "#0b1426",
+        "backgroundColor": "#151918",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "permissions": [
@@ -67,8 +67,8 @@
       "favicon": "./assets/favicon.png",
       "name": "Spotlight Studio",
       "shortName": "Spotlight",
-      "themeColor": "#07080d",
-      "backgroundColor": "#07080d"
+      "themeColor": "#151918",
+      "backgroundColor": "#151918"
     },
     "plugins": [
       [
@@ -77,10 +77,10 @@
           "image": "./assets/splash-icon.png",
           "imageWidth": 200,
           "resizeMode": "contain",
-          "backgroundColor": "#07080d",
+          "backgroundColor": "#151918",
           "dark": {
             "image": "./assets/splash-icon.png",
-            "backgroundColor": "#07080d"
+            "backgroundColor": "#151918"
           }
         }
       ],

@@ -375,3 +375,47 @@ def test_openapi_is_complete_and_constants_agree(client):
     assert set(api_mod.SortField.__args__) == set(db.ALLOWED_SORTS)
     assert set(api_mod.QualityFilter.__args__) - {""} == set(db.ALLOWED_QUALITIES)
     assert time.time() > 0
+
+
+@pytest.mark.parametrize("path", [
+    "/api/control/start", "/api/control/pause", "/api/control/stop",
+    "/api/catalog/sync", "/api/maintenance/dedupe", "/api/maintenance/thumbnails",
+    "/api/wallpapers/1/set-wallpaper", "/api/future-endpoint",
+])
+def test_read_only_blocks_all_mutations(client, monkeypatch, path):
+    monkeypatch.setattr(settings, "READ_ONLY", True)
+    assert client.post(path).status_code == 403
+    assert client.get("/api/status").json()["config"]["read_only"] is True
+    assert client.get("/api/catalog").status_code == 200
+    assert client.get("/api/export/json").status_code == 200
+
+
+def test_catalog_etag_supports_http_validators(client):
+    row = add_wallpaper()
+    etag = client.get("/api/catalog").headers["etag"]
+    for validator in (etag, etag.removeprefix("W/"), f'"other", {etag}', "*"):
+        response = client.get("/api/catalog", headers={"If-None-Match": validator})
+        assert response.status_code == 304 and not response.content
+        assert response.headers["etag"] == etag
+    db.update_wallpaper_metadata(row["id"], title="Updated title")
+    response = client.get("/api/catalog", headers={"If-None-Match": etag})
+    assert response.status_code == 200 and response.headers["etag"] != etag
+
+
+@pytest.mark.parametrize("origin", ["https://127.0.0.1", "http://127.0.0.1/path", "http://[bad"])
+def test_origin_must_match_scheme_and_be_valid(client, origin):
+    assert client.post("/api/control/pause", headers={"Origin": origin}).status_code == 403
+
+
+def test_api_reference_is_self_hosted_and_csp_compatible(client):
+    from bs4 import BeautifulSoup
+
+    response = client.get("/api/docs")
+    assert response.status_code == 200
+    assert "script-src 'self'" in response.headers["content-security-policy"]
+    soup = BeautifulSoup(response.text, "html.parser")
+    for script in soup.find_all("script"):
+        assert script.get("src", "").startswith("/static/")
+        assert not script.string
+        assert client.get(script["src"]).status_code == 200
+    assert client.get("/api/redoc", follow_redirects=False).headers["location"] == "/api/docs"

@@ -195,7 +195,15 @@
    * Raw rows are never mutated, so exports stay faithful to the source data.
    */
   function buildCatalog(rawItems) {
-    const rows = Array.isArray(rawItems) ? rawItems : [];
+    const seenIds = new Set();
+    const seenKeys = new Set();
+    const rows = (Array.isArray(rawItems) ? rawItems : []).filter((row) => {
+      if (!row || typeof row !== "object" || !Number.isSafeInteger(row.id) || row.id < 1 ||
+          !validFavoriteKey(row.filename) || seenIds.has(row.id) || seenKeys.has(row.filename)) return false;
+      seenIds.add(row.id);
+      seenKeys.add(row.filename);
+      return true;
+    });
     const tagCount = new Map();
     const items = new Array(rows.length);
     for (let i = 0; i < rows.length; i++) {
@@ -428,6 +436,34 @@
     return "\ufeff" + lines.join("\r\n") + "\r\n";
   }
 
+  /* ───────────────────────────── favorites backup ───────────────────────────── */
+
+  const MAX_FAVORITES = 20000;
+  function validFavoriteKey(key) {
+    return typeof key === "string" && key.length > 0 && key.length <= 512 &&
+      !/[:\\?#\x00-\x1f]/.test(key) && !key.startsWith("/") &&
+      key.split("/").every((part) => part && part !== "." && part !== "..");
+  }
+
+  /** Defensive local-storage read: invalid JSON shapes must not break startup. */
+  function normalizeFavorites(value) {
+    return Array.isArray(value) ? [...new Set(value.filter(validFavoriteKey))].slice(0, MAX_FAVORITES) : [];
+  }
+
+  function favoritesBackup(favorites) {
+    return { format: "spotlight-favorites", version: 1, favorites: normalizeFavorites([...favorites]) };
+  }
+
+  /** Strict import, tolerant local storage. Unknown catalog keys are kept for later. */
+  function parseFavoritesBackup(value) {
+    if (!value || value.format !== "spotlight-favorites" || value.version !== 1 ||
+        !Array.isArray(value.favorites) || value.favorites.length > MAX_FAVORITES ||
+        !value.favorites.every(validFavoriteKey)) {
+      throw new Error("Choose a valid Spotlight Studio favorites backup (version 1).");
+    }
+    return normalizeFavorites(value.favorites);
+  }
+
   /* ───────────────────────────── misc ───────────────────────────── */
 
   function debounce(fn, ms) {
@@ -447,7 +483,7 @@
 
   return {
     DEFAULT_IMAGE_BASE, SORTS, PAGE_SIZES, VIEWS, SOURCES, QUALITIES, QUALITY_LABELS, SOURCE_LABELS,
-    DEFAULT_STATE, CSV_COLUMNS,
+    DEFAULT_STATE, CSV_COLUMNS, MAX_FAVORITES, normalizeFavorites, favoritesBackup, parseFavoritesBackup,
     isPlaceholderTitle, foldText, tokenize, splitTags, titleCase, slugify,
     fmtInt, fmtBytes, fmtDate, fmtRelative, fmtDuration, parseDateTs,
     qualityClass, buildCatalog, topTags, comparator, filterAndSort, filterKey, paginate, pageNumbers,

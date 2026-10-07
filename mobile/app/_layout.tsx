@@ -18,7 +18,7 @@ import { Button } from '../src/components/ui/Button';
 import { AppText } from '../src/components/ui/AppText';
 import { CatalogProvider } from '../src/providers/CatalogProvider';
 import { PreferencesProvider } from '../src/providers/PreferencesProvider';
-import { ThemeProvider, useColors } from '../src/theme/ThemeProvider';
+import { ThemeProvider, useColors, useTheme } from '../src/theme/ThemeProvider';
 import { defineRotationTask } from '../src/services/rotation';
 
 // The task has to be defined on every launch – Android may start the app *only* to run it
@@ -52,7 +52,7 @@ class AppErrorBoundary extends React.Component<
     if (!this.state.error) return this.props.children;
     return (
       <View style={styles.errorWrap}>
-        <Ionicons name="bug-outline" size={42} color="#f87171" />
+        <Ionicons name="bug-outline" size={42} color="#edaaa7" />
         <AppText variant="title" align="center">
           Something broke
         </AppText>
@@ -70,6 +70,7 @@ class AppErrorBoundary extends React.Component<
 
 function ThemedApp() {
   const colors = useColors();
+  const { reduceMotion } = useTheme();
   useEffect(() => {
     void SplashScreen.hideAsync().catch(() => undefined);
   }, []);
@@ -81,12 +82,12 @@ function ThemedApp() {
         screenOptions={{
           headerShown: false,
           contentStyle: { backgroundColor: colors.bg },
-          animation: 'slide_from_right',
+          animation: reduceMotion ? 'none' : 'fade',
         }}
       >
         <Stack.Screen name="(tabs)" />
-        <Stack.Screen name="wallpaper/[id]" options={{ animation: 'fade_from_bottom' }} />
-        <Stack.Screen name="search" options={{ animation: 'fade' }} />
+        <Stack.Screen name="wallpaper/[id]" options={{ animation: reduceMotion ? 'none' : 'fade_from_bottom' }} />
+        <Stack.Screen name="search" options={{ animation: reduceMotion ? 'none' : 'fade' }} />
         <Stack.Screen name="directory" />
         <Stack.Screen name="tags" />
         <Stack.Screen name="about" options={{ presentation: 'modal' }} />
@@ -124,6 +125,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 12,
     padding: 28,
-    backgroundColor: '#07080d',
+    backgroundColor: '#151918',
   },
 });

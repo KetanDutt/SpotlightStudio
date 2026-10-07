@@ -26,7 +26,7 @@ import { describeMode } from '../../src/services/wallpaper';
 import { ALBUM_NAME } from '../../src/services/media';
 import { ROTATION_TASK } from '../../src/services/rotation';
 import { fmtBytes, fmtInt, fmtRelative, topTags } from '../../src/core/utils';
-import { spacing } from '../../src/theme/tokens';
+import { navigation, spacing } from '../../src/theme/tokens';
 import { useTheme, type ThemePreference } from '../../src/theme/ThemeProvider';
 import { useRotation } from '../../src/hooks/useRotation';
 import { useCatalog } from '../../src/providers/CatalogProvider';
@@ -94,7 +94,7 @@ export default function SettingsScreen() {
         <ScreenHeader title="Settings" subtitle={`Spotlight Studio ${APP_VERSION} · ${capabilities.name}`} />
       </View>
 
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={[styles.content, { paddingBottom: navigation.contentInset + insets.bottom }]} showsVerticalScrollIndicator={false}>
         {/* ── Appearance ─────────────────────────────────────────────── */}
         <SectionCard title="Appearance">
           <View style={styles.block}>

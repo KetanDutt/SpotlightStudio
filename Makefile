@@ -3,13 +3,14 @@ PY ?= python3
 VENV ?= .venv
 BIN := $(VENV)/bin
 
-.PHONY: help install run server crawl test lint check icons mobile clean
+.PHONY: help install run server crawl test lint check icons mobile browser site clean
 
 help:  ## show this help
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  make %-9s %s\n", $$1, $$2}'
 
 install:  ## create .venv and install runtime + dev dependencies
 	$(PY) -m venv $(VENV)
+	$(BIN)/python -m pip install --upgrade pip setuptools
 	$(BIN)/pip install -q -r requirements-dev.txt
 
 run:  ## desktop window (PyWebView, falls back to the browser)
@@ -28,13 +29,19 @@ test:  ## Python + JavaScript unit tests
 lint:  ## ruff
 	$(BIN)/ruff check .
 
-check: lint test  ## everything CI runs
+check: lint test  ## Python/Node checks (browser and mobile run separately)
 
 icons:  ## regenerate the PWA + Expo icons (scripts/make_icons.py)
 	$(BIN)/python scripts/make_icons.py
 
 mobile:  ## install and verify the Expo app (mobile/ – needs Node ≥ 20)
 	cd mobile && npm ci && npm run verify
+
+browser:  ## real Chromium smoke tests (npm ci + npx playwright install chromium first)
+	PYTHON=$(BIN)/python npm run test:browser
+
+site:  ## build an allow-listed static site in dist/site
+	$(PY) scripts/build_site.py
 
 clean:  ## remove caches
 	rm -rf .pytest_cache .ruff_cache && find . -name __pycache__ -type d -prune -exec rm -rf {} +

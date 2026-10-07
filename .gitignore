@@ -50,3 +50,8 @@ $RECYCLE.BIN/
 dist/
 build/
 *.egg-info/
+
+# Generated test reports
+coverage/
+playwright-report/
+test-results/
