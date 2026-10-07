@@ -1,0 +1,128 @@
+{
+  "expo": {
+    "name": "Spotlight Studio",
+    "slug": "spotlight-studio",
+    "version": "1.0.0",
+    "description": "Browse thousands of Windows Spotlight wallpapers in 4K and set them on your phone – Android & iOS.",
+    "scheme": "spotlightstudio",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "icon": "./assets/icon.png",
+    "assetBundlePatterns": ["**/*"],
+    "githubUrl": "https://github.com/KetanDutt/SpotlightStudio",
+    "primaryColor": "#38bdf8",
+    "platforms": ["android", "ios", "web"],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.ketandutt.spotlightstudio",
+      "buildNumber": "1",
+      "usesAppleSignIn": false,
+      "infoPlist": {
+        "CFBundleDisplayName": "Spotlight Studio",
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSPhotoLibraryAddUsageDescription": "Spotlight Studio saves the wallpapers you choose into your photo library so you can set them from the Photos app.",
+        "NSPhotoLibraryUsageDescription": "Spotlight Studio only needs access to save the wallpapers you pick into an album of your own.",
+        "NSAppTransportSecurity": {
+          "NSAllowsLocalNetworking": true
+        },
+        "UIBackgroundModes": ["fetch", "processing"],
+        "BGTaskSchedulerPermittedIdentifiers": ["com.ketandutt.spotlightstudio.rotation"]
+      }
+    },
+    "android": {
+      "package": "com.ketandutt.spotlightstudio",
+      "versionCode": 1,
+      "edgeToEdgeEnabled": true,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundColor": "#0b1426",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "permissions": [
+        "android.permission.INTERNET",
+        "android.permission.ACCESS_NETWORK_STATE",
+        "android.permission.SET_WALLPAPER",
+        "android.permission.WAKE_LOCK",
+        "android.permission.RECEIVE_BOOT_COMPLETED",
+        "android.permission.VIBRATE"
+      ],
+      "blockedPermissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_COARSE_LOCATION"
+      ],
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": false,
+          "data": [{ "scheme": "spotlightstudio" }],
+          "category": ["BROWSABLE", "DEFAULT"]
+        }
+      ]
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "single",
+      "favicon": "./assets/favicon.png",
+      "name": "Spotlight Studio",
+      "shortName": "Spotlight",
+      "themeColor": "#07080d",
+      "backgroundColor": "#07080d"
+    },
+    "plugins": [
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 200,
+          "resizeMode": "contain",
+          "backgroundColor": "#07080d",
+          "dark": {
+            "image": "./assets/splash-icon.png",
+            "backgroundColor": "#07080d"
+          }
+        }
+      ],
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "Spotlight Studio saves the wallpapers you choose into your photo library so you can set them from the Photos app.",
+          "savePhotosPermission": "Spotlight Studio saves the wallpapers you choose into an album in your photo library.",
+          "isAccessMediaLocationEnabled": false,
+          "granularPermissions": ["photo"]
+        }
+      ],
+      [
+        "expo-background-task",
+        {
+          "minimumInterval": 15
+        }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true,
+            "enableProguardInReleaseBuilds": true,
+            "enableShrinkResourcesInReleaseBuilds": true
+          },
+          "ios": {
+            "deploymentTarget": "16.4"
+          }
+        }
+      ],
+      "expo-router",
+      "expo-system-ui",
+      "expo-file-system",
+      "expo-image"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "extra": {
+      "apiVersion": 1,
+      "showSpotlightStudioCredit": true
+    }
+  }
+}

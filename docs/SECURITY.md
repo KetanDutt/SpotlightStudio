@@ -33,7 +33,11 @@ Setting `HOST` (or `--host`) to a non-loopback address — e.g. `0.0.0.0` — ma
 
 * keep it on a trusted LAN or behind a VPN, **or** put a reverse proxy with authentication in front;
 * set `ALLOWED_HOSTS` to the exact names you use;
-* never forward the port to the internet.
+* never forward the port to the internet;
+* remember that a phone client needs the same widened access: the mobile app talks to
+  `http://<your-ip>:8765` (set `EXPO_PUBLIC_API_URL`), which means `ALLOWED_HOSTS` must include
+  that address. Save-to-Photos and set-wallpaper happen **on the phone** and are unaffected by
+  the server's permissions — see [MOBILE.md](MOBILE.md).
 
 ## Data handling & privacy
 

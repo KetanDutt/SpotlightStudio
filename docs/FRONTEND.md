@@ -1,6 +1,8 @@
 # Front-end
 
 The UI is a dependency-free single-page app: **no framework, no bundler, no build step.**
+(The native client in `mobile/` is the opposite extreme — React Native and a bundler; it is
+documented separately in [MOBILE.md](MOBILE.md) and reuses this UI's pure logic.)
 
 ```
 index.html                 markup shell, CSP <meta>, version-stamped asset URLs

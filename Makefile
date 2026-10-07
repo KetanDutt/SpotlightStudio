@@ -3,7 +3,7 @@ PY ?= python3
 VENV ?= .venv
 BIN := $(VENV)/bin
 
-.PHONY: help install run server crawl test lint check icons clean
+.PHONY: help install run server crawl test lint check icons mobile clean
 
 help:  ## show this help
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  make %-9s %s\n", $$1, $$2}'
@@ -30,8 +30,11 @@ lint:  ## ruff
 
 check: lint test  ## everything CI runs
 
-icons:  ## regenerate static/icons from scripts/make_icons.py
+icons:  ## regenerate the PWA + Expo icons (scripts/make_icons.py)
 	$(BIN)/python scripts/make_icons.py
+
+mobile:  ## install and verify the Expo app (mobile/ – needs Node ≥ 20)
+	cd mobile && npm ci && npm run verify
 
 clean:  ## remove caches
 	rm -rf .pytest_cache .ruff_cache && find . -name __pycache__ -type d -prune -exec rm -rf {} +

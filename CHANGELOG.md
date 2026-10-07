@@ -5,6 +5,17 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [Unreleased]
+
+### Added
+- **Mobile app** (`mobile/`): a production Expo (React Native) client for Android and iOS that browses and searches the same catalog offline, keeps favourites/history on the device, downloads, saves to Photos and shares. On Android it **sets the wallpaper** (home / lock / both) through a bundled Expo Module (`modules/wallpaper`, `WallpaperManager`) and rotates it periodically with `expo-background-task`; iOS has no public API to set a wallpaper, so there the app saves into a “Spotlight Studio” album and guides the user through the Shortcuts step instead.
+- Mobile screens: gallery (masonry + list, tag rail, source/quality/sort filters, favourites-only, deep links), dedicated search with recent searches, directory (stats, sources, resolution classes, full tag index, JSON/CSV catalog export through the share sheet), wallpaper detail, tags, history, settings (theme, rotation, cache, reset) and about.
+- `mobile/src/core/` ports the web UI's pure logic (filters, generated titles, quality classes, rotation rules) so both clients behave identically; Jest covers it, the media/rotation services (Android *and* iOS personalities), the export, the optional native module and the React providers/components — 114 tests, with a coverage floor enforced by `npm run test:ci`.
+- `scripts/make_icons.py` now generates the Expo icon set (`mobile/assets/`) from the same brand mark as the PWA icons.
+
+### Changed
+- `docs/MOBILE.md` (build, store, environment variables, set-wallpaper capabilities, rotation, troubleshooting), a mobile section in `docs/DEVELOPMENT.md`/`docs/SECURITY.md`, a CI job running `npm ci && npm run verify`, and `mobile/eas.json` with development/preview/production profiles.
+
 ## [2.2.0] — 2026-10-03
 
 A reliability, security and quality release: the crawler no longer loses work, the Peapix/Win10 data is repairable, the UI was rebuilt on a testable, CSP-safe foundation and the project gained a real test-suite, CI and documentation.
