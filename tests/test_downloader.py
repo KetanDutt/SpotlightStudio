@@ -277,3 +277,97 @@ def test_final_retry_may_degrade_resolution(site):
     assert run(go) == "downloaded"
     (row,), _ = db.get_all_wallpapers()
     assert row["source_url"].endswith("_1920.jpg")
+
+
+@pytest.mark.parametrize("failure", ["image", "thumbnail", "database"])
+def test_failed_upgrade_preserves_old_files_metadata_and_counters(site, monkeypatch, failure):
+    low = {**item_for(site, 1), "image_url": peapix_url(site, 1, "640")}
+
+    async def go(session):
+        assert await process_download(session, low) == "downloaded"
+        (before,), _ = db.get_all_wallpapers()
+        image = storage.image_path(before["filename"]).read_bytes()
+        thumb = storage.thumb_path(before["filename"]).read_bytes()
+        stats = db.get_stats()
+
+        def fail(*args, **kwargs):
+            raise OSError("simulated disk failure")
+
+        if failure == "database":
+            monkeypatch.setattr(downloader, "upsert_wallpaper", fail)
+        else:
+            monkeypatch.setattr(storage, "write_" + failure, fail)
+        with pytest.raises(OSError, match="simulated"):
+            await process_download(session, item_for(site, 1))
+        assert db.get_wallpaper(before["id"]) == before
+        assert storage.image_path(before["filename"]).read_bytes() == image
+        assert storage.thumb_path(before["filename"]).read_bytes() == thumb
+        assert db.get_stats() == stats
+        assert not db.is_url_suppressed(low["image_url"])
+        assert len([p for p in settings.IMAGES_DIR.rglob("*") if p.is_file()]) == 2
+
+    run(go)
+
+
+def test_upgrade_preserves_public_id(site):
+    async def go(session):
+        low = {**item_for(site, 1), "image_url": peapix_url(site, 1, "640")}
+        assert await process_download(session, low) == "downloaded"
+        (before,), _ = db.get_all_wallpapers()
+        assert await process_download(session, item_for(site, 1)) == "replaced"
+        assert db.get_wallpaper(before["id"])["width"] == 1280
+
+    run(go)
+
+
+def test_cancel_during_storage_waits_for_commit_without_orphans(site, monkeypatch):
+    import threading
+
+    writing = threading.Event()
+    release = threading.Event()
+    original = storage.write_image
+
+    def blocked_write(filename, data):
+        writing.set()
+        assert release.wait(5)
+        return original(filename, data)
+
+    monkeypatch.setattr(storage, "write_image", blocked_write)
+
+    async def go(session):
+        task = asyncio.create_task(process_download(session, item_for(site, 1)))
+        try:
+            assert await asyncio.to_thread(writing.wait, 5)
+            task.cancel()
+            await asyncio.sleep(0)
+            assert not task.done()
+        finally:
+            release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        (row,), count = db.get_all_wallpapers()
+        assert count == 1
+        assert storage.image_path(row["filename"]).is_file()
+        assert storage.thumb_path(row["filename"]).is_file()
+
+    run(go)
+
+
+def test_automatic_cpu_pool_is_memory_conservative(monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+
+    downloader.shutdown_cpu_pool(wait=True)
+    monkeypatch.setattr(settings, "CPU_THREADS", 0)
+    monkeypatch.setattr(downloader.os, "cpu_count", lambda: 96)
+    sizes = []
+
+    def factory(**kwargs):
+        sizes.append(kwargs["max_workers"])
+        return ThreadPoolExecutor(**kwargs)
+
+    monkeypatch.setattr(downloader, "ThreadPoolExecutor", factory)
+    try:
+        downloader.get_cpu_pool()
+        assert sizes == [4]
+    finally:
+        downloader.shutdown_cpu_pool(wait=True)

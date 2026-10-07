@@ -147,7 +147,7 @@ class OriginCheckMiddleware:
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] == "http" and scope["method"] in UNSAFE_METHODS:
             headers = Headers(scope=scope)
-            if not self._permitted(headers):
+            if not self._permitted(headers, scope.get("scheme", "http")):
                 response = JSONResponse(
                     {"detail": "Cross-origin request blocked."}, status_code=403
                 )
@@ -155,7 +155,7 @@ class OriginCheckMiddleware:
                 return
         await self.app(scope, receive, send)
 
-    def _permitted(self, headers: Headers) -> bool:
+    def _permitted(self, headers: Headers, scheme: str = "http") -> bool:
         origin = headers.get("origin")
         fetch_site = headers.get("sec-fetch-site", "").lower()
         if origin is None:
@@ -166,4 +166,29 @@ class OriginCheckMiddleware:
         if "*" in self.allowed or origin_norm in self.allowed:
             return True
         host = headers.get("host", "").lower()
-        return bool(host) and urlparse(origin_norm).netloc == host
+        try:
+            parsed = urlparse(origin_norm)
+            return (bool(host) and parsed.scheme == scheme and parsed.netloc == host
+                    and not parsed.path and not parsed.query and not parsed.fragment)
+        except ValueError:
+            return False
+
+
+class ReadOnlyMiddleware:
+    """Disable *all* HTTP mutations, including future endpoints, for public galleries.
+
+    This is not filesystem read-only mode: startup still migrates/syncs the catalog.
+    CLI crawls are intentionally unaffected.
+    """
+
+    def __init__(self, app: ASGIApp, enabled: Callable[[], bool]) -> None:
+        self.app = app
+        self.enabled = enabled
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "http" and scope["method"] in UNSAFE_METHODS and self.enabled():
+            await JSONResponse({"detail": "This server is read-only."}, status_code=403)(
+                scope, receive, send
+            )
+            return
+        await self.app(scope, receive, send)

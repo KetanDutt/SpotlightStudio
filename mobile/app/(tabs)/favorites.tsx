@@ -80,7 +80,7 @@ export default function FavoritesScreen() {
                 icon={view === 'grid' ? 'list-outline' : 'grid-outline'}
                 accessibilityLabel={view === 'grid' ? 'Switch to list view' : 'Switch to grid view'}
                 onPress={() => setView(view === 'grid' ? 'list' : 'grid')}
-                translucent
+
               />
               {items.length ? (
                 <IconButton
@@ -90,7 +90,7 @@ export default function FavoritesScreen() {
                     clearFavorites();
                     show({ tone: 'info', message: 'All favourites removed.' });
                   }}
-                  translucent
+
                 />
               ) : null}
             </>

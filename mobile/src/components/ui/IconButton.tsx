@@ -35,7 +35,7 @@ export function IconButton({
   testID,
 }: IconButtonProps) {
   const colors = useColors();
-  const resolvedColor = color ?? (active ? colors.accent : colors.text);
+  const resolvedColor = color ?? (translucent ? colors.imageText : active ? colors.accent : colors.text);
 
   return (
     <Touchable
@@ -52,7 +52,7 @@ export function IconButton({
           width: size,
           height: size,
           borderRadius: radius.pill,
-          backgroundColor: translucent || active ? colors.fill : 'transparent',
+          backgroundColor: translucent ? colors.imageControl : active ? colors.accentFill : 'transparent',
           borderWidth: translucent ? StyleSheet.hairlineWidth : 0,
           borderColor: colors.stroke,
           opacity: disabled ? 0.4 : 1,

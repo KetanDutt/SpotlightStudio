@@ -6,7 +6,6 @@
  * one thumb.  Previous/next move through the library in the same order as the gallery.
  */
 import { Ionicons } from '@expo/vector-icons';
-import { BlurView } from 'expo-blur';
 import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useMemo, useState } from 'react';
@@ -25,7 +24,8 @@ import { SetWallpaperSheet } from '../../src/components/wallpaper/SetWallpaperSh
 import { fullImageUrl, thumbnailUrl } from '../../src/services/media';
 import { SOURCE_LABELS, fmtBytes, fmtDate, fmtInt, fmtWallpaperSize } from '../../src/core/utils';
 import { radius, spacing } from '../../src/theme/tokens';
-import { useColors } from '../../src/theme/ThemeProvider';
+import { GlassBackdrop } from '../../src/components/ui/GlassBackdrop';
+import { useColors, useTheme } from '../../src/theme/ThemeProvider';
 import { useWallpaperActions } from '../../src/hooks/useWallpaperActions';
 import { useCatalog } from '../../src/providers/CatalogProvider';
 import { usePreferences } from '../../src/providers/PreferencesProvider';
@@ -34,6 +34,7 @@ export default function WallpaperDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const colors = useColors();
+  const { reduceMotion } = useTheme();
   const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();
   const { show } = useToast();
@@ -113,7 +114,7 @@ export default function WallpaperDetailScreen() {
           placeholder={{ uri: thumbnailUrl(item) }}
           placeholderContentFit="contain"
           contentFit="contain"
-          transition={260}
+          transition={reduceMotion ? 0 : 260}
           cachePolicy="memory-disk"
           style={StyleSheet.absoluteFill}
           onLoadStart={() => setImageLoading(true)}
@@ -178,9 +179,8 @@ export default function WallpaperDetailScreen() {
       </View>
 
       {/* Bottom panel */}
-      <View style={[styles.panel, { paddingBottom: insets.bottom + spacing.lg }]}>
-        <BlurView intensity={48} tint={colors.dark ? 'dark' : 'light'} style={StyleSheet.absoluteFill} />
-        <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.glassStrong }]} />
+      <View style={[styles.panel, { paddingBottom: insets.bottom + spacing.lg, borderColor: colors.strokeStrong }]}>
+        <GlassBackdrop strength="floating" />
 
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.panelContent}>
           <View style={styles.badges}>
@@ -318,14 +318,10 @@ const styles = StyleSheet.create({
   },
   panel: {
     position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
+    left: spacing.md, right: spacing.md, bottom: spacing.sm,
     maxHeight: '58%',
-    borderTopLeftRadius: radius.xl,
-    borderTopRightRadius: radius.xl,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.12)',
+    borderRadius: radius.xl,
+    borderWidth: StyleSheet.hairlineWidth,
     overflow: 'hidden',
   },
   panelContent: {

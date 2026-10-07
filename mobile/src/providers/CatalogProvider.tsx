@@ -18,7 +18,7 @@ import { API_BASE, CACHE_POLICY, GITHUB_CATALOG_URL, IMAGE_BASE, LIMITS, isFetch
 import type { Catalog, CatalogMeta, RawWallpaper, Wallpaper } from '../core/types';
 import { buildCatalog, topTags } from '../core/utils';
 import { bundledCatalog } from '../data';
-import { KEYS, setJson } from '../services/storage';
+import { KEYS, getJson, setJson } from '../services/storage';
 
 interface CatalogContextValue {
   catalog: Catalog | null;
@@ -55,7 +55,7 @@ async function readCachedCatalog(): Promise<RawWallpaper[] | null> {
   const file = catalogCacheFile();
   if (!file) return null;
   try {
-    if (!file.exists) return null;
+    if (!file.exists || file.size > LIMITS.catalogBytes) return null;
     const text = await file.text();
     const parsed = JSON.parse(text);
     return Array.isArray(parsed) ? (parsed as RawWallpaper[]) : null;
@@ -64,15 +64,16 @@ async function readCachedCatalog(): Promise<RawWallpaper[] | null> {
   }
 }
 
-async function writeCachedCatalog(payload: RawWallpaper[]): Promise<void> {
+async function writeCachedCatalog(payload: RawWallpaper[]): Promise<boolean> {
   const file = catalogCacheFile();
-  if (!file) return;
+  if (!file) return false;
   try {
     if (file.exists) file.delete();
     file.create();
     file.write(JSON.stringify(payload));
+    return true;
   } catch {
-    /* a failed cache write must never break a refresh */
+    return false; // never mark a failed write fresh
   }
 }
 
@@ -102,7 +103,7 @@ async function fetchCatalog(url: string, timeoutMs = 20000): Promise<RawWallpape
 
 function normalizeRows(rows: RawWallpaper[]): RawWallpaper[] {
   // Guards against hand-edited catalogs: rows without an id/filename are dropped rather
-  // than rendered as blank cards (and de-duplicated by filename, last one wins).
+  // than rendered as blank cards (and de-duplicated by filename, first one wins).
   const seen = new Set<string>();
   const out: RawWallpaper[] = [];
   for (const row of rows) {
@@ -135,6 +136,7 @@ export function CatalogProvider({ children }: { children: React.ReactNode }) {
   const [error, setError] = useState<string | null>(null);
   const mounted = useRef(true);
   const lastLoadedAt = useRef(0);
+  const inFlight = useRef<Promise<void> | null>(null);
 
   useEffect(() => {
     mounted.current = true;
@@ -154,6 +156,7 @@ export function CatalogProvider({ children }: { children: React.ReactNode }) {
 
   const load = useCallback(
     async (force: boolean) => {
+      let failure: string | undefined;
       // 1 ─ a local Spotlight Studio server (if configured)
       if (API_BASE) {
         try {
@@ -171,11 +174,14 @@ export function CatalogProvider({ children }: { children: React.ReactNode }) {
 
       // 2 ─ the catalog cached on disk (fresh enough and no force refresh)
       if (!force) {
-        const cachedAge = Date.now() - lastLoadedAt.current;
-        if (cachedAge < CACHE_POLICY.catalogMaxAgeMs) {
+        const savedAt = await getJson<unknown>(KEYS.lastCatalogAt, 0);
+        const cachedAge = typeof savedAt === 'number' && Number.isFinite(savedAt)
+          ? Date.now() - savedAt : Infinity;
+        if (cachedAge >= 0 && cachedAge < CACHE_POLICY.catalogMaxAgeMs) {
           const cached = await readCachedCatalog();
           if (cached && cached.length) {
             apply(cached, 'remote', IMAGE_BASE);
+            lastLoadedAt.current = savedAt as number;
             setLoading(false);
             setRefreshing(false);
             return;
@@ -188,14 +194,14 @@ export function CatalogProvider({ children }: { children: React.ReactNode }) {
         const rows = await fetchCatalog(GITHUB_CATALOG_URL);
         if (rows.length) {
           apply(rows, 'remote', IMAGE_BASE);
-          void writeCachedCatalog(rows);
-          void setJson(KEYS.lastCatalogAt, Date.now());
+          if (await writeCachedCatalog(rows)) await setJson(KEYS.lastCatalogAt, Date.now());
           setLoading(false);
           setRefreshing(false);
           return;
         }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
+        failure = message;
         // 4 ─ the catalog cached from an earlier session
         const cached = await readCachedCatalog();
         if (cached && cached.length) {
@@ -210,25 +216,33 @@ export function CatalogProvider({ children }: { children: React.ReactNode }) {
       // 5 ─ the catalog bundled with the app
       const bundled = normalizeRows(bundledCatalog as RawWallpaper[]);
       if (bundled.length) {
-        apply(bundled, 'bundled', IMAGE_BASE, error ?? undefined);
+        apply(bundled, 'bundled', IMAGE_BASE, failure);
       } else if (mounted.current) {
         setError('No catalog available – check your internet connection and pull to refresh.');
       }
       setLoading(false);
       setRefreshing(false);
     },
-    [apply, error],
+    [apply],
   );
+
+  // Pull-to-refresh and foreground events share one request, avoiding stale races.
+  const loadOnce = useCallback((force: boolean): Promise<void> => {
+    if (!inFlight.current) {
+      inFlight.current = load(force).finally(() => { inFlight.current = null; });
+    }
+    return inFlight.current;
+  }, [load]);
 
   const refresh = useCallback(async () => {
     setRefreshing(true);
-    await load(true);
-  }, [load]);
+    await loadOnce(true);
+  }, [loadOnce]);
 
   // First load.  Deferred by a tick so the effect body itself does not trigger a render
   // (the load sets state from asynchronous work anyway, this just keeps the rule honest).
   useEffect(() => {
-    const timer = setTimeout(() => void load(false), 0);
+    const timer = setTimeout(() => void loadOnce(false), 0);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -238,10 +252,10 @@ export function CatalogProvider({ children }: { children: React.ReactNode }) {
     const sub = AppState.addEventListener('change', (state) => {
       if (state !== 'active') return;
       const age = Date.now() - lastLoadedAt.current;
-      if (age > CACHE_POLICY.catalogMaxAgeMs) void load(true);
+      if (age > CACHE_POLICY.catalogMaxAgeMs) void loadOnce(true);
     });
     return () => sub.remove();
-  }, [load]);
+  }, [loadOnce]);
 
   const tags = useMemo(() => {
     if (!catalog) return [];

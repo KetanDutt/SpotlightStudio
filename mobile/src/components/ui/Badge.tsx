@@ -20,11 +20,11 @@ export interface BadgeProps {
 export function Badge({ label, tone = 'neutral', icon, gradient }: BadgeProps) {
   const colors = useColors();
   const tones: Record<BadgeTone, { bg: string; fg: TextTone }> = {
-    neutral: { bg: 'rgba(120, 133, 158, 0.28)', fg: 'default' },
-    accent: { bg: 'rgba(74, 168, 255, 0.22)', fg: 'accent' },
-    ok: { bg: 'rgba(52, 211, 153, 0.2)', fg: 'ok' },
-    warn: { bg: 'rgba(251, 191, 36, 0.2)', fg: 'warn' },
-    danger: { bg: 'rgba(248, 113, 113, 0.22)', fg: 'danger' },
+    neutral: { bg: colors.fillHover, fg: 'default' },
+    accent: { bg: colors.accentFill, fg: 'accent' },
+    ok: { bg: colors.accentFill, fg: 'ok' },
+    warn: { bg: colors.warnFill, fg: 'warn' },
+    danger: { bg: colors.dangerFill, fg: 'danger' },
   };
   const spec = tones[gradient ? 'accent' : tone];
 

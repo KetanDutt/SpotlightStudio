@@ -285,7 +285,7 @@ def test_start_after_stop_is_rejected_while_shutting_down(site, eng, monkeypatch
             return True
 
         def join(self, timeout=None):
-            return None
+            pytest.fail("start must not join a stopping thread while holding its lock")
 
     eng._status = "stopping"
     eng._thread = FakeThread()
@@ -367,3 +367,16 @@ def test_run_stats_progress_and_rate():
     assert stats.rate() == pytest.approx(2.0, rel=0.05)
     assert RunStats().rate() == 0.0
     assert set(stats.as_dict()) >= {"pages_total", "downloaded", "elapsed_seconds", "result"}
+
+
+def test_maintenance_reserves_idle_engine_and_releases_on_failure(env):
+    eng = DownloadEngine()
+    with pytest.raises(RuntimeError, match="repair failed"), eng.maintenance_guard():
+        with pytest.raises(EngineBusy, match="maintenance"):
+            eng.start()
+        with pytest.raises(EngineBusy):
+            with eng.maintenance_guard():
+                pass
+        raise RuntimeError("repair failed")
+    with eng.maintenance_guard():
+        pass  # the guard was released after the failure

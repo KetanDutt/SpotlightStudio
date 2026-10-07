@@ -145,7 +145,7 @@ export function FavoritesToggle({ value, count, onToggle }: { value: boolean; co
       style={[
         styles.favToggle,
         value
-          ? { backgroundColor: 'rgba(248,113,113,0.16)', borderColor: 'rgba(248,113,113,0.4)' }
+          ? { backgroundColor: colors.dangerFill, borderColor: colors.strokeStrong }
           : { backgroundColor: colors.fill, borderColor: colors.stroke },
       ]}
     >

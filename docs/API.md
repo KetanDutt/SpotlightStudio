@@ -3,7 +3,7 @@
 The backend serves the UI **and** a JSON API. Interactive OpenAPI documentation is built in:
 
 * Swagger UI — `http://127.0.0.1:8765/api/docs`
-* ReDoc — `http://127.0.0.1:8765/api/redoc`
+* Legacy `/api/redoc` redirects to the self-hosted Swagger reference
 * Schema — `http://127.0.0.1:8765/api/openapi.json`
 
 > The API is designed for **local use**. It has no authentication; instead it answers only to known `Host` headers and refuses cross-origin state-changing requests (see [SECURITY.md](SECURITY.md)). Use `curl`, scripts or the bundled UI — a web page on another site cannot drive it.
@@ -13,7 +13,7 @@ Base URL: `http://127.0.0.1:8765` · All bodies are JSON (UTF-8) unless noted ·
 | Status | Meaning |
 |---|---|
 | `400` | invalid `Host` header (`Invalid host header`) or an invalid wallpaper path |
-| `403` | cross-origin state-changing request blocked |
+| `403` | cross-origin state-changing request blocked, or `READ_ONLY=true` |
 | `404` | wallpaper / image not found |
 | `409` | conflict: the crawler is busy/shutting down, or the image is a Git-LFS pointer |
 | `422` | invalid query parameter (the response lists the allowed values) |
@@ -29,7 +29,7 @@ Liveness probe.
 ```json
 {
   "status": "healthy",
-  "version": "2.2.0",
+  "version": "2.4.0",
   "engine_status": "stopped",
   "library_count": 7458,
   "downloaded_count": 7458,
@@ -166,7 +166,7 @@ Applies the image as the desktop background of the machine running the server �
 ## Catalog & exports
 
 ### `GET /api/catalog`
-The whole library as one compact JSON array (the **same shape as `data/wallpapers.json`**, i.e. without `phash`). It carries a weak `ETag` derived from the library signature and honours `If-None-Match` (`304`). This is what the UI loads in desktop mode. Compressed with gzip when the client accepts it.
+The whole library as one compact JSON array (the **same shape as `data/wallpapers.json`**, i.e. without `phash`). It carries a weak `ETag` derived from SHA-256 of the response bytes and honours weak/strong/list/wildcard `If-None-Match` validators (`304`). This is what the UI loads in desktop mode. Compressed with gzip when the client accepts it.
 
 ### `GET /data/wallpapers.json`
 The static catalog file. This is the **only** file of `data/` that is served — the database and the log never are.
@@ -219,3 +219,15 @@ page = requests.get(f"{base}/api/wallpapers", params={"quality": "4k", "per_page
 for w in page["wallpapers"]:
     print(w["date_spotted"], w["title"], w["width"], "x", w["height"])
 ```
+
+## Read-only mode and documentation assets
+
+`GET /api/status` includes `config.read_only`. When enabled, **every** HTTP
+POST/PUT/PATCH/DELETE request returns `403` before reaching a handler. GET browsing,
+exports and diagnostics remain available. Default: false. This is not authentication.
+
+`/api/docs` uses pinned local Swagger UI assets and a separate initialization script;
+there are no CDN dependencies, inline scripts or external validator requests. Its
+"Try it out" requests use the same origin and obey read-only mode and CSRF checks.
+Concurrent maintenance requests and crawl starts are coordinated by the engine guard;
+busy operations return 409.

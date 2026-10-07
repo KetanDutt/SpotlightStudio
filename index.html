@@ -5,9 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>Spotlight Studio — Windows Spotlight wallpaper gallery</title>
   <meta name="description" content="Browse, search and download thousands of Windows Spotlight wallpapers in 4K and Full HD. A fast, installable gallery with favorites, tags and shareable links." />
-  <meta name="app-version" content="2.2.0" />
+  <meta name="app-version" content="2.4.0" />
   <meta name="color-scheme" content="dark light" />
-  <meta name="theme-color" content="#07080d" />
+  <meta name="theme-color" content="#151918" />
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob: https://github.com https://*.githubusercontent.com; font-src 'self'; connect-src 'self'; manifest-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-title" content="Spotlight Studio" />
@@ -24,10 +24,11 @@
   <link rel="preconnect" href="https://github.com" />
   <link rel="preconnect" href="https://media.githubusercontent.com" />
 
-  <link rel="stylesheet" href="static/css/app.css?v=2.2.0" />
-  <script src="static/js/theme-init.js?v=2.2.0"></script>
-  <script src="static/js/core.js?v=2.2.0" defer></script>
-  <script src="static/js/app.js?v=2.2.0" defer></script>
+  <link rel="stylesheet" href="static/css/tokens.css?v=2.4.0" />
+  <link rel="stylesheet" href="static/css/app.css?v=2.4.0" />
+  <script src="static/js/theme-init.js?v=2.4.0"></script>
+  <script src="static/js/core.js?v=2.4.0" defer></script>
+  <script src="static/js/app.js?v=2.4.0" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to wallpapers</a>
@@ -38,7 +39,7 @@
     <header class="topbar" id="topbar">
       <a class="brand" href="./" aria-label="Spotlight Studio – home">
         <span class="brand-mark" aria-hidden="true">
-          <svg viewBox="0 0 32 32" width="30" height="30"><defs><linearGradient id="bm" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#38bdf8"/><stop offset="1" stop-color="#6366f1"/></linearGradient></defs><rect width="32" height="32" rx="9" fill="url(#bm)"/><circle cx="21.5" cy="11" r="3.6" fill="#fff" fill-opacity=".95"/><path d="M0 25 8 16l5.5 5 6-7L32 26v6H0z" fill="#0b1226" fill-opacity=".72"/></svg>
+          <svg viewBox="0 0 32 32" width="32" height="32" fill="none"><rect x="1" y="1" width="30" height="30" rx="10" fill="currentColor" fill-opacity=".1"/><rect x="7.5" y="7.5" width="17" height="17" rx="4" stroke="currentColor" stroke-width="1.5"/><circle cx="19.5" cy="12.5" r="2" fill="currentColor"/><path d="m8 22 5-6 4 4 3-3 4 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </span>
         <span class="brand-text">
           <strong>Spotlight Studio</strong>
@@ -67,6 +68,8 @@
           <div id="menu" class="menu" role="menu" hidden>
             <button class="menu-item" role="menuitem" type="button" data-action="export-json"><span data-icon="download"></span>Export catalog (JSON)</button>
             <button class="menu-item" role="menuitem" type="button" data-action="export-csv"><span data-icon="download"></span>Export catalog (CSV)</button>
+            <button class="menu-item" role="menuitem" type="button" data-action="backup-favorites"><span data-icon="heart"></span>Back up favorites</button>
+            <button class="menu-item" role="menuitem" type="button" data-action="restore-favorites"><span data-icon="refresh"></span>Restore favorites</button>
             <a class="menu-item desktop-only" role="menuitem" href="/api/docs" target="_blank" rel="noopener"><span data-icon="external"></span>API documentation</a>
             <hr class="menu-sep" />
             <button class="menu-item" role="menuitem" type="button" data-action="shortcuts"><span data-icon="keyboard"></span>Keyboard shortcuts</button>
@@ -84,6 +87,16 @@
       <span data-icon="alert"></span>
       <span><strong>Images are Git LFS pointers.</strong> This clone was made without the real image files. Run <code>git lfs install &amp;&amp; git lfs pull</code> and restart.</span>
       <button class="btn btn-ghost btn-sm" type="button" id="lfs-dismiss">Dismiss</button>
+    </div>
+
+    <input type="file" id="favorites-file" accept="application/json,.json" aria-label="Restore favorites backup" hidden />
+    <div class="banner" id="offline-banner" role="status" hidden>
+      <span data-icon="info"></span>
+      <span><strong>You’re offline.</strong> Saved catalog search and favorites still work. Uncached images need a connection.</span>
+    </div>
+    <div class="banner read-only-notice" role="status">
+      <span data-icon="info"></span>
+      <span><strong>Read-only gallery.</strong> Browse and save favorites freely. Server controls are disabled.</span>
     </div>
 
     <div class="layout">
@@ -171,8 +184,9 @@
       <!-- ═════════════ Gallery ═════════════ -->
       <main id="main" tabindex="-1">
         <div class="results-bar" id="results-bar">
-          <button class="btn filters-toggle" type="button" id="filters-toggle" aria-controls="sidebar" aria-expanded="false"><span data-icon="filter"></span>Filters<span class="count-pill" id="filters-count" hidden>0</span></button>
+          <button class="btn filters-toggle" type="button" id="filters-toggle" aria-label="Filters" aria-controls="sidebar" aria-expanded="false"><span data-icon="filter"></span><span class="filters-label">Filters</span><span class="count-pill" id="filters-count" hidden>0</span></button>
           <div class="results-info">
+            <p class="collection-eyebrow">A world worth discovering</p>
             <h1 class="results-title" id="results-title">Wallpapers</h1>
             <p class="results-sub" id="results-sub" aria-live="polite">Loading…</p>
           </div>

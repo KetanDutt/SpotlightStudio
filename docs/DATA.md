@@ -6,8 +6,8 @@ A JSON **array** of objects, newest first (`downloaded_at DESC, id DESC`), writt
 
 | Field | Type | Notes |
 |---|---|---|
-| `id` | integer | database id; used by deep links (`#w=<id>`). A wallpaper that is *replaced* by a better copy gets a new id. |
-| `filename` | string | relative path of the image: `peapix/<32 hex>.jpg`; the thumbnail is `thumbs/<filename>` |
+| `id` | integer | database id; used by deep links (`#w=<id>`). Since 2.3, a quality replacement preserves the original id. |
+| `filename` | string | relative path of the image: `peapix/<64 hex>.jpg` (legacy 32-hex paths remain valid); the thumbnail is `thumbs/<filename>` |
 | `title` | string | may be a **placeholder** (a 32-character file hash or `Windows Spotlight`) — see below |
 | `source` | string | `peapix` or `win10spotlight` |
 | `source_url` | string | the original image URL that was downloaded |
@@ -66,7 +66,19 @@ Add a migration by writing `_migrate_to_vN(conn)`, registering it in `_MIGRATION
 
 ## Images
 
-* Names are content-addressed: `sha256(source_url)[:32]` + extension taken from the *decoded* format (`jpg`, `png`, `webp`). A file therefore never changes, which is what allows `Cache-Control: immutable`.
+* New names are content-addressed: `sha256(image_bytes)` (64 hex characters; legacy URL-derived paths are not renamed) + extension taken from the *decoded* format (`jpg`, `png`, `webp`). A file therefore never changes, which is what allows `Cache-Control: immutable`.
 * Thumbnails: centre-cropped to 16:9, 480×270, progressive JPEG quality 82.
 * Files are written to `*.part` and renamed, so a crash never leaves a truncated image.
 * The repository tracks `images/**` with **Git LFS** (`.gitattributes`). Without LFS the files are 130-byte pointers; `python main.py --check` and the UI both report that.
+
+## Browser favorites backup (version 1)
+
+```json
+{"format":"spotlight-favorites","version":1,"favorites":["peapix/example.jpg"]}
+```
+
+Exported from the browser More options menu. Import validates the entire document before
+merging; existing favorites are never deleted. Relative keys must not contain traversal,
+URL schemes, query/fragment delimiters or control characters. Unknown catalog keys survive
+restore. At most 20,000 keys and a 2 MiB file are accepted. Image files and mobile preferences
+are not included. Browser and mobile export formats are not interchangeable.

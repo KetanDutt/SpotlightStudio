@@ -3,14 +3,13 @@ storage.py – where wallpapers live on disk and how they are written / removed.
 
 Layout (all paths relative to ``settings.IMAGES_DIR``)::
 
-    peapix/<sha256(url)[:32]>.jpg            full resolution image
-    win10spotlight/<sha256(url)[:32]>.jpg
+    peapix/<sha256(bytes)>.jpg            full resolution image
+    win10spotlight/<sha256(bytes)>.jpg
     thumbs/peapix/<…>.jpg                    480×270 thumbnail (same relative name)
     thumbs/win10spotlight/<…>.jpg
 
-Filenames are *content addressed* (derived from the source URL), so a file never
-changes after it was written – which is what allows the API to serve images
-with ``Cache-Control: immutable``.
+New downloads are content addressed (SHA-256 of image bytes). Legacy URL-derived
+32-character filenames remain supported and are not renamed.
 """
 from __future__ import annotations
 

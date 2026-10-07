@@ -13,13 +13,20 @@ The usual workflow is: crawl locally → commit the new data → GitHub Pages re
 
 ### What is published
 
-Pages serves the repository's static files: `index.html`, `static/`, `sw.js`, `manifest.webmanifest` and `data/wallpapers.json`. The UI detects that no backend exists and runs in **web mode** (search, filters, favorites, downloads — no crawler controls).
+The allow-listed build in `dist/site/` contains: `index.html`, `static/`, `sw.js`, `manifest.webmanifest` and `data/wallpapers.json`. The UI detects that no backend exists and runs in **web mode** (search, filters, favorites, downloads — no crawler controls).
 
 ### Set-up
 
 1. Push the repository to GitHub (images must be pushed through **Git LFS**: `git lfs install` first).
-2. **Settings → Pages → Build and deployment**: *Deploy from a branch* → branch `main`, folder `/ (root)` → Save.
-3. After a minute the site is live at `https://<user>.github.io/<repository>/`.
+2. **Settings → Pages → Build and deployment**: select **GitHub Actions**.
+3. Run `.github/workflows/pages.yml` manually, or push a site/catalog change to `main`.
+   The workflow runs `python scripts/build_site.py` and publishes only `dist/site/`.
+4. After successful deployment the site is live at `https://<user>.github.io/<repository>/`.
+
+**Do not publish the repository root.** Generic static hosts do not apply the FastAPI
+file allow-list and can expose `data/wallpapers.db`, logs and source files. For other
+static hosts run `python scripts/build_site.py` and upload only `dist/site/`.
+The build intentionally excludes local images: the static UI uses GitHub LFS URLs.
 
 ### Images and Git LFS
 
@@ -79,11 +86,18 @@ Restart=on-failure
 WantedBy=multi-user.target
 ```
 
+Set `READ_ONLY=true` for a publicly accessible browse-only gallery. This rejects all
+HTTP mutations, not CLI updates or startup migrations. Use explicit `ALLOWED_HOSTS`.
+
 Binding anything other than `127.0.0.1` exposes an **unauthenticated** API. Put it behind a reverse proxy with authentication, or restrict access with a firewall, and set `ALLOWED_HOSTS` to the names you use. Read [SECURITY.md](SECURITY.md).
 
 ---
 
 ## Automatic updates
+
+**One writer process at a time.** Do not schedule a CLI crawl while the server (or another
+crawl) is using the same database. Stop the server first, or invoke its control API through
+your secured administrative channel. Multiple uvicorn workers are unsupported.
 
 `--crawl` runs one crawl without any UI and exits (`0` = completed, `1` = failed, `130` = interrupted). A *quick* update takes seconds and is safe to run daily.
 
@@ -130,3 +144,8 @@ Behavioural changes to be aware of:
 | Static catalog | list incl. `phash`, mixed date formats | slim list, ISO dates |
 | `templates/index.html`, `data/wallpapers.min.json` | present | removed |
 | Browser UI in `--server` mode | no crawler controls (needed `?app=desktop`) | auto-detected |
+
+## Production gates
+
+See [REVIEW.md](REVIEW.md) for verified changes and remaining limitations, and
+[RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md) for deployment, monitoring and rollback.

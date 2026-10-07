@@ -42,7 +42,7 @@ export function Segmented<T extends string>({ options, value, onChange, accessib
             plain
             style={[
               styles.segment,
-              selected ? { backgroundColor: colors.surfaceAlt, borderColor: colors.strokeStrong } : { borderColor: 'transparent' },
+              selected ? { backgroundColor: colors.surface, borderColor: colors.strokeStrong } : { borderColor: 'transparent' },
             ]}
           >
             <AppText variant="label" tone={selected ? 'default' : 'muted'}>
@@ -71,6 +71,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     borderRadius: radius.pill,
     borderWidth: StyleSheet.hairlineWidth,
-    minHeight: 34,
+    minHeight: 44,
   },
 });

@@ -17,7 +17,7 @@ import { SetWallpaperSheet } from '../../src/components/wallpaper/SetWallpaperSh
 import { thumbnailUrl } from '../../src/services/media';
 import type { HistoryAction, Wallpaper } from '../../src/core/types';
 import { fmtRelative } from '../../src/core/utils';
-import { radius, spacing } from '../../src/theme/tokens';
+import { navigation, radius, spacing } from '../../src/theme/tokens';
 import { useColors } from '../../src/theme/ThemeProvider';
 import { useCatalog } from '../../src/providers/CatalogProvider';
 import { usePreferences } from '../../src/providers/PreferencesProvider';
@@ -79,7 +79,7 @@ export default function HistoryScreen() {
                   clearHistory();
                   show({ message: 'History cleared.' });
                 }}
-                translucent
+
               />
             ) : undefined
           }
@@ -95,7 +95,7 @@ export default function HistoryScreen() {
           onAction={() => router.push('/')}
         />
       ) : (
-        <ScrollView contentContainerStyle={styles.list} showsVerticalScrollIndicator={false}>
+        <ScrollView contentContainerStyle={[styles.list, { paddingBottom: navigation.contentInset + insets.bottom }]} showsVerticalScrollIndicator={false}>
           {rows.map(({ id, action, at, item }) => {
             const meta = ACTION_META[action] ?? ACTION_META.save;
             const favorite = isFavorite(item.key);

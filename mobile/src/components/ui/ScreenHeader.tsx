@@ -1,16 +1,13 @@
-/**
- * Screen header – large title, optional subtitle, and a slot for actions.
- *
- * On iOS the header stretches with the scroll offset; on Android it stays put.  Both sit
- * behind a blur so photos scrolling underneath look right.
+/** Floating structural header with title, actions and optional search/controls.
+ * iOS uses restrained blur; web, Android and reduced-transparency use an opaque material.
  */
-import { BlurView } from 'expo-blur';
 import React from 'react';
-import { Platform, StyleSheet, View } from 'react-native';
+import { StyleSheet, View, useWindowDimensions } from 'react-native';
 
-import { spacing } from '../../theme/tokens';
+import { radius, spacing } from '../../theme/tokens';
 import { useColors } from '../../theme/ThemeProvider';
 import { AppText } from './AppText';
+import { GlassBackdrop } from './GlassBackdrop';
 
 export interface ScreenHeaderProps {
   title: string;
@@ -23,9 +20,11 @@ export interface ScreenHeaderProps {
 
 export function ScreenHeader({ title, subtitle, actions, children }: ScreenHeaderProps) {
   const colors = useColors();
+  const { width, fontScale } = useWindowDimensions();
+  const stacked = width < 360 || fontScale > 1.3;
   const content = (
     <View style={styles.content}>
-      <View style={styles.row}>
+      <View style={[styles.row, stacked && { flexDirection: 'column', alignItems: 'stretch' }]}>
         <View style={styles.titles}>
           <AppText variant="title" numberOfLines={1}>
             {title}
@@ -36,30 +35,28 @@ export function ScreenHeader({ title, subtitle, actions, children }: ScreenHeade
             </AppText>
           ) : null}
         </View>
-        {actions ? <View style={styles.actions}>{actions}</View> : null}
+        {actions ? <View style={[styles.actions, stacked && { alignSelf: 'flex-end' }]}>{actions}</View> : null}
       </View>
       {children ? <View style={styles.extra}>{children}</View> : null}
     </View>
   );
 
-  if (Platform.OS === 'ios') {
-    return (
-      <BlurView intensity={36} tint={colors.dark ? 'dark' : 'light'} style={styles.wrap}>
-        {content}
-      </BlurView>
-    );
-  }
-  return <View style={[styles.wrap, { backgroundColor: colors.bg }]}>{content}</View>;
+  return <View style={[styles.wrap, { borderColor: colors.stroke }]}><GlassBackdrop />{content}</View>;
 }
 
 const styles = StyleSheet.create({
   wrap: {
     overflow: 'hidden',
+    marginHorizontal: spacing.md,
+    marginTop: spacing.sm,
+    marginBottom: spacing.md,
+    borderRadius: radius.xl,
+    borderWidth: StyleSheet.hairlineWidth,
   },
   content: {
     paddingHorizontal: spacing.lg,
-    paddingTop: spacing.sm,
-    paddingBottom: spacing.md,
+    paddingTop: spacing.lg,
+    paddingBottom: spacing.lg,
     gap: spacing.md,
   },
   row: {

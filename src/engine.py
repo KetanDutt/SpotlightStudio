@@ -47,6 +47,7 @@ import sys
 import threading
 import time
 from collections import deque
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
@@ -198,6 +199,7 @@ class DownloadEngine:
         self._status: Status = "stopped"
         self._source = "both"
         self._mode = "full"
+        self._maintenance_active = False
         self._loop: asyncio.AbstractEventLoop | None = None
         self._thread: threading.Thread | None = None
         self._pause_event: asyncio.Event | None = None
@@ -248,12 +250,12 @@ class DownloadEngine:
         md = md if md in VALID_MODES else "full"
 
         with self._lock:
+            if self._maintenance_active:
+                raise EngineBusy("Library maintenance is in progress.")
             if self._status == "stopping":
-                thread = self._thread
-                if thread is not None and thread.is_alive():
-                    thread.join(timeout=15)
-                if self._status == "stopping":
-                    raise EngineBusy("The previous run is still shutting down.")
+                # Shutdown needs this same lock to publish "stopped". Joining
+                # while holding it prevented completion and stalled HTTP for 15s.
+                raise EngineBusy("The previous run is still shutting down.")
 
             if self._status in ("running", "paused"):
                 changed = src != self._source
@@ -294,6 +296,19 @@ class DownloadEngine:
                 md, src, settings.CONCURRENT_DOWNLOADS, settings.CONCURRENT_SCRAPERS,
             )
             return "started"
+
+    @contextmanager
+    def maintenance_guard(self):
+        """Reserve the idle engine without racing a concurrent start/maintenance call."""
+        with self._lock:
+            if self._status != "stopped" or self._maintenance_active:
+                raise EngineBusy("Stop the crawler and wait for any maintenance to finish.")
+            self._maintenance_active = True
+        try:
+            yield
+        finally:
+            with self._lock:
+                self._maintenance_active = False
 
     def pause(self) -> None:
         """Stop dispatching new work; in-flight requests finish, queues stay in SQLite."""
@@ -394,7 +409,8 @@ class DownloadEngine:
                 run.phase = "Idle"
                 self._status = "stopped"
                 self._persist_summary(run)
-            self._finished.set()
+                # Publish completion before a new start can clear this event.
+                self._finished.set()
             log.info("Engine finished (%s).", result)
 
     def _persist_summary(self, run: RunStats) -> None:

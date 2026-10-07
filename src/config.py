@@ -19,6 +19,7 @@ Design notes
 from __future__ import annotations
 
 import logging
+import math
 import os
 from pathlib import Path
 
@@ -66,6 +67,8 @@ def _env_float(name: str, default: float, lo: float | None = None, hi: float | N
         return default
     try:
         value = float(raw.strip())
+        if not math.isfinite(value):
+            raise ValueError("non-finite number")
     except ValueError:
         _log.warning("Invalid number for %s=%r – using default %s", name, raw, default)
         return default
@@ -119,6 +122,7 @@ class Settings:
         """(Re)read every value from the current environment."""
         # ── Server ────────────────────────────────────────────────────────
         self.HOST: str = _env_str("HOST", "127.0.0.1")
+        self.READ_ONLY: bool = _env_bool("READ_ONLY", False)
         self.PORT: int = _env_int("PORT", 8765, 1, 65535)
         # Host headers accepted by the API (DNS-rebinding protection).
         # Defaults to loopback names; "*" is implied when HOST is not loopback.

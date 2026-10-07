@@ -38,7 +38,8 @@
     set(key, value) {
       try {
         localStorage.setItem(`spotlight:${key}`, JSON.stringify(value));
-      } catch (_) { /* private mode / quota – preferences simply are not persisted */ }
+        return true;
+      } catch (_) { return false; }
     },
   };
 
@@ -61,6 +62,34 @@
     }
     return el;
   }
+
+  // Visual-only lifecycle: preserve dialog/history behavior while allowing exits
+  // to finish. Reopening cancels a pending close; reduced motion is immediate.
+  const pendingClose = new WeakMap();
+  function cancelVisualClose(element) {
+    clearTimeout(pendingClose.get(element));
+    pendingClose.delete(element);
+    element.classList.remove("is-closing");
+  }
+  function visualClose(element, finish) {
+    if (pendingClose.has(element)) return;
+    if (prefersReducedMotion()) { finish(); return; }
+    element.classList.add("is-closing");
+    const ms = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--duration-fast")) || 150;
+    pendingClose.set(element, setTimeout(() => {
+      cancelVisualClose(element);
+      finish();
+    }, ms));
+  }
+  function dismissDialog(dialog) {
+    if (dialog.open) visualClose(dialog, () => dialog.close());
+  }
+  document.addEventListener("close", (event) => {
+    // A toast should outlive its originating dialog without becoming invisible.
+    if (event.target instanceof HTMLDialogElement && event.target.contains($("toasts"))) {
+      (document.querySelector("dialog[open]") || document.body).append($("toasts"));
+    }
+  }, true);
 
   /* ═══════════════════════════ icons (static, trusted markup) ═══════════════════════════ */
 
@@ -132,7 +161,7 @@
     catalog: null,
     catalogVersion: 0,
     state: Object.assign({}, C.DEFAULT_STATE),
-    favorites: new Set(store.get("favorites", [])),
+    favorites: new Set(C.normalizeFavorites(store.get("favorites", []))),
     favVersion: 0,
     cache: { key: "", list: [] },
     info: null,
@@ -155,6 +184,8 @@
   function toast(message, type, ms) {
     const kind = type || "info";
     const box = $("toasts");
+    // A dialog is in the top layer: keep its action feedback in that layer too.
+    (document.querySelector("dialog[open]") || document.body).append(box);
     while (box.children.length >= 4) box.firstChild.remove();
     const el = h("div", { class: `toast is-${kind}` },
       h("span", { dataset: { icon: kind === "success" ? "check" : kind === "error" ? "alert" : "info" } }),
@@ -208,9 +239,16 @@
 
   async function loadCatalog() {
     const url = app.mode === "desktop" ? "/api/catalog" : "data/wallpapers.json";
-    const res = await fetch(url, { cache: "no-cache" });
-    if (!res.ok) throw new Error(`The catalog request failed (HTTP ${res.status}).`);
-    const raw = await res.json();
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 20000);
+    let raw;
+    try {
+      const res = await fetch(url, { cache: "no-cache", signal: controller.signal });
+      if (!res.ok) throw new Error(`The catalog request failed (HTTP ${res.status}).`);
+      raw = await res.json();
+    } finally {
+      clearTimeout(timeout);
+    }
     if (!Array.isArray(raw)) throw new Error("The catalog has an unexpected format.");
     app.raw = raw;
     app.catalog = C.buildCatalog(raw);
@@ -247,10 +285,11 @@
     app.mode = onPages ? "web" : await detectMode();
     if (onPages) app.forcedApp = new URLSearchParams(location.search).get("app") || "";
     document.body.classList.toggle("is-desktop", app.mode === "desktop");
+    document.body.classList.toggle("is-read-only", !!app.status?.config?.read_only);
     setupImageSource();
 
     // Restore state: saved display prefs < URL.
-    const prefs = store.get("prefs", {});
+    const prefs = store.get("prefs", {}) || {};
     const fromUrl = C.decodeState(location.search);
     const urlHas = new URLSearchParams(location.search);
     app.state = Object.assign({}, C.DEFAULT_STATE, {
@@ -330,7 +369,7 @@
     const theme = resolveTheme(pref);
     document.documentElement.setAttribute("data-theme", theme);
     const meta = document.querySelector('meta[name="theme-color"]');
-    if (meta) meta.setAttribute("content", theme === "light" ? "#eef2f8" : "#07080d");
+    if (meta) meta.setAttribute("content", theme === "light" ? "#f5f5f1" : "#151918");
     setIcon($("theme-icon"), THEME_ICON[pref]);
     $("btn-theme").title = `Theme: ${pref}`;
     $("btn-theme").setAttribute("aria-label", `Theme: ${pref} (click to change)`);
@@ -632,6 +671,7 @@
       $(id).classList.toggle("is-active", active);
       $(id).setAttribute("aria-pressed", String(active));
     }
+    $("view-list").parentElement.classList.toggle("is-list-selected", s.view === "list");
     $("btn-favs").setAttribute("aria-pressed", String(s.fav));
     $("fav-count").textContent = String(app.favorites.size);
     $("fav-count").hidden = app.favorites.size === 0;
@@ -669,15 +709,36 @@
     if (!item) return;
     const key = item.key;
     const adding = !app.favorites.has(key);
+    if (adding && app.favorites.size >= C.MAX_FAVORITES) return toast("Favorites limit reached. Export a backup first.", "error");
     if (adding) app.favorites.add(key);
     else app.favorites.delete(key);
     app.favVersion += 1;
-    store.set("favorites", [...app.favorites]);
+    if (!store.set("favorites", [...app.favorites])) toast("Favorites could not be saved. Export a backup before closing this tab.", "error");
     syncFavoriteButtons();
     $("fav-count").textContent = String(app.favorites.size);
     $("fav-count").hidden = app.favorites.size === 0;
     toast(adding ? "Added to favorites" : "Removed from favorites", "info", 1500);
     if (app.state.fav && !adding && !app.lb.item) render();
+  }
+
+  async function importFavorites(file) {
+    if (!file) return;
+    try {
+      if (file.size > 2 * 1024 * 1024) throw new Error("Backup is too large (maximum 2 MB).");
+      const keys = C.parseFavoritesBackup(JSON.parse(await file.text()));
+      const merged = new Set([...app.favorites, ...keys]);
+      if (merged.size > C.MAX_FAVORITES) throw new Error("The combined favorites exceed the 20,000 item limit.");
+      const added = merged.size - app.favorites.size;
+      app.favorites = merged;
+      app.favVersion += 1;
+      const saved = store.set("favorites", [...merged]);
+      render();
+      syncFavoriteButtons();
+      toast(saved ? `Restored ${added} favorites. Existing favorites were kept.` :
+        "Restored for this tab only: browser storage is unavailable. Keep your backup.", saved ? "success" : "error");
+    } catch (err) {
+      toast(err instanceof SyntaxError ? "This file is not valid JSON." : err.message, "error");
+    }
   }
 
   function syncFavoriteButtons() {
@@ -723,6 +784,7 @@
     const index = list.indexOf(item);
     app.lb.list = index >= 0 ? list : [item];
     app.lb.index = Math.max(0, index);
+    cancelVisualClose(lb.dlg);
     showLightboxItem(item);
     if (!lb.dlg.open) lb.dlg.showModal();
     if (!(opts && opts.push === false) && C.parseHash(location.hash) !== item.id) {
@@ -827,7 +889,7 @@
       history.back(); // popstate → syncFromHash closes the dialog
       return;
     }
-    lb.dlg.close();
+    dismissDialog(lb.dlg);
     if (C.parseHash(location.hash) != null) history.replaceState(null, "", cleanUrl());
   }
 
@@ -846,7 +908,7 @@
     if (!app.catalog) return;
     const id = C.parseHash(location.hash);
     if (id == null) {
-      if (lb.dlg.open) lb.dlg.close();
+      if (lb.dlg.open) dismissDialog(lb.dlg);
       syncURL(); // history.back() restores the *old* URL: re-apply the current filters (e.g. after a tag click)
       return;
     }
@@ -1114,10 +1176,19 @@
     else downloadBlob(new Blob([C.toCsv(app.raw)], { type: "text/csv;charset=utf-8" }), "spotlight_wallpapers.csv");
   }
 
-  function setMenu(open) {
-    $("menu").hidden = !open;
+  function setMenu(open, restoreFocus) {
+    const menu = $("menu");
     $("btn-menu").setAttribute("aria-expanded", String(open));
-    if (open) $("menu").querySelector(".menu-item:not([hidden])").focus();
+    if (open) {
+      cancelVisualClose(menu);
+      menu.hidden = false;
+      menu.inert = false;
+      menu.querySelector(".menu-item:not([hidden])").focus();
+    } else {
+      menu.inert = true;
+      visualClose(menu, () => { menu.hidden = true; });
+      if (restoreFocus) $("btn-menu").focus();
+    }
   }
 
   function openDialog(id) {
@@ -1129,19 +1200,50 @@
         ? new Date(app.catalog.newestAdded).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" }) : "–";
     }
     const dlg = $(id);
+    cancelVisualClose(dlg);
     if (!dlg.open) dlg.showModal();
   }
 
   /* ═══════════════════════════ UI bindings ═══════════════════════════ */
 
   function setSidebar(open) {
-    $("sidebar").classList.toggle("is-open", open);
+    const sidebar = $("sidebar");
+    const mobile = window.matchMedia("(max-width: 960px)").matches;
+    const wasOpen = sidebar.classList.contains("is-open");
+    open = Boolean(open && mobile);
+    sidebar.classList.toggle("is-open", open);
     $("scrim").hidden = !open;
     $("filters-toggle").setAttribute("aria-expanded", String(open));
+    document.body.classList.toggle("has-sidebar", open);
+    for (const element of [$("topbar"), $("main"), document.querySelector(".site-foot")]) element.inert = open;
+    if (open) {
+      sidebar.setAttribute("role", "dialog");
+      sidebar.setAttribute("aria-modal", "true");
+      sidebar.setAttribute("aria-label", "Library filters and crawler controls");
+      $("sidebar-close").focus();
+    } else {
+      sidebar.removeAttribute("role");
+      sidebar.removeAttribute("aria-modal");
+      sidebar.removeAttribute("aria-label");
+      if (wasOpen && mobile) $("filters-toggle").focus();
+    }
   }
 
   function bindUI() {
     bindLightbox();
+    $("sidebar").addEventListener("keydown", (event) => {
+      if (!$("sidebar").classList.contains("is-open")) return;
+      if (event.key === "Escape") {
+        event.preventDefault(); event.stopPropagation(); setSidebar(false); return;
+      }
+      if (event.key !== "Tab") return;
+      const controls = [...$("sidebar").querySelectorAll("button:not(:disabled), select, a[href], input")]
+        .filter((element) => element.getClientRects().length);
+      const first = controls[0], last = controls[controls.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    });
+    window.matchMedia("(min-width: 961px)").addEventListener("change", () => setSidebar(false));
 
     // Search
     const search = $("search");
@@ -1157,23 +1259,51 @@
     $("btn-shuffle").addEventListener("click", openRandom);
     $("btn-favs").addEventListener("click", toggleFavoritesView);
     $("btn-theme").addEventListener("click", cycleTheme);
-    $("btn-menu").addEventListener("click", (e) => { e.stopPropagation(); setMenu($("menu").hidden); });
+    $("btn-menu").addEventListener("click", (e) => { e.stopPropagation(); setMenu($("btn-menu").getAttribute("aria-expanded") !== "true"); });
     $("menu").addEventListener("click", (e) => {
       const item = e.target.closest("[data-action]");
       if (!item && !e.target.closest("a")) return;
-      setMenu(false);
+      setMenu(false, true);
       if (!item) return;
       const action = item.dataset.action;
       if (action === "export-json") exportCatalog("json");
       else if (action === "export-csv") exportCatalog("csv");
+      else if (action === "backup-favorites") downloadBlob(new Blob([JSON.stringify(C.favoritesBackup(app.favorites), null, 2)], { type: "application/json" }), "spotlight-favorites.json");
+      else if (action === "restore-favorites") $("favorites-file").click();
       else if (action === "shortcuts") openDialog("dlg-shortcuts");
       else if (action === "about") openDialog("dlg-about");
     });
     document.addEventListener("click", (e) => { if (!$("menu").hidden && !e.target.closest(".menu-wrap")) setMenu(false); });
 
+    $("favorites-file").addEventListener("change", (event) => {
+      void importFavorites(event.target.files[0]);
+      event.target.value = "";
+    });
+    $("menu").addEventListener("keydown", (event) => {
+      const items = [...$("menu").querySelectorAll(".menu-item")].filter((item) => item.getClientRects().length);
+      const index = items.indexOf(document.activeElement);
+      const next = event.key === "ArrowDown" ? (index + 1) % items.length :
+        event.key === "ArrowUp" ? (index - 1 + items.length) % items.length :
+        event.key === "Home" ? 0 : event.key === "End" ? items.length - 1 : -1;
+      if (next >= 0) { event.preventDefault(); items[next].focus(); }
+      if (event.key === "Tab") setMenu(false, true);
+    });
+    const connectionStatus = () => { $("offline-banner").hidden = navigator.onLine !== false; };
+    window.addEventListener("online", connectionStatus);
+    window.addEventListener("offline", connectionStatus);
+    connectionStatus();
+    window.addEventListener("storage", (event) => {
+      if (event.key !== "spotlight:favorites" && event.key !== null) return;
+      app.favorites = new Set(C.normalizeFavorites(store.get("favorites", [])));
+      app.favVersion += 1;
+      if (app.catalog) render();
+      syncFavoriteButtons();
+    });
+
     // Dialog close buttons + backdrop click
     for (const dlg of document.querySelectorAll("dialog.modal")) {
-      dlg.addEventListener("click", (e) => { if (e.target === dlg || e.target.closest("[data-close]")) dlg.close(); });
+      dlg.addEventListener("cancel", (event) => { event.preventDefault(); dismissDialog(dlg); });
+      dlg.addEventListener("click", (e) => { if (e.target === dlg || e.target.closest("[data-close]")) dismissDialog(dlg); });
     }
 
     // Results bar
@@ -1264,7 +1394,7 @@
     if (typing) return; // the search box handles its own Escape/Enter
     if (e.key === "Escape") {
       if ($("sidebar").classList.contains("is-open")) setSidebar(false);
-      else if (!$("menu").hidden) setMenu(false);
+      else if (!$("menu").hidden) setMenu(false, true);
       return;
     }
     if (document.querySelector("dialog.modal[open]")) return; // native dialogs own the keyboard

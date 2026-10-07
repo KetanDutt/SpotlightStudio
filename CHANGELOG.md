@@ -5,6 +5,60 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [2.4.0] — 2026-10-07
+
+### Changed
+- Original Still Glass design across browser/PWA and Expo screens: semantic light/dark
+  palettes, restrained structural materials, external photo captions, floating navigation,
+  consistent typography, forms, lists, buttons, sheets and state surfaces.
+- Centralized web/native design tokens; refreshed the existing icon family in muted sage.
+- Styled the self-hosted API reference without modifying Swagger or relaxing CSP.
+- Service-worker shell/cache version updated; includes the new token stylesheet.
+
+### Accessibility and interaction
+- Animated, cancellable dialog/menu/viewer closing; top-layer-aware toasts; a focus-contained
+  mobile browser filter drawer with inert background and reliable focus return.
+- Native motion/transparency preferences, 44dp shared controls, stable tag-rail height,
+  floating-tab content clearance and small-width header/control wrapping.
+- Reduced-motion CSS/native handling and semantic-text contrast regression checks.
+
+### Fixed
+- Expo web startup no longer eagerly evaluates the native-only photo-library module.
+- Cross-platform stable animation values and guarded reduced-transparency capability checks.
+- Native press feedback preserves caller opacity/transforms and applies layout to the press target.
+
+### Documentation and checks
+- Design specification and screen/component consistency audit; refreshed preview screenshots.
+- Expanded browser coverage for themes, viewer/dialog flows, 320/390/768px layouts,
+  focus containment, touch targets, reduced motion and contrast; native theme tests.
+- Data, API contracts, routes, native wallpaper workflows and previous hardening preserved.
+  Device/native, archive and dependency-advisory release gates still apply.
+
+## [2.3.0] — 2026-10-07
+
+### Fixed
+- Keep the old wallpaper until its replacement files and metadata are safely committed;
+  preserve the wallpaper ID/deep link, and wait for executor writes during cancellation.
+- Persisted mobile catalog freshness now survives launches; overlapping refreshes share a request.
+- Malformed browser favorites/preferences no longer prevent startup.
+- Catalog ETags hash response bytes and support weak/list/wildcard validators.
+- Starting during shutdown returns busy without a lock-blocking thread join.
+- Maintenance reserves the idle engine; HTML reads are size-capped and automatic CPU workers capped at four.
+- Origin checks compare scheme as well as host; reject non-finite numeric configuration.
+- Service-worker writes are awaited and quota-safe; cached pages/catalogs survive HTTP 5xx.
+
+### Added
+- `READ_ONLY` server mode, capability-aware UI, and deployment guidance.
+- Versioned favorites backup/restore (merge, validation, size limits), cross-tab synchronization,
+  storage-failure notices, offline indicator, and keyboard navigation in the actions menu.
+- Self-hosted, CSP-compatible API reference and a safe static-site build/Pages workflow.
+- Chromium smoke tests in CI and a production-readiness review with explicit release blockers.
+
+### Maintenance
+- New downloads use content-addressed filenames; existing paths remain supported.
+- Refreshed compatible mobile dependencies; unresolved upstream advisories remain documented.
+- Removed generated mobile coverage reports from version control and ignored future reports.
+
 ## [Unreleased]
 
 ### Added

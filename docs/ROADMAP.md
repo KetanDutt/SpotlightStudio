@@ -1,6 +1,8 @@
 # Suggested improvements
 
-Ideas that were **not** implemented in 2.2.0 — either because they need decisions only the owner can make, access to real accounts/hardware, or simply more room than one release. Effort: **S** ≤ a day · **M** a few days · **L** a week or more.
+Ideas still **not** implemented after 2.3.0 — either because they need decisions only the owner can make, access to real accounts/hardware, or simply more room than one release. Effort: **S** ≤ a day · **M** a few days · **L** a week or more.
+
+Immediate release blockers and prioritized security work are in [REVIEW.md](REVIEW.md#release-blockers-and-prioritized-follow-up).
 
 ## High value, small effort
 
@@ -51,7 +53,6 @@ Ideas that were **not** implemented in 2.2.0 — either because they need decisi
 | **Image zoom / pan** in the viewer (pinch, wheel) | wallpapers are detailed | M |
 | **Internationalisation** (the strings are already centralised in a few places) | wider audience | M |
 | **Share targets**: Web Share API on mobile, "copy as markdown" | convenience | S |
-| **Playwright smoke tests in CI** against a generated demo catalog | the manual browser checks used for 2.2.0 would become automatic | M |
 
 ## Deliberately out of scope
 

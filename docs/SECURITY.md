@@ -55,3 +55,18 @@ Runtime dependencies are small and widely used: `aiohttp`, `beautifulsoup4`, `fa
 * No authentication or HTTPS: not intended for untrusted networks (see above).
 * `set-wallpaper` runs OS commands (`osascript`, `gsettings`, `plasma-apply-wallpaperimage`) with arguments derived from file paths created by the app itself — never from request input.
 * A malicious source site could serve misleading titles/tags; the UI renders them inertly, but cannot judge their content.
+
+## Public galleries and release auditing
+
+Set `READ_ONLY=true` to reject every HTTP mutation. This does not restrict catalog reads,
+CLI operations or startup migrations, and it is not filesystem read-only mode. For writable
+remote deployments use authenticated TLS access; **Host allow-lists are not authentication**.
+Origin comparison includes the scheme; configure trusted reverse-proxy headers correctly.
+
+Static publication must use `python scripts/build_site.py` and publish only `dist/site/`.
+A generic static server serving the repository root does not inherit FastAPI's protections.
+HTML scraping is capped at 8 MiB of decompressed bytes; automatic CPU workers are capped at
+four (explicit concurrency settings can still exhaust constrained hosts).
+
+See [REVIEW.md](REVIEW.md#dependency-audit-2026-10-07) for current audit findings and unresolved
+mobile advisories. Self-hosted Swagger UI attribution/version is recorded alongside its assets.

@@ -1,37 +1,42 @@
 /** Bottom tab bar – Browse · Favourites · History · Settings. */
 import { Ionicons } from '@expo/vector-icons';
-import { BlurView } from 'expo-blur';
 import { Tabs } from 'expo-router/js-tabs';
 import React from 'react';
-import { Platform, StyleSheet } from 'react-native';
+import { StyleSheet } from 'react-native';
 
-import { fontSize } from '../../src/theme/tokens';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { GlassBackdrop } from '../../src/components/ui/GlassBackdrop';
+import { fontSize, navigation, radius, spacing } from '../../src/theme/tokens';
 import { useColors } from '../../src/theme/ThemeProvider';
 import { usePreferences } from '../../src/providers/PreferencesProvider';
 
 export default function TabsLayout() {
   const colors = useColors();
+  const insets = useSafeAreaInsets();
   const { favoriteCount } = usePreferences();
 
   return (
     <Tabs
       screenOptions={{
         headerShown: false,
+        sceneStyle: { backgroundColor: colors.bg },
         tabBarActiveTintColor: colors.accent,
         tabBarInactiveTintColor: colors.textFaint,
         tabBarStyle: {
           position: 'absolute',
-          borderTopWidth: StyleSheet.hairlineWidth,
-          borderTopColor: colors.stroke,
-          backgroundColor: Platform.OS === 'ios' ? 'transparent' : colors.surface,
-          height: Platform.OS === 'ios' ? 84 : 62,
-          paddingTop: 6,
+          left: spacing.lg, right: spacing.lg,
+          bottom: Math.max(insets.bottom, navigation.inset),
+          height: navigation.height,
+          paddingTop: spacing.sm, paddingBottom: spacing.sm,
+          borderRadius: radius.xl, overflow: 'hidden',
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: colors.strokeStrong, borderTopColor: colors.strokeStrong,
+          backgroundColor: 'transparent',
           elevation: 0,
         },
-        tabBarBackground: () =>
-          Platform.OS === 'ios' ? (
-            <BlurView intensity={48} tint={colors.dark ? 'dark' : 'light'} style={StyleSheet.absoluteFill} />
-          ) : null,
+        tabBarActiveBackgroundColor: colors.accentFill,
+        tabBarItemStyle: { borderRadius: radius.lg, overflow: 'hidden', marginHorizontal: spacing.xs },
+        tabBarBackground: () => <GlassBackdrop />,
         tabBarLabelStyle: { fontSize: fontSize.xxs, fontWeight: '600' },
       }}
     >

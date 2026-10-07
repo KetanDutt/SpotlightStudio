@@ -92,6 +92,9 @@ _PERMANENT_STATUSES = frozenset({404, 403, 410})
 _BACKOFF_BASE = 0.5  # seconds; doubled per attempt (tests shrink it)
 
 
+MAX_HTML_BYTES = 8 * 1024 * 1024  # cap decompressed HTML, including chunked responses
+
+
 async def fetch_html(session: aiohttp.ClientSession, url: str, retries: int = 2) -> str | None:
     """
     GET ``url`` and return the HTML text.
@@ -105,7 +108,17 @@ async def fetch_html(session: aiohttp.ClientSession, url: str, retries: int = 2)
         try:
             async with session.get(url) as resp:
                 if resp.status == 200:
-                    return await resp.text(errors="replace")
+                    if resp.content_length and resp.content_length > MAX_HTML_BYTES:
+                        raise ScrapeError(f"{url}: HTML exceeds {MAX_HTML_BYTES} bytes")
+                    body = bytearray()
+                    async for chunk in resp.content.iter_chunked(64 * 1024):
+                        if len(body) + len(chunk) > MAX_HTML_BYTES:
+                            raise ScrapeError(f"{url}: HTML exceeds {MAX_HTML_BYTES} bytes")
+                        body.extend(chunk)
+                    try:
+                        return body.decode(resp.charset or "utf-8", errors="replace")
+                    except LookupError:
+                        return body.decode("utf-8", errors="replace")
                 if resp.status in _PERMANENT_STATUSES:
                     log.debug("Permanent HTTP %d for %s", resp.status, url)
                     return None

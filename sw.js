@@ -11,7 +11,7 @@
  */
 "use strict";
 
-const VERSION = "2.2.0";
+const VERSION = "2.4.0";
 const SHELL_CACHE = `spotlight-shell-${VERSION}`;
 const DATA_CACHE = "spotlight-data-v1"; // survives app updates: it is the offline copy of the catalog
 
@@ -19,6 +19,7 @@ const SHELL = [
   "./",
   "index.html",
   "manifest.webmanifest",
+  `static/css/tokens.css?v=${VERSION}`,
   `static/css/app.css?v=${VERSION}`,
   `static/js/theme-init.js?v=${VERSION}`,
   `static/js/core.js?v=${VERSION}`,
@@ -49,11 +50,20 @@ self.addEventListener("activate", (event) => {
   })());
 });
 
+async function safePut(cache, key, response) {
+  try { await cache.put(key, response); } catch (_) { /* quota/private mode: network still works */ }
+}
+
 async function networkFirst(request, cacheName, fallbackKey) {
   const cache = await caches.open(cacheName);
   try {
     const response = await fetch(request);
-    if (response && response.ok) cache.put(fallbackKey || request, response.clone());
+    if (response && response.ok) await safePut(cache, fallbackKey || request, response.clone());
+    // A transient server outage should not hide a usable offline catalog/shell.
+    if (response && response.status >= 500) {
+      const cached = await cache.match(fallbackKey || request);
+      if (cached) return cached;
+    }
     return response;
   } catch (err) {
     const cached = await cache.match(fallbackKey || request);
@@ -68,7 +78,7 @@ async function cacheFirst(request) {
   const response = await fetch(request);
   if (response && response.ok && response.type === "basic") {
     const cache = await caches.open(SHELL_CACHE);
-    cache.put(request, response.clone());
+    await safePut(cache, request, response.clone());
   }
   return response;
 }
@@ -87,7 +97,8 @@ self.addEventListener("fetch", (event) => {
     event.respondWith(
       networkFirst(request, SHELL_CACHE, "index.html").catch(async () => (await caches.match("./")) || Response.error())
     );
-  } else {
+  } else if (SHELL.some((path) => new URL(path, self.registration.scope).href === url.href)) {
+    // Never cache arbitrary query URLs: that creates an unbounded storage sink.
     event.respondWith(cacheFirst(request));
   }
 });

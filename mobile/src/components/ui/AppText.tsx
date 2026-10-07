@@ -63,12 +63,12 @@ const styles = StyleSheet.create({
 });
 
 const variantStyle = StyleSheet.create<Record<TextVariant, TextStyle>>({
-  display: { fontSize: fontSize.xxl, fontWeight: weight.bold, letterSpacing: -0.4 },
-  title: { fontSize: fontSize.xl, fontWeight: weight.bold, letterSpacing: -0.3 },
+  display: { fontSize: fontSize.xxl, fontWeight: weight.medium, letterSpacing: -1.1, lineHeight: 40 },
+  title: { fontSize: fontSize.xl, fontWeight: weight.medium, letterSpacing: -0.8, lineHeight: 34 },
   heading: { fontSize: fontSize.lg, fontWeight: weight.semibold },
   subheading: { fontSize: fontSize.md, fontWeight: weight.semibold },
-  body: { fontSize: fontSize.md, fontWeight: weight.regular },
+  body: { fontSize: fontSize.md, fontWeight: weight.regular, lineHeight: 23 },
   label: { fontSize: fontSize.sm, fontWeight: weight.medium },
-  caption: { fontSize: fontSize.xs, fontWeight: weight.regular },
+  caption: { fontSize: fontSize.xs, fontWeight: weight.regular, lineHeight: 18 },
   mono: { fontSize: fontSize.sm, fontFamily: 'monospace' },
 });

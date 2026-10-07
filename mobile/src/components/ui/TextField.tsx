@@ -24,7 +24,7 @@ export function TextField({ icon = 'search', onClear, clearable = true, value, o
       style={[
         styles.wrap,
         {
-          backgroundColor: colors.fill,
+          backgroundColor: focused ? colors.surface : colors.fill,
           borderColor: focused ? colors.accent : colors.stroke,
         },
       ]}
@@ -59,7 +59,7 @@ export function TextField({ icon = 'search', onClear, clearable = true, value, o
             onChangeText?.('');
             onClear?.();
           }}
-          hitSlop={8}
+          style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }}
         >
           <Ionicons name="close-circle" size={17} color={colors.textMuted} />
         </Touchable>
@@ -75,7 +75,7 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     minHeight: TOUCH_TARGET,
     paddingHorizontal: spacing.md,
-    borderRadius: radius.md,
+    borderRadius: radius.pill,
     borderWidth: StyleSheet.hairlineWidth,
   },
   input: {

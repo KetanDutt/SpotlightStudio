@@ -9,6 +9,7 @@
  */
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import { useColors } from '../src/theme/ThemeProvider';
 import React, { useCallback, useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -27,6 +28,7 @@ import { spacing } from '../src/theme/tokens';
 const TAG_RAIL_LIMIT = 24;
 
 export default function DirectoryScreen() {
+  const colors = useColors();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { show } = useToast();
@@ -96,7 +98,7 @@ export default function DirectoryScreen() {
   return (
     <View style={styles.fill}>
       <View style={[styles.header, { paddingTop: insets.top + spacing.sm }]}>
-        <IconButton icon="chevron-back" accessibilityLabel="Back" onPress={back} translucent />
+        <IconButton icon="chevron-back" accessibilityLabel="Back" onPress={back} />
         <View style={styles.headerText}>
           <AppText variant="heading">Directory</AppText>
           <AppText variant="caption" tone="faint">
@@ -206,7 +208,7 @@ export default function DirectoryScreen() {
           </SectionCard>
 
           <View style={styles.legend}>
-            <Ionicons name="information-circle-outline" size={15} color="#7f8ea8" />
+            <Ionicons name="information-circle-outline" size={15} color={colors.textMuted} />
             <AppText variant="caption" tone="faint" style={styles.legendText}>
               Filters apply to the gallery: a source, a resolution class or a tag opens Browse with that filter already set.
             </AppText>

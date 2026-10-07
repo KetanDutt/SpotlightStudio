@@ -2,7 +2,7 @@
 """
 Generate the app icons (only Pillow required).
 
-Two destinations, one design – a cyan→indigo rounded square, a bright "spotlight" sun and
+Two destinations, one design – a restrained sage rounded square, a soft "spotlight" sun and
 two mountain silhouettes:
 
 * ``static/icons/`` – the PWA (512/192 px, maskable, apple-touch, favicon);
@@ -20,18 +20,18 @@ from PIL import Image, ImageChops, ImageDraw
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "static" / "icons"
 MOBILE = ROOT / "mobile" / "assets"
-TOP, BOTTOM = (56, 189, 248), (99, 102, 241)  # #38bdf8 → #6366f1
+TOP, BOTTOM = (181, 213, 197), (140, 176, 157)  # Still Glass sage / shaded sage
 SUN = (344, 176, 58)  # cx, cy, r  (512 px design grid)
 MOUNTAINS = [(0, 400), (128, 256), (216, 336), (312, 224), (512, 416), (512, 512), (0, 512)]
 SVG = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
   <defs>
-    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#38bdf8"/><stop offset="1" stop-color="#6366f1"/></linearGradient>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#b5d5c5"/><stop offset="1" stop-color="#8cb09d"/></linearGradient>
     <clipPath id="c"><rect width="512" height="512" rx="116"/></clipPath>
   </defs>
   <g clip-path="url(#c)">
     <rect width="512" height="512" fill="url(#g)"/>
     <circle cx="344" cy="176" r="58" fill="#fff" fill-opacity=".96"/>
-    <path d="M0 400 128 256l88 80 96-112L512 416v96H0z" fill="#0b1226" fill-opacity=".72"/>
+    <path d="M0 400 128 256l88 80 96-112L512 416v96H0z" fill="#203e31" fill-opacity=".85"/>
   </g>
 </svg>
 """
@@ -68,7 +68,7 @@ def artwork(size: int, scale: float = 1.0, rounded: bool = True) -> Image.Image:
         pts[0], pts[4] = (0, pts[0][1]), (512, pts[4][1])
         pts[5], pts[6] = (512, 512), (0, 512)
     mountain = Image.new("RGBA", (big, big), (0, 0, 0, 0))
-    ImageDraw.Draw(mountain).polygon([(x * k, y * k) for x, y in pts], fill=(11, 18, 38, 184))
+    ImageDraw.Draw(mountain).polygon([(x * k, y * k) for x, y in pts], fill=(32, 62, 49, 217))
     art = Image.alpha_composite(base, Image.alpha_composite(layer, mountain))
     if rounded:
         mask = Image.new("L", (big, big), 0)

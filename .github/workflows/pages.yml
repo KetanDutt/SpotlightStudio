@@ -1,0 +1,48 @@
+name: Publish static gallery
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'index.html'
+      - 'static/**'
+      - 'sw.js'
+      - 'manifest.webmanifest'
+      - 'data/wallpapers.json'
+      - 'scripts/build_site.py'
+      - '.github/workflows/pages.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - run: python scripts/build_site.py
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: dist/site
+
+  deploy:
+    needs: build
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4

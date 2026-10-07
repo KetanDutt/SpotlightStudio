@@ -1,5 +1,7 @@
 # Mobile app (Android & iOS)
 
+For the shared Still Glass material, typography, motion and accessibility rules, see [DESIGN.md](DESIGN.md). The Expo app retains its independent native version (1.0.0).
+
 The `mobile/` folder is a **production Expo (React Native) client** for the same wallpaper
 library the desktop app crawls: it browses the published catalog, searches it offline, keeps
 favourites and history on the device, downloads wallpapers — and, on Android, *sets them*,
@@ -201,3 +203,14 @@ the Expo set: `icon.png` (1024², opaque, full-bleed), `splash-icon.png`, `favic
 | Images stay grey | `EXPO_PUBLIC_IMAGE_BASE` must be reachable from the phone (not `localhost`), and must contain the `images/…` paths. |
 | Rotation never runs | Android may throttle background work; check the status line in Settings, keep the app installed and battery optimisation off for it. |
 | `npm run android` fails | No Android SDK/JDK on the machine — use EAS or install Android Studio. |
+
+## 2.3 review notes
+
+Fresh cached remote catalogs now load across app launches using the persisted freshness
+stamp, and overlapping foreground/manual refreshes share one request. Provider regressions
+cover both cold-cache freshness and expired-cache refresh. Mobile favorites/export formats
+are unchanged and are distinct from browser favorites backups.
+
+Native builds/device behavior were not verified in the 2.3 sandbox review. Compatible npm
+updates did not clear all upstream advisories; consult [REVIEW.md](REVIEW.md) before a store
+release. Do not force Expo/React Native major changes just to silence `npm audit`.

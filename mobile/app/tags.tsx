@@ -84,7 +84,7 @@ export default function TagsScreen() {
   return (
     <View style={styles.fill}>
       <View style={[styles.header, { paddingTop: insets.top + spacing.sm }]}>
-        <IconButton icon="chevron-back" accessibilityLabel="Back" onPress={back} translucent />
+        <IconButton icon="chevron-back" accessibilityLabel="Back" onPress={back} />
         <View style={styles.headerText}>
           <AppText variant="heading">Tags</AppText>
           <AppText variant="caption" tone="faint">

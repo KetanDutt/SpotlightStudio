@@ -41,7 +41,7 @@ Settings are read from environment variables and from a `.env` file in the proje
 | `CONCURRENT_SCRAPERS` | `4` | 1–32 | Gallery pages scraped in parallel. |
 | `MAX_CONNECTIONS` | `128` | 4–1024 | Open TCP connections in total. |
 | `MAX_CONNECTIONS_PER_HOST` | `48` | 1–512 | Open connections per host. |
-| `CPU_THREADS` | `0` | 0–128 | Threads for Pillow work. `0` = Python's default (`min(32, cpus + 4)`). |
+| `CPU_THREADS` | `0` | 0–128 | Threads for Pillow work. `0` = at most four threads (`min(4, cpus)`), to bound simultaneous decoded images. |
 
 ## Reliability and politeness
 
@@ -78,3 +78,10 @@ The GitHub Pages site needs no configuration. If you host the static files somew
 ```
 
 and extend the `img-src` directive of the Content-Security-Policy (the `<meta http-equiv>` tag in `index.html`, and `CONTENT_SECURITY_POLICY` in `src/security.py` for the desktop server) to allow that origin.
+
+### Public read-only gallery
+
+`READ_ONLY` is `false` by default. Set `READ_ONLY=true` to reject all HTTP POST/PUT/PATCH/DELETE
+requests with 403 and hide crawler/wallpaper controls. Browsing and exports still work.
+This does not make the filesystem read-only: startup migrations/catalog sync and CLI
+updates still write to disk. It is not a replacement for authentication on private libraries.
