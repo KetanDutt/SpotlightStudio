@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
 """
-Generate the app icons in ``static/icons`` (only Pillow required).
+Generate the app icons (only Pillow required).
 
-The artwork mirrors the in-app brand mark: a cyan→indigo rounded square, a bright
-"spotlight" sun and two mountain silhouettes.  Run ``python scripts/make_icons.py``
-after changing the design; the output is committed so nobody needs to run it.
+Two destinations, one design – a cyan→indigo rounded square, a bright "spotlight" sun and
+two mountain silhouettes:
+
+* ``static/icons/`` – the PWA (512/192 px, maskable, apple-touch, favicon);
+* ``mobile/assets/`` – the Expo app (iOS/Android icons, splash, adaptive icon layers).
+
+Run ``python scripts/make_icons.py`` (or ``make icons``) after changing the design; the
+output is committed so nobody needs to run it.
 """
 from __future__ import annotations
 
@@ -12,7 +17,9 @@ from pathlib import Path
 
 from PIL import Image, ImageChops, ImageDraw
 
-OUT = Path(__file__).resolve().parents[1] / "static" / "icons"
+ROOT = Path(__file__).resolve().parents[1]
+OUT = ROOT / "static" / "icons"
+MOBILE = ROOT / "mobile" / "assets"
 TOP, BOTTOM = (56, 189, 248), (99, 102, 241)  # #38bdf8 → #6366f1
 SUN = (344, 176, 58)  # cx, cy, r  (512 px design grid)
 MOUNTAINS = [(0, 400), (128, 256), (216, 336), (312, 224), (512, 416), (512, 512), (0, 512)]
@@ -70,6 +77,50 @@ def artwork(size: int, scale: float = 1.0, rounded: bool = True) -> Image.Image:
     return art.resize((size, size), Image.LANCZOS)
 
 
+def mobile_assets() -> None:
+    """
+    The Expo app's icon set.
+
+    * ``icon.png`` – the iOS/generic icon: a full-bleed square (Apple applies its own mask),
+      opaque because the App Store rejects transparency.
+    * ``splash-icon.png`` – the rounded tile with transparent corners, drawn on the dark
+      splash background configured in ``app.json``.
+    * ``android-icon-foreground.png`` – the adaptive-icon foreground: same artwork scaled
+      into the 66 % safe zone so no launcher mask cuts the peaks off; the dark background
+      colour (``android.adaptiveIcon.backgroundColor``) fills whatever is left.
+    * ``android-icon-monochrome.png`` – themed icons: the logo as a white alpha mask.
+    """
+    MOBILE.mkdir(parents=True, exist_ok=True)
+    artwork(1024, rounded=False).convert("RGB").save(MOBILE / "icon.png", optimize=True)
+    artwork(1024).save(MOBILE / "splash-icon.png", optimize=True)
+    artwork(64).save(MOBILE / "favicon.png", optimize=True)
+    artwork(1024, scale=0.78, rounded=False).convert("RGB").save(
+        MOBILE / "android-icon-foreground.png", optimize=True
+    )
+    monochrome(1024).save(MOBILE / "android-icon-monochrome.png", optimize=True)
+
+
+def monochrome(size: int) -> Image.Image:
+    """The sun and the peaks as opaque white on a transparent canvas (themed icons)."""
+    big = size * 4
+    k = big / 512
+    scale = 0.78  # keep the shapes inside the adaptive-icon safe zone
+
+    def to_safe(x: float, y: float) -> tuple[float, float]:
+        return (x - 256) * scale + 256, (y - 256) * scale + 256
+
+    layer = Image.new("RGBA", (big, big), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(layer)
+    cx, cy, r = SUN
+    scx, scy = to_safe(cx, cy)
+    draw.ellipse([(scx - r) * k, (scy - r) * k, (scx + r) * k, (scy + r) * k], fill=(255, 255, 255, 255))
+    pts = [to_safe(x, y) for x, y in MOUNTAINS]
+    pts[0], pts[4] = (0, pts[0][1]), (512, pts[4][1])
+    pts[5], pts[6] = (512, 512), (0, 512)
+    draw.polygon([(x * k, y * k) for x, y in pts], fill=(255, 255, 255, 255))
+    return layer.resize((size, size), Image.LANCZOS)
+
+
 def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
     (OUT / "favicon.svg").write_text(SVG, encoding="utf-8")
@@ -77,8 +128,10 @@ def main() -> None:
     artwork(192).save(OUT / "icon-192.png", optimize=True)
     artwork(512, scale=0.78, rounded=False).convert("RGB").save(OUT / "icon-maskable-512.png", optimize=True)
     artwork(180, rounded=False).convert("RGB").save(OUT / "apple-touch-icon.png", optimize=True)
-    for path in sorted(OUT.iterdir()):
-        print(f"{path.relative_to(OUT.parents[1])}  {path.stat().st_size:,} bytes")
+    mobile_assets()
+    for folder in (OUT, MOBILE):
+        for path in sorted(folder.iterdir()):
+            print(f"{path.relative_to(ROOT)}  {path.stat().st_size:,} bytes")
 
 
 if __name__ == "__main__":

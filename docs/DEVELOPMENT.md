@@ -9,7 +9,7 @@ pip install -r requirements-dev.txt                    # runtime + pytest + http
 cp .env.example .env                                   # optional
 python main.py --server                                # http://127.0.0.1:8765/
 ```
-`make help` lists shortcuts for Linux/macOS. **Node ≥ 20** is only needed for the front-end unit tests; there is no build step and no `package.json`.
+`make help` lists shortcuts for Linux/macOS. **Node ≥ 20** is only needed for the front-end unit tests and for the Expo app in `mobile/` (which has its own `package.json`); the web UI itself has no build step.
 
 > **Do not run the app against the repository's own `data/` while testing changes** — the database and catalog are tracked in git and would be modified. Point `DB_PATH`, `IMAGES_DIR`, `CATALOG_PATH` and `LOG_PATH` at a scratch folder (the test-suite does this for you).
 
@@ -20,6 +20,7 @@ python main.py --server                                # http://127.0.0.1:8765/
 | `pytest` | 200+ Python tests, **fully offline** |
 | `node --test tests/js/*.test.mjs` | unit tests of `static/js/core.js` (no dependencies) |
 | `ruff check .` | lint (also CI) |
+| `cd mobile && npm run verify` | the Expo app: `tsc --noEmit` + `eslint . --max-warnings 0` + Jest (see [MOBILE.md](MOBILE.md)) |
 | `make check` | all of the above |
 
 On Windows run the three commands directly. `node --test tests/js/*.test.mjs` works in PowerShell with Node ≥ 21 (which expands the glob itself); with Node 20 name the file instead: `node --test tests/js/core.test.mjs`.
@@ -59,7 +60,12 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the modules and [FRONTEND.md](FRONTEN
 3. `make check`, then tag `vX.Y.Z`.
 4. If you changed the schema, add the migration and its test first ([DATA.md](DATA.md#migrations)).
 
-Regenerate the icons with `python scripts/make_icons.py` (Pillow only).
+Regenerate the icons with `python scripts/make_icons.py` (Pillow only) — it writes both the
+PWA icons in `static/icons/` and the Expo icons in `mobile/assets/`, so the two platforms can
+never drift apart.
+
+The mobile app is versioned independently of the Python package (`mobile/package.json`,
+`mobile/app.json`); its own gate is `cd mobile && npm run verify`, run by CI as well.
 
 ## Style of commits and pull requests
 

@@ -26,16 +26,18 @@
 | 🛡️ **Reliable** | queue items are *claimed*, never lost on stop/crash; automatic retries; a circuit breaker for network outages; page counts are auto-discovered |
 | 🔎 **Great browsing** | instant multi-term search, tag & resolution filters, favorites, shareable deep links (`#w=1234`), random wallpaper, keyboard shortcuts, light/dark theme |
 | 📱 **Installable PWA** | works on phones, offline-capable, accessible (keyboard, screen-reader, reduced-motion) |
+| 🤖 **Android / iOS app** | Expo client: offline search, favourites, history, **set the wallpaper on Android** (home/lock/both) with automatic rotation; on iOS it saves to Photos and guides you through the Shortcuts step ([details](docs/MOBILE.md#setting-a-wallpaper)) |
 | 🔒 **Locked down** | strict CSP, Host/Origin checks on the local API, no XSS from scraped titles, CSV-injection-safe exports, DB and logs are never served |
 
-## Two ways to use it
+## Three ways to use it
 
 | Mode | What you get | How |
 |---|---|---|
 | **Static showcase** | browse, search, favorite, download | deploy the repository to GitHub Pages ([guide](docs/DEPLOYMENT.md)) |
 | **Desktop / server** | everything above **plus** crawler controls, live progress, repair tools, *Set as wallpaper*, full exports | run the app locally |
+| **Mobile app** | the same catalog on Android/iOS with favourites, history and offline search — and real *set wallpaper* plus background rotation on Android | `cd mobile && npm ci && npm start` ([guide](docs/MOBILE.md)) |
 
-The same `index.html` serves both: it detects a Spotlight Studio backend on its own origin and unlocks the crawler console when one answers.
+The same `index.html` serves the two browser modes: it detects a Spotlight Studio backend on its own origin and unlocks the crawler console when one answers. The mobile app is a separate client in `mobile/` and reads the same catalog.
 
 ## Quick start
 
@@ -127,7 +129,8 @@ sw.js · manifest.webmanifest   PWA
 data/                   wallpapers.db (SQLite) · wallpapers.json (static catalog)
 images/                 wallpapers + thumbnails (Git LFS)
 tests/                  pytest suite (fake source site) + Node tests for core.js
-docs/                   architecture, API, configuration, deployment, security, …
+mobile/                 Expo (React Native) app for Android & iOS – browse, search, set wallpaper
+docs/                   architecture, API, configuration, deployment, mobile, security, …
 scripts/                setup_env.bat (launcher helper) · make_icons.py
 start_*.bat · Makefile  Windows launchers · developer shortcuts
 .github/                CI workflow, Dependabot, issue / PR templates
@@ -150,6 +153,10 @@ pip install -r requirements-dev.txt
 pytest                                  # 200+ tests, fully offline (a fake Peapix/Win10 site)
 node --test tests/js/*.test.mjs         # unit tests of the front-end logic
 ruff check .
+
+cd mobile                               # the Expo app (Node ≥ 20)
+npm ci && npm run verify                # typecheck + lint + Jest (110+ tests)
+npm run android                         # dev build on a device/emulator
 ```
 
 Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) and [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
@@ -163,6 +170,7 @@ Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) and [docs/D
 | [Configuration](docs/CONFIGURATION.md) | all environment variables |
 | [Deployment](docs/DEPLOYMENT.md) | GitHub Pages, local/headless use, scheduled updates, upgrading |
 | [Front-end](docs/FRONTEND.md) | modules, URL parameters, CSP, service worker |
+| [Mobile app](docs/MOBILE.md) | Android & iOS client: set-wallpaper capabilities, rotation, EAS builds |
 | [Data formats](docs/DATA.md) | catalog JSON, database schema, normalisation rules |
 | [Security](docs/SECURITY.md) | threat model and hardening |
 | [Troubleshooting](docs/TROUBLESHOOTING.md) | common problems and fixes |

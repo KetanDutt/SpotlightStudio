@@ -1,0 +1,8 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <!--
+    The wallpaper module needs `SET_WALLPAPER` (a normal permission, granted at install
+    time).  Declaring it here keeps the module self-contained; the app manifest also lists
+    it, and duplicate declarations are merged by Gradle.
+  -->
+  <uses-permission android:name="android.permission.SET_WALLPAPER" />
+</manifest>

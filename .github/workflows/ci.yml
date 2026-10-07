@@ -57,3 +57,24 @@ jobs:
         with:
           node-version: 22
       - run: node --test tests/js/*.test.mjs
+
+  mobile:
+    # The Expo app: types, lint and Jest.  No Android SDK / Xcode here – store builds happen
+    # through EAS or on a developer machine (see docs/MOBILE.md).
+    name: Mobile app
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      # `--ci --coverage --runInBand` – the coverage floor guards the ported core logic.
+      - run: npm run test:ci
