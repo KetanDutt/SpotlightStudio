@@ -4,5 +4,5 @@
 pytest>=9.1.1
 httpx>=0.28.1      # FastAPI TestClient
 ruff>=0.5
-imagehash>=4.3   # reference for tests/test_hashing.py: proves src/hashing.py is bit-identical
+imagehash>=4.3.2   # reference for tests/test_hashing.py: proves src/hashing.py is bit-identical
                  # (dev only – it drags in NumPy/SciPy, which the app itself no longer needs)
