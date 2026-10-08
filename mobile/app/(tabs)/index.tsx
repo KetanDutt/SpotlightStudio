@@ -5,7 +5,7 @@
  * the list itself is virtualised and grows 60 items at a time.  Filters live in component
  * state and can be seeded from a deep link (`?tag=sunset`) so shared links open filtered.
  */
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
@@ -22,6 +22,8 @@ import { TextField } from '../../src/components/ui/TextField';
 import { FilterSheet, FavoritesToggle } from '../../src/components/wallpaper/FilterSheet';
 import { SetWallpaperSheet } from '../../src/components/wallpaper/SetWallpaperSheet';
 import { TagRail } from '../../src/components/wallpaper/TagRail';
+import { DailySpotlight } from '../../src/components/wallpaper/DailySpotlight';
+import { useDailyWallpaper } from '../../src/hooks/useDailyWallpaper';
 import { WallpaperGrid } from '../../src/components/wallpaper/WallpaperGrid';
 import { thumbnailUrl } from '../../src/services/media';
 import {
@@ -48,7 +50,8 @@ export default function BrowseScreen() {
   const params = useLocalSearchParams<Record<string, string>>();
   const insets = useSafeAreaInsets();
   const { show } = useToast();
-  const { catalog, loading, refreshing, error, refresh, tags } = useCatalog();
+  const { catalog, meta, loading, refreshing, error, refresh, tags } = useCatalog();
+  const daily = useDailyWallpaper(catalog);
   const { favorites, favoritesVersion, isFavorite, toggleFavorite } = usePreferences();
 
   const [filters, setFilters] = useState<CatalogState>(() => ({ ...DEFAULT_STATE, ...decodeState(params) }));
@@ -117,6 +120,10 @@ export default function BrowseScreen() {
   const onToggleFavorite = useCallback(
     (item: Wallpaper) => {
       const added = toggleFavorite(item.key);
+      if (added === null) {
+        show({ tone: 'warning', message: 'The favorites limit is 20,000. Remove an item before adding another.' });
+        return;
+      }
       show({ tone: added ? 'success' : 'info', message: added ? `Added “${item.title}” to favourites.` : 'Removed from favourites.' });
     },
     [show, toggleFavorite],
@@ -242,11 +249,11 @@ export default function BrowseScreen() {
         </View>
       ) : null}
 
-      {error && catalog ? (
+      {(error || meta.error) && catalog ? (
         <View style={styles.banner}>
           <Ionicons name="cloud-offline-outline" size={15} color={colors.warn} />
           <AppText variant="caption" tone="warn" numberOfLines={2} style={styles.bannerText}>
-            {error}
+            {error || meta.error}
           </AppText>
         </View>
       ) : null}
@@ -263,6 +270,8 @@ export default function BrowseScreen() {
         onEndReached={() => setVisible((current) => (current >= filtered.length ? current : current + PAGE_SIZE))}
         refreshing={refreshing}
         onRefresh={() => void refresh()}
+        ListHeaderComponent={daily && !effective.q && !filters.source && !filters.quality && !filters.tag && !filters.fav ?
+          <DailySpotlight key={daily.key} item={daily} favorite={isFavorite(daily.key)} onOpen={open} onToggleFavorite={onToggleFavorite} /> : null}
         ListEmptyComponent={
           <EmptyState
             icon="search-outline"

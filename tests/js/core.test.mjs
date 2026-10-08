@@ -248,3 +248,36 @@ test("catalog tolerates malformed rows and refuses traversal/duplicate keys", ()
   assert.equal(catalog.total, 2);
   assert.deepEqual(catalog.items.map(item => item.id), [1, 5]);
 });
+
+test('daily wallpaper uses a UTC day and stable IDs, not order or metadata', () => {
+  const rows = Array.from({ length: 100 }, (_, i) => row(i + 1));
+  const catalog = core.buildCatalog(rows);
+  const today = new Date('2026-10-08T10:00:00Z');
+  const id = core.dailyWallpaper(catalog, today).id;
+  assert.equal(core.dailyWallpaper(core.buildCatalog([...rows].reverse()), today).id, id);
+  assert.equal(core.dailyWallpaper(core.buildCatalog(rows.map(r => ({ ...r, title: 'updated' }))), today).id, id);
+  assert.equal(core.dailyWallpaper(catalog, new Date('2026-10-08T23:59:59Z')).id, id);
+  assert.equal(core.dailyWallpaper(catalog, new Date('2026-10-09T01:00:00+02:00')).id, id);
+  const picks = new Set(Array.from({ length: 20 }, (_, day) =>
+    core.dailyWallpaper(catalog, new Date(Date.UTC(2026, 9, 1 + day))).id));
+  assert.ok(picks.size > 10, 'the salted picks should be distributed across the library');
+  assert.equal(core.dailyWallpaper(core.buildCatalog([]), today), undefined);
+  assert.equal(core.dailyWallpaper(catalog, new Date('invalid')), undefined);
+});
+
+test('image paths reject encoded traversal and safely encode readable filenames', () => {
+  for (const filename of ['../a.jpg', 'a/%2e%2e/x.jpg', 'a/%252e%252e/x.jpg', 'a/\x7f.jpg']) {
+    assert.equal(core.imageUrl({ local: true }, filename, false), '');
+    assert.equal(core.buildCatalog([row(1, { filename })]).total, 0);
+  }
+  assert.equal(core.imageUrl({ local: true }, 'peapix/Mount Fuji.jpg', false), '/images/peapix/Mount%20Fuji.jpg');
+  assert.equal(core.safeHttpUrl('https://username:password@example.com/x'), '');
+  assert.equal(core.deriveImageBase({}, 'javascript:alert(1)'), core.DEFAULT_IMAGE_BASE);
+});
+
+test('unpaired UTF-16 paths and source prototype keys cannot break a gallery', () => {
+  assert.equal(core.buildCatalog([row(1, { filename: 'a/\ud800.jpg' })]).total, 0);
+  assert.equal(core.imageUrl({ local: true }, 'a/\ud800.jpg', false), '');
+  assert.equal(core.buildCatalog([row(1, { source: '__proto__' })]).sourceCounts.__proto__, 1);
+  assert.equal(core.imageUrl({ local: true }, 'a/😀.jpg', false), '/images/a/%F0%9F%98%80.jpg');
+});

@@ -29,23 +29,24 @@ export const MAX_INTERVAL_MINUTES = 1440;
 
 /** Normalise anything that came out of storage into valid settings. */
 export function coerceRotation(value: unknown): RotationSettings {
-  if (!value || typeof value !== 'object') return { ...ROTATION_DEFAULTS };
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return { ...ROTATION_DEFAULTS, tags: [] };
   const raw = value as Record<string, unknown>;
   const interval = Number(raw.intervalMinutes);
+  const nonnegative = (v: unknown) => typeof v === 'number' && Number.isFinite(v) && v >= 0 ? Math.floor(v) : 0;
   const mode: RotationSettings['mode'] = raw.mode === 'lock' || raw.mode === 'both' ? raw.mode : 'home';
   return {
-    enabled: Boolean(raw.enabled),
+    enabled: raw.enabled === true,
     intervalMinutes: Number.isFinite(interval)
       ? Math.min(MAX_INTERVAL_MINUTES, Math.max(MIN_INTERVAL_MINUTES, Math.round(interval)))
       : ROTATION_DEFAULTS.intervalMinutes,
     mode,
-    tags: asStringArray(raw.tags),
+    tags: [...new Set(asStringArray(raw.tags).map((tag) => tag.trim().toLowerCase()).filter(Boolean))].slice(0, 20),
     highResOnly: raw.highResOnly !== false,
     favoritesOnly: raw.favoritesOnly === true,
-    lastRunAt: Number(raw.lastRunAt) || 0,
-    lastWallpaperId: Number(raw.lastWallpaperId) || 0,
+    lastRunAt: Math.min(8640000000000000, nonnegative(raw.lastRunAt)),
+    lastWallpaperId: Number.isSafeInteger(raw.lastWallpaperId) ? nonnegative(raw.lastWallpaperId) : 0,
     lastRunError: typeof raw.lastRunError === 'string' ? raw.lastRunError : '',
-    runCount: Number(raw.runCount) || 0,
+    runCount: nonnegative(raw.runCount),
   };
 }
 
@@ -60,8 +61,7 @@ export function buildRotationPool(catalog: Catalog, settings: RotationSettings, 
     pool = pool.filter((item) => favorites.has(item.key));
   }
   if (settings.highResOnly) {
-    const hiRes = pool.filter((item) => item.q === '4k' || item.q === '2k');
-    if (hiRes.length) pool = hiRes;
+    pool = pool.filter((item) => item.q === '4k' || item.q === '2k');
   }
   return pool;
 }
@@ -83,4 +83,5 @@ export interface RotationRunResult {
   status: 'applied' | 'skipped' | 'failed';
   wallpaperId?: number;
   message: string;
+  bookkeeping?: Pick<RotationSettings, 'lastRunAt' | 'lastWallpaperId' | 'lastRunError' | 'runCount'>;
 }

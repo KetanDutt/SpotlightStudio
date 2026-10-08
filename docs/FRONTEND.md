@@ -25,7 +25,7 @@ The old 2,826-line `index.html` (CSS + HTML + JS inline) was split so that the b
 | Catalog | `data/wallpapers.json` | `/api/catalog` (live, ETag) |
 | Images | `github.com/<owner>/<repo>/blob/main/images/…?raw=true` | `/images/…` |
 | Crawler panel, *Set as wallpaper*, API docs link | hidden | shown (`body.is-desktop`) |
-| Service worker | registered (offline shell) | **unregistered** and its caches deleted — the app is always online and must never be masked by a stale shell |
+| Service worker | registered (offline shell) | only the **same-scope** worker is unregistered and its scoped caches deleted — the app is always online and must never be masked by a stale shell |
 
 **Detection** (`detectMode` in `app.js`): `?app=web` forces web mode; non-`http(s)` pages and `*.github.io` hosts are web mode without any probing (the catalog download starts immediately); any other origin probes `/api/status` (1.8 s timeout) and switches to desktop mode if a Spotlight Studio backend answers. `?app=desktop` is accepted for backwards compatibility. Because of the probe, `python main.py --server` shows the crawler controls in a normal browser.
 
@@ -65,7 +65,10 @@ Browser storage: `spotlight:favorites` (list of filenames — stable across data
 
 ## Rendering
 
-* Cards are built with `createElement`/`textContent` (a tiny `h()` helper) and a single `replaceChildren`; the grid is **not rebuilt** when the visible page is identical (this matters while the crawler refreshes the catalog every few seconds).
+* The daily spotlight is independent of sorting/search. It is shown on unfiltered page 1,
+  uses only a thumbnail before opening, and recomputes at UTC midnight/foreground resume.
+  Equal valid catalogs give equal web/mobile picks; catalog membership differences can change it.
+* Cards are built with `createElement`/`textContent` (a tiny `h()` helper) and a single `replaceChildren`; the grid is **not rebuilt** when the visible page is identical, including displayed metadata and image URLs (this matters while the crawler refreshes the catalog every few seconds).
 * All events are delegated (`#gallery`, `#sidebar`, `#pagination`, …) — there are no inline handlers.
 * Thumbnails: the first 8 load eagerly (4 with `fetchpriority=high`), the rest `loading=lazy`; `content-visibility: auto` skips off-screen cards. A missing thumbnail falls back to the full image once, then to a muted placeholder.
 * Cards deliberately have **no `backdrop-filter`** and the ambient background has no animated blur layers — they were the biggest GPU costs of the previous design. Blur is used only on the top bar, sidebar, viewer panel and menus.
@@ -75,6 +78,8 @@ Browser storage: `spotlight:favorites` (list of filenames — stable across data
 A native `<dialog>` (focus trap, `Esc`, inert background for free).
 
 * **History-aware**: opening pushes `#w=<id>`; arrows replace it; **Back** closes the viewer; a deep link opens it on load; closing via `Esc` removes the hash.
+* **Image failure:** retain the thumbnail, show persistent connection/LFS advice and a
+  retry button; stop the loading state and cancel obsolete detached loaders.
 * **Progressive**: the cached thumbnail is shown blurred instantly, the full image replaces it when loaded; the next/previous full images are preloaded.
 * **Navigation crosses pages** — it walks the whole filtered list and keeps the gallery page in sync (applied when the viewer closes).
 * Swipe left/right on touch screens, fullscreen (`Enter`), favorite, copy permalink / direct image URL, download (with a readable file name like `kirstenbosch-botanical-garden-1920x1080.jpg`; for cross-origin GitHub URLs the link opens in a new tab because browsers ignore `download` there).
@@ -95,11 +100,15 @@ A native `<dialog>` (focus trap, `Esc`, inert background for free).
 | Request | Strategy |
 |---|---|
 | shell: `index.html`, `static/**?v=…`, icons, manifest | pre-cached at install, **cache-first** (URLs are versioned) |
-| `data/wallpapers.json` | **network-first**, last copy kept in `spotlight-data-v1` for offline use |
+| `data/wallpapers.json` | **network-first**, last copy kept in `spotlight-data-<encoded-scope>-v1` for offline use |
 | navigations | network-first, one canonical cached `index.html` as the offline fallback (any `?query`/`#hash`) |
 | `/api/*`, `/images/*`, `sw.js`, cross-origin (GitHub images) | not intercepted |
 
-Old caches (`spotlight-shell-<other version>`, the 2.x `spotlight-studio-*`) are deleted on activation.
+Shell cache names include the encoded registration scope and app version. Activation deletes
+only older shell versions for that scope, retains data, migrates an exact-URL legacy catalog,
+and seeds a missing JSON catalog before claiming first-visit clients. Another scope's caches
+are not deleted, including when a desktop page opens on the same origin. Storage failures
+are quota-safe; offline cannot guarantee uncached images or a catalog that never loaded.
 
 ## Theming
 
@@ -116,7 +125,7 @@ Skip link, landmarks (`header`, `nav`, `main`, `aside`, `footer`), real `<button
 ## 2.3 user-data and offline behavior
 
 The actions menu supports arrow keys, Home/End and Escape with focus return. Favorites can
-be backed up/restored as documented in [DATA.md](DATA.md#browser-favorites-backup-version-1);
+be backed up/restored as documented in [DATA.md](DATA.md#portable-browsermobile-favorites-backup-version-1);
 imports merge, saved state is shape-checked, storage failures are visible, and storage events
 synchronize open tabs. Read-only server capabilities hide controls and display a notice.
 The offline banner reports browser connectivity, not a guarantee that uncached images exist.

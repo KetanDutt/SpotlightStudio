@@ -3,7 +3,7 @@
  * `src/core/platform` and `src/modules/wallpaper`:
  *
  *  * Android with the native module → the picture is applied directly;
- *  * iOS (or Android without the module) → the picture is saved to Photos and the user is
+ *  * iOS → the picture is saved to Photos and the user is
  *    told exactly how to finish.
  */
 jest.mock('expo-file-system', () => jest.requireActual('./mocks').fileSystemMock());
@@ -68,23 +68,23 @@ describe('platform behaviour', () => {
     expect(native.nativeWallpaper.setWallpaper).not.toHaveBeenCalled();
   });
 
-  it('saves to the photo library when the native module refuses', async () => {
+  it('reports native refusal without silently saving or requesting Photos consent', async () => {
     native.nativeWallpaper.setWallpaper.mockImplementation(async () => {
       throw new Error('Android refused the image');
     });
     const result = await applyWallpaper(item, 'home');
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    expect(result.value.status).toBe('saved');
-    expect(result.value.reason).toBe('native-error');
+    expect(result).toEqual({ ok: false, error: 'Android refused the image' });
+    const photos = jest.requireMock('expo-media-library');
+    expect(photos.Asset.create).not.toHaveBeenCalled();
+    expect(photos.requestPermissionsAsync).not.toHaveBeenCalled();
   });
 
   it('does not pretend to work when the device cannot set wallpapers at all', async () => {
     native.nativeWallpaper.isSupported.mockImplementation(() => false);
     const result = await applyWallpaper(item, 'home');
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    expect(result.value.status).toBe('saved');
+    expect(result.ok).toBe(false);
+    expect(fs.DownloadTask.calls).toHaveLength(0);
+    expect(jest.requireMock('expo-media-library').Asset.create).not.toHaveBeenCalled();
   });
 
   it('reports a failed download before touching the wallpaper', async () => {

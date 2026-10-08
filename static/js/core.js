@@ -216,8 +216,8 @@
     const tagShare = new Map();
     for (const [tag, count] of tagCount) tagShare.set(tag, count / total);
 
-    const qualityCounts = {};
-    const sourceCounts = {};
+    const qualityCounts = Object.create(null);
+    const sourceCounts = Object.create(null);
     let newestAdded = 0;
     for (const item of items) {
       const raw = item.raw;
@@ -244,6 +244,31 @@
       byKey.set(item.key, item);
     }
     return { items, byId, byKey, tagCount, tagShare, qualityCounts, sourceCounts, newestAdded, total: items.length };
+  }
+
+  /**
+   * A daily pick shared by web and native clients (UTC day, stable public IDs).
+   * Highest salted FNV-1a score wins: one pass, no sort, independent of catalog
+   * ordering or metadata edits. Adding/removing rows may change today's pick.
+   */
+  function dailyWallpaper(catalog, now = new Date()) {
+    if (!catalog || !Number.isFinite(now.getTime())) return undefined;
+    const day = now.toISOString().slice(0, 10);
+    let winner, best = -1;
+    for (const item of catalog.items) {
+      const key = `${day}|${item.id}`;
+      let hash = 2166136261;
+      for (let i = 0; i < key.length; i++) hash = Math.imul(hash ^ key.charCodeAt(i), 16777619);
+      // Avalanche the sequential IDs so neighbouring IDs are not favoured.
+      hash = Math.imul(hash ^ (hash >>> 16), 0x7feb352d);
+      hash = Math.imul(hash ^ (hash >>> 15), 0x846ca68b);
+      const score = (hash ^ (hash >>> 16)) >>> 0;
+      if (score > best || (score === best && item.id < winner.id)) {
+        winner = item;
+        best = score;
+      }
+    }
+    return winner;
   }
 
   /** Most used tags as `[tag, count]` pairs – library wide, or within `pool` (a filtered list). */
@@ -392,7 +417,7 @@
    * The owner/repo are derived from the Pages URL so forks work without editing code.
    */
   function deriveImageBase(loc, override) {
-    if (override) return String(override).replace(/\/+$/, "");
+    if (override && safeHttpUrl(override)) return safeHttpUrl(override).replace(/\/+$/, "");
     const m = /^([a-z0-9-]+)\.github\.io$/i.exec((loc && loc.hostname) || "");
     if (m) {
       const repo = String(loc.pathname || "").split("/")[1] || "";
@@ -402,7 +427,9 @@
   }
 
   function imageUrl(opts, filename, thumb) {
-    const path = `images/${thumb ? "thumbs/" : ""}${filename}`;
+    if (!validFavoriteKey(filename)) return "";
+    const encoded = filename.split("/").map(encodeURIComponent).join("/");
+    const path = `images/${thumb ? "thumbs/" : ""}${encoded}`;
     if (opts.local) return `/${path}`;
     return `${String(opts.base).replace(/\/+$/, "")}/${path}?raw=true`;
   }
@@ -411,7 +438,8 @@
   function safeHttpUrl(value) {
     try {
       const url = new URL(String(value == null ? "" : value));
-      return url.protocol === "http:" || url.protocol === "https:" ? url.href : "";
+      return (url.protocol === "http:" || url.protocol === "https:") &&
+        !url.username && !url.password ? url.href : "";
     } catch (_) {
       return "";
     }
@@ -440,9 +468,10 @@
 
   const MAX_FAVORITES = 20000;
   function validFavoriteKey(key) {
-    return typeof key === "string" && key.length > 0 && key.length <= 512 &&
-      !/[:\\?#\x00-\x1f]/.test(key) && !key.startsWith("/") &&
-      key.split("/").every((part) => part && part !== "." && part !== "..");
+    if (typeof key !== "string" || !key.length || key.length > 512 ||
+        /[:\\%?#\x00-\x1f\x7f]/.test(key) || key.startsWith("/") ||
+        !key.split("/").every((part) => part && part !== "." && part !== "..")) return false;
+    try { encodeURIComponent(key); return true; } catch (_) { return false; } // reject unpaired UTF-16
   }
 
   /** Defensive local-storage read: invalid JSON shapes must not break startup. */
@@ -486,7 +515,7 @@
     DEFAULT_STATE, CSV_COLUMNS, MAX_FAVORITES, normalizeFavorites, favoritesBackup, parseFavoritesBackup,
     isPlaceholderTitle, foldText, tokenize, splitTags, titleCase, slugify,
     fmtInt, fmtBytes, fmtDate, fmtRelative, fmtDuration, parseDateTs,
-    qualityClass, buildCatalog, topTags, comparator, filterAndSort, filterKey, paginate, pageNumbers,
+    qualityClass, buildCatalog, dailyWallpaper, topTags, comparator, filterAndSort, filterKey, paginate, pageNumbers,
     encodeState, decodeState, parseHash,
     deriveImageBase, imageUrl, safeHttpUrl, csvCell, toCsv, debounce, clamp,
   };

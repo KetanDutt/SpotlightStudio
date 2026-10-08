@@ -2,7 +2,7 @@
  * Buttons – primary (soft fill), secondary (glass) and ghost, with an icon slot, a loading
  * state and a disabled state.  Accessibility roles/labels are set here once.
  */
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import React from 'react';
 import { ActivityIndicator, StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
 

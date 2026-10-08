@@ -147,7 +147,9 @@ class RunStats:
     def rate(self, window: float = 10.0) -> float:
         """Wallpapers stored per second over the last ``window`` seconds."""
         now = time.monotonic()
-        recent = [(t, n) for t, n in self._samples if now - t <= window]
+        # Snapshot the deque in C before Python iterates it; the engine thread may
+        # append while an API worker is calculating the rate.
+        recent = [(t, n) for t, n in tuple(self._samples) if now - t <= window]
         if len(recent) < 2:
             return 0.0
         (t0, n0), (t1, n1) = recent[0], recent[-1]
@@ -218,6 +220,7 @@ class DownloadEngine:
         self._breaker_pause = BREAKER_FIRST_PAUSE
         self._title_sem: asyncio.Semaphore | None = None
         self._last_phase = ""
+        self._worker_error: BaseException | None = None
 
     # ── Public control API ────────────────────────────────────────────────
 
@@ -261,14 +264,14 @@ class DownloadEngine:
                 changed = src != self._source
                 self._source = src
                 set_stat("active_source", src)
+                if changed and self._loop is not None and self._mode != "repair":
+                    asyncio.run_coroutine_threadsafe(self._seed(src), self._loop)
                 if self._status == "paused":
                     self._status = "running"
                     set_stat("status", "running")
                     self._call_in_loop(self._pause_event.set if self._pause_event else None)
                     log.info("Engine resumed (source=%s).", src)
                     return "resumed"
-                if changed and self._loop is not None and md != "repair":
-                    asyncio.run_coroutine_threadsafe(self._seed(src), self._loop)
                 log.info("Engine source updated to: %s", src)
                 return "updated"
 
@@ -284,6 +287,7 @@ class DownloadEngine:
             self._breaker_until = 0.0
             self._breaker_pause = BREAKER_FIRST_PAUSE
             self._last_phase = ""
+            self._worker_error = None
             self._finished.clear()
             set_stat("status", "running")
             set_stat("phase", "Starting")
@@ -392,6 +396,9 @@ class DownloadEngine:
         finally:
             try:
                 loop.run_until_complete(loop.shutdown_asyncgens())
+                # Thread jobs (maintenance/export) can outlive their cancelled
+                # asyncio wrapper. Drain them before marking the library idle.
+                loop.run_until_complete(loop.shutdown_default_executor())
             except Exception:  # noqa: BLE001
                 pass
             loop.close()
@@ -477,11 +484,13 @@ class DownloadEngine:
     # ── Main coroutine ─────────────────────────────────────────────────────
 
     async def _main(self) -> None:
-        self._pause_event = asyncio.Event()
-        self._pause_event.set()
-        self._stop_event = asyncio.Event()
-        if self._stop_requested:
-            self._stop_event.set()
+        with self._lock:
+            self._pause_event = asyncio.Event()
+            if self._status == "running":
+                self._pause_event.set()
+            self._stop_event = asyncio.Event()
+            if self._stop_requested:
+                self._stop_event.set()
         self._title_sem = asyncio.Semaphore(TITLE_FETCH_CONCURRENCY)
 
         release_all_claims()  # a previous crashed run may have left claims behind
@@ -520,12 +529,19 @@ class DownloadEngine:
             asyncio.create_task(self._scrape_dispatcher(session), name="scrape-dispatcher"),
             asyncio.create_task(self._download_dispatcher(session), name="download-dispatcher"),
         ]
+        supervisor = asyncio.create_task(self._supervise(), name="crawl-supervisor")
         try:
-            await self._supervise()
+            done, _pending = await asyncio.wait(
+                [supervisor, *dispatchers], return_when=asyncio.FIRST_COMPLETED
+            )
+            for task in done:
+                task.result()  # surface a crashed dispatcher instead of hanging forever
+            if supervisor not in done and not self._stopping():
+                raise RuntimeError("A crawler dispatcher exited unexpectedly.")
         finally:
-            for task in dispatchers:
+            for task in [supervisor, *dispatchers]:
                 task.cancel()
-            await asyncio.gather(*dispatchers, return_exceptions=True)
+            await asyncio.gather(supervisor, *dispatchers, return_exceptions=True)
 
         if self._stopping():
             return
@@ -596,6 +612,9 @@ class DownloadEngine:
                 if self._stopping():
                     break
                 await sem.acquire()
+                if self._stopping() or self._status != "running":
+                    sem.release()
+                    continue
                 page = claim_scrape_page(self._target(), self._min_priority())
                 if page is None:
                     sem.release()
@@ -622,6 +641,9 @@ class DownloadEngine:
                 if self._stopping():
                     break
                 await sem.acquire()
+                if self._stopping() or self._status != "running":
+                    sem.release()
+                    continue
                 item = claim_download_item(self._target(), self._since())
                 if item is None:
                     sem.release()
@@ -640,6 +662,10 @@ class DownloadEngine:
     def _make_done_cb(self, tasks: set[asyncio.Task], kind: str):
         def _done(task: asyncio.Task) -> None:
             tasks.discard(task)
+            if not task.cancelled():
+                error = task.exception()
+                if error is not None:
+                    self._worker_error = error
             if kind == "scrape":
                 self._scrape_inflight = len(tasks)
             else:
@@ -782,6 +808,8 @@ class DownloadEngine:
         last_export = time.monotonic()
         last_stored = 0
         while not self._stopping():
+            if self._worker_error is not None:
+                raise RuntimeError("A crawler worker failed unexpectedly.") from self._worker_error
             paused = not self._pause_event.is_set()
             scraping = self._scrape_inflight > 0 or scrape_queue_size(
                 self._target(), self._min_priority()

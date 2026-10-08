@@ -103,3 +103,25 @@ def test_command_failures_become_wallpaper_errors(image, monkeypatch):
     monkeypatch.setattr(wallpaper.subprocess, "run", missing)
     with pytest.raises(WallpaperError, match="Could not run"):
         set_desktop_wallpaper(image)
+
+
+def test_older_gnome_missing_dark_key_does_not_negate_a_success(image, monkeypatch, caplog):
+    calls = []
+    def run(cmd, **_kwargs):
+        calls.append(cmd)
+        return subprocess.CompletedProcess(cmd, int(cmd[3] == "picture-uri-dark"), stdout="", stderr="No such key")
+    monkeypatch.setenv("XDG_CURRENT_DESKTOP", "GNOME")
+    monkeypatch.setattr(wallpaper.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(wallpaper.shutil, "which", lambda name: "/usr/bin/gsettings")
+    monkeypatch.setattr(wallpaper.subprocess, "run", run)
+    set_desktop_wallpaper(image)
+    assert len(calls) == 2
+    assert "main wallpaper was applied" in caplog.text
+
+
+def test_kde_without_helper_does_not_silently_set_an_unused_gnome_schema(image, monkeypatch):
+    monkeypatch.setenv("XDG_CURRENT_DESKTOP", "KDE")
+    monkeypatch.setattr(wallpaper.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(wallpaper.shutil, "which", lambda name: "/usr/bin/gsettings" if name == "gsettings" else None)
+    with pytest.raises(UnsupportedPlatform, match="KDE needs"):
+        set_desktop_wallpaper(image)

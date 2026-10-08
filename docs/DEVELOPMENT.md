@@ -9,7 +9,9 @@ pip install -r requirements-dev.txt                    # runtime + pytest + http
 cp .env.example .env                                   # optional
 python main.py --server                                # http://127.0.0.1:8765/
 ```
-`make help` lists shortcuts for Linux/macOS. **Node ≥ 20** is only needed for the front-end unit tests and for the Expo app in `mobile/` (which has its own `package.json`); the web UI itself has no build step.
+`make help` lists shortcuts for Linux/macOS. The front-end unit tests need **Node ≥ 20**; prefer a maintained LTS. The Expo app in `mobile/`
+requires its declared React Native-compatible Node range (Node **22.13+ LTS** recommended).
+The web UI itself has no build step.
 
 > **Do not run the app against the repository's own `data/` while testing changes** — the database and catalog are tracked in git and would be modified. Point `DB_PATH`, `IMAGES_DIR`, `CATALOG_PATH` and `LOG_PATH` at a scratch folder (the test-suite does this for you).
 
@@ -102,3 +104,31 @@ Upgrade pip/setuptools in new environments before installing/auditing dependenci
 Run `pip-audit --vulnerability-service pypi` with separately installed audit tooling, and
 `npm audit` in both root and `mobile/`. Review advisories rather than forcing incompatible
 Expo upgrades. Known outstanding findings are recorded in [REVIEW.md](REVIEW.md).
+
+## New reliability contracts
+
+- All API/CLI library lifecycles use `LibraryLock` before startup writes. Never unlink a
+  sidecar, add a second server worker, or point an app factory at paths differing from
+  process-wide storage. Set environment configuration before importing the app.
+- Hash query expressions and schema-3 indexes must match exactly; query-plan regression
+  guards prevent accidental full scans. Distance ≥8 deliberately scans all candidates.
+- Web/mobile daily selection and portable favorites codecs have cross-client regressions.
+  Daily identity is UTC date + catalog ID, not title/row order or local timezone.
+- Preference functions return accurate synchronous results; keep writes serialized and
+  avoid side effects inside React state updater functions. Preserve source cache provenance.
+- Media operations stage before promotion, honor cancellation and suppress late UI actions;
+  do not replace Save with Apply. Image headers are a cheap sanity check, not full validation.
+- For native dependency changes, check `npx expo-modules-autolinking resolve --platform android`
+  and `EXPO_OFFLINE=1 npx expo export --platform all`, **then** compile/test on real toolchains.
+  Keep scoped dependency overrides justified by compatibility tests and current audit output.
+- `scripts/build_site.py::PUBLIC_FILES` is an exact list; register new public assets explicitly.
+  Never broaden it to publish entire source/data folders. Generated reports/builds remain ignored.
+
+
+## Native release gates
+
+The 1.2 native pass adds resolved-manifest checks (`npm run verify:config`), profile/audit
+EAS hooks and `.github/workflows/mobile-native.yml` for Kotlin/Swift compilation. Keep those
+separate from JS/Hermes export. `npm run verify:release` intentionally remains blocked by
+inherited high-severity advisories; no automatic exception is granted. Use preview for device
+QA, production for shipping only after [NATIVE_RELEASE.md](NATIVE_RELEASE.md) is complete.

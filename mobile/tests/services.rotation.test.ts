@@ -42,10 +42,13 @@ import {
   pickNext,
   runRotationOnce,
   syncRotationTask,
+  defineRotationTask,
 } from '../src/services/rotation';
 import { buildCatalog } from '../src/core/utils';
-import { KEYS, setJson } from '../src/services/storage';
+import { KEYS, getJson, setJson } from '../src/services/storage';
 import { cloneRows } from './fixtures';
+import { applyWallpaper } from '../src/services/wallpaper';
+import { clearAppCache } from '../src/services/cache';
 
 const fs = jest.requireMock('expo-file-system') as ReturnType<typeof import('./mocks').fileSystemMock>;
 const native = jest.requireMock('../src/modules/wallpaper');
@@ -73,7 +76,7 @@ describe('settings coercion', () => {
     expect(coerceRotation({ mode: 'ceiling', tags: 'nope', enabled: 'yes' })).toMatchObject({
       mode: 'home',
       tags: [],
-      enabled: true,
+      enabled: false,
     });
   });
 });
@@ -91,10 +94,10 @@ describe('the pool', () => {
     expect(hiRes.map((i) => i.id).sort()).toEqual([101, 102, 105]);
   });
 
-  it('keeps everything when the high-resolution filter would empty the pool', () => {
+  it('respects the high-resolution restriction even when it empties the pool', () => {
     const tiny = buildCatalog(cloneRows().filter((row) => row.width < 2000));
     const pool = buildRotationPool(tiny, { ...ROTATION_DEFAULTS, highResOnly: true }, new Set());
-    expect(pool).toHaveLength(tiny.total);
+    expect(pool).toHaveLength(0);
   });
 });
 
@@ -195,4 +198,103 @@ describe('scheduler sync', () => {
     expect(result.registered).toBe(false);
     expect(BackgroundTask.registerTaskAsync).not.toHaveBeenCalled();
   });
+});
+
+it('never bypasses an empty favorites/tag filter and never downloads an unrelated wallpaper', async () => {
+  await setJson(KEYS.rotation, { ...ROTATION_DEFAULTS, enabled: true, favoritesOnly: true });
+  const result = await runRotationOnce();
+  expect(result.status).toBe('skipped');
+  expect(result.message).toMatch(/filters/);
+  expect(fs.DownloadTask.calls).toHaveLength(0);
+  expect(native.nativeWallpaper.setWallpaper).not.toHaveBeenCalled();
+});
+
+it('enforces the interval except for manual runs; manual runs do not enable rotation', async () => {
+  await setJson(KEYS.rotation, { ...ROTATION_DEFAULTS, enabled: true, lastRunAt: Date.now(), highResOnly: false });
+  expect((await runRotationOnce()).status).toBe('skipped');
+  expect(fs.DownloadTask.calls).toHaveLength(0);
+  await setJson(KEYS.rotation, { ...ROTATION_DEFAULTS, enabled: false, highResOnly: false });
+  expect((await runRotationOnce({ force: true })).status).toBe('applied');
+  const stored = await getJson<{ enabled: boolean }>(KEYS.rotation, { enabled: true });
+  expect(stored.enabled).toBe(false);
+});
+
+it('coalesces overlapping rotations and preserves settings changed during a transfer', async () => {
+  await setJson(KEYS.rotation, { ...ROTATION_DEFAULTS, enabled: true, highResOnly: false });
+  let release!: () => void;
+  fs.DownloadTask.gate = new Promise<void>(resolve => { release = resolve; });
+  const first = runRotationOnce();
+  const second = runRotationOnce();
+  expect(second).toBe(first);
+  // Wait until the test double has reached the download, then emulate a user edit.
+  for (let n = 0; n < 30 && !fs.DownloadTask.calls.length; n++) await Promise.resolve();
+  await setJson(KEYS.rotation, { ...ROTATION_DEFAULTS, enabled: false, tags: ['lake'], highResOnly: false });
+  release();
+  expect((await first).status).toBe('skipped');
+  const stored = await getJson<{ enabled: boolean; tags: string[]; runCount: number }>(KEYS.rotation, { enabled: true, tags: [], runCount: 0 });
+  expect(stored.enabled).toBe(false);
+  expect(stored.tags).toEqual(['lake']);
+  expect(stored.runCount).toBe(0);
+  expect(native.nativeWallpaper.setWallpaper).not.toHaveBeenCalled();
+});
+
+it('serializes enable/disable/enable scheduling without coalescing away the final intent', async () => {
+  let registered = false;
+  (TaskManager.isTaskRegisteredAsync as jest.Mock).mockImplementation(async () => registered);
+  (BackgroundTask.registerTaskAsync as jest.Mock).mockImplementation(async () => { registered = true; });
+  (BackgroundTask.unregisterTaskAsync as jest.Mock).mockImplementation(async () => { registered = false; });
+  await Promise.all([
+    syncRotationTask({ ...ROTATION_DEFAULTS, enabled: true }),
+    syncRotationTask({ ...ROTATION_DEFAULTS, enabled: false }),
+    syncRotationTask({ ...ROTATION_DEFAULTS, enabled: true }),
+  ]);
+  expect(registered).toBe(true);
+  expect(BackgroundTask.registerTaskAsync).toHaveBeenCalledTimes(2);
+});
+
+
+it('cancels a pending rotation when its selected favorite is removed', async () => {
+  await setJson(KEYS.rotation, { ...ROTATION_DEFAULTS, enabled: true, favoritesOnly: true, highResOnly: false });
+  await setJson(KEYS.favorites, ['peapix/one.jpg']);
+  let release!: () => void;
+  fs.DownloadTask.gate = new Promise<void>(resolve => { release = resolve; });
+  const run = runRotationOnce();
+  for (let tick = 0; tick < 50 && !fs.DownloadTask.calls.length; tick++) await Promise.resolve();
+  expect(() => clearAppCache()).toThrow(/Finish or cancel/);
+  await setJson(KEYS.favorites, []);
+  release();
+  expect((await run).status).toBe('skipped');
+  expect(native.nativeWallpaper.setWallpaper).not.toHaveBeenCalled();
+});
+
+it('lets a manual wallpaper apply preempt a background download before its OS write', async () => {
+  await setJson(KEYS.rotation, { ...ROTATION_DEFAULTS, enabled: true, highResOnly: false });
+  let release!: () => void;
+  fs.DownloadTask.gate = new Promise<void>(resolve => { release = resolve; });
+  const background = runRotationOnce();
+  for (let tick = 0; tick < 50 && !fs.DownloadTask.calls.length; tick++) await Promise.resolve();
+  const manual = applyWallpaper(catalog.byId.get(101)!, 'home');
+  release();
+  expect((await background).status).toBe('skipped');
+  expect((await manual).ok).toBe(true);
+  expect(native.nativeWallpaper.setWallpaper).toHaveBeenCalledTimes(1);
+  expect(native.nativeWallpaper.setWallpaper).toHaveBeenCalledWith(expect.stringContaining('wallpaper-101-'), 'home');
+});
+
+it('does not define iOS tasks and does not confuse unregister failures with stopped scheduling', async () => {
+  platformState.platform = 'ios';
+  defineRotationTask();
+  expect(TaskManager.defineTask).not.toHaveBeenCalled();
+  platformState.platform = 'android';
+  (TaskManager.isTaskRegisteredAsync as jest.Mock).mockResolvedValue(true);
+  (BackgroundTask.unregisterTaskAsync as jest.Mock).mockRejectedValueOnce(new Error('OS refused unregister'));
+  const result = await syncRotationTask({ ...ROTATION_DEFAULTS, enabled: false });
+  expect(result).toMatchObject({ registered: true, confirmed: true, message: 'OS refused unregister' });
+});
+
+it('exposes unknown scheduler state instead of asserting rotation is stopped', async () => {
+  (TaskManager.isTaskRegisteredAsync as jest.Mock).mockRejectedValue(new Error('task manager unavailable'));
+  const result = await syncRotationTask({ ...ROTATION_DEFAULTS, enabled: false });
+  expect(result.confirmed).toBe(false);
+  expect(result.message).toMatch(/Could not confirm/);
 });

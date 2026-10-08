@@ -7,11 +7,13 @@
  * uploaded.  Both functions resolve to a result object instead of throwing, because the UI
  * has to show a message either way.
  */
-import { File, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 
 import type { Wallpaper } from '../core/types';
 import { fmtBytes } from '../core/utils';
+import { cacheActivity, createExportFile, pinCacheFile } from './cache';
+import { LIMITS } from '../core/config';
+import { utf8Bytes } from './catalog-cache';
 
 /** Column order of the CSV export – documented in `docs/MOBILE.md`. */
 export const CSV_COLUMNS = [
@@ -95,7 +97,7 @@ export function catalogToJson(items: Wallpaper[]): string {
   return JSON.stringify(items.map((item) => item.raw));
 }
 
-/** `spotlight-studio-catalog-20261007-1830.csv` – sortable and collision-free. */
+/** `spotlight-studio-catalog-20261007-1830.csv` – time-stamped for easy sorting. */
 export function exportFilename(extension: 'json' | 'csv', now = new Date()): string {
   const pad = (value: number) => String(value).padStart(2, '0');
   const stamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}`;
@@ -109,23 +111,28 @@ async function writeAndShare(
   uti: string,
   dialogTitle: string,
   rows: number,
-  now: Date,
-): Promise<ExportResult> {
+ ): Promise<ExportResult> {
+  let done: (() => void) | undefined;
+  let unpin: (() => void) | undefined;
   try {
-    const file = new File(Paths.cache, fileName);
+    done = cacheActivity();
+    const expectedBytes = utf8Bytes(contents);
+    if (expectedBytes > LIMITS.catalogBytes) throw new Error('The export exceeds the 32 MB catalog limit.');
+    const file = createExportFile(fileName, expectedBytes);
+    unpin = pinCacheFile(file.uri);
     if (!file.exists) file.create();
     file.write(contents);
     if (!file.exists) return fail('The export file could not be written.');
 
     if (!(await Sharing.isAvailableAsync())) {
       // The file is still there – the UI points the user at it instead of failing silently.
-      return ok({ uri: file.uri, name: fileName, size: file.size, rows });
+      return ok({ uri: file.uri, name: file.name, size: file.size, rows });
     }
     await Sharing.shareAsync(file.uri, { mimeType, UTI: uti, dialogTitle });
-    return ok({ uri: file.uri, name: fileName, size: file.size, rows });
+    return ok({ uri: file.uri, name: file.name, size: file.size, rows });
   } catch (error) {
     return fail(error);
-  }
+  } finally { unpin?.(); done?.(); }
 }
 
 export async function exportCatalogCsv(items: Wallpaper[], now = new Date()): Promise<ExportResult> {
@@ -137,7 +144,6 @@ export async function exportCatalogCsv(items: Wallpaper[], now = new Date()): Pr
     'public.comma-separated-values-text',
     'Spotlight Studio catalog (CSV)',
     items.length,
-    now,
   );
 }
 
@@ -150,7 +156,6 @@ export async function exportCatalogJson(items: Wallpaper[], now = new Date()): P
     'public.json',
     'Spotlight Studio catalog (JSON)',
     items.length,
-    now,
   );
 }
 

@@ -2,37 +2,58 @@
   "expo": {
     "name": "Spotlight Studio",
     "slug": "spotlight-studio",
-    "version": "1.0.0",
+    "version": "1.2.0",
     "description": "Browse thousands of Windows Spotlight wallpapers in 4K and set them on your phone – Android & iOS.",
     "scheme": "spotlightstudio",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
     "icon": "./assets/icon.png",
-    "assetBundlePatterns": ["**/*"],
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "githubUrl": "https://github.com/KetanDutt/SpotlightStudio",
     "primaryColor": "#3c6250",
-    "platforms": ["android", "ios", "web"],
+    "platforms": [
+      "android",
+      "ios",
+      "web"
+    ],
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.ketandutt.spotlightstudio",
-      "buildNumber": "1",
+      "buildNumber": "3",
       "usesAppleSignIn": false,
       "infoPlist": {
-        "CFBundleDisplayName": "Spotlight Studio",
         "ITSAppUsesNonExemptEncryption": false,
-        "NSPhotoLibraryAddUsageDescription": "Spotlight Studio saves the wallpapers you choose into your photo library so you can set them from the Photos app.",
-        "NSPhotoLibraryUsageDescription": "Spotlight Studio only needs access to save the wallpapers you pick into an album of your own.",
+        "NSPhotoLibraryAddUsageDescription": "Save only wallpapers you choose to Photos, so you can apply them manually. Spotlight Studio does not request access to read your photo library.",
         "NSAppTransportSecurity": {
-          "NSAllowsLocalNetworking": true
-        },
-        "UIBackgroundModes": ["fetch", "processing"],
-        "BGTaskSchedulerPermittedIdentifiers": ["com.ketandutt.spotlightstudio.rotation"]
+          "NSAllowsArbitraryLoads": false,
+          "NSAllowsLocalNetworking": false
+        }
+      },
+      "privacyManifests": {
+        "NSPrivacyTracking": false,
+        "NSPrivacyTrackingDomains": [],
+        "NSPrivacyCollectedDataTypes": [],
+        "NSPrivacyAccessedAPITypes": [
+          {
+            "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategoryFileTimestamp",
+            "NSPrivacyAccessedAPITypeReasons": [
+              "C617.1"
+            ]
+          },
+          {
+            "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategoryDiskSpace",
+            "NSPrivacyAccessedAPITypeReasons": [
+              "E174.1"
+            ]
+          }
+        ]
       }
     },
     "android": {
       "package": "com.ketandutt.spotlightstudio",
-      "versionCode": 1,
-      "edgeToEdgeEnabled": true,
+      "versionCode": 3,
       "adaptiveIcon": {
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundColor": "#151918",
@@ -50,16 +71,31 @@
         "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO",
         "android.permission.ACCESS_FINE_LOCATION",
-        "android.permission.ACCESS_COARSE_LOCATION"
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.READ_MEDIA_VIDEO",
+        "android.permission.READ_MEDIA_AUDIO",
+        "android.permission.READ_MEDIA_VISUAL_USER_SELECTED",
+        "android.permission.ACCESS_MEDIA_LOCATION",
+        "android.permission.MANAGE_EXTERNAL_STORAGE"
       ],
       "intentFilters": [
         {
           "action": "VIEW",
           "autoVerify": false,
-          "data": [{ "scheme": "spotlightstudio" }],
-          "category": ["BROWSABLE", "DEFAULT"]
+          "data": [
+            {
+              "scheme": "spotlightstudio"
+            }
+          ],
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
         }
-      ]
+      ],
+      "allowBackup": false
     },
     "web": {
       "bundler": "metro",
@@ -87,10 +123,11 @@
       [
         "expo-media-library",
         {
-          "photosPermission": "Spotlight Studio saves the wallpapers you choose into your photo library so you can set them from the Photos app.",
-          "savePhotosPermission": "Spotlight Studio saves the wallpapers you choose into an album in your photo library.",
+          "photosPermission": false,
+          "savePhotosPermission": "Save only wallpapers you choose to Photos, so you can apply them manually. Spotlight Studio does not request access to read your photo library.",
           "isAccessMediaLocationEnabled": false,
-          "granularPermissions": ["photo"]
+          "granularPermissions": [],
+          "preventAutomaticLimitedAccessAlert": true
         }
       ],
       [
@@ -103,8 +140,8 @@
         "expo-build-properties",
         {
           "android": {
-            "usesCleartextTraffic": true,
-            "enableProguardInReleaseBuilds": true,
+            "usesCleartextTraffic": false,
+            "enableMinifyInReleaseBuilds": true,
             "enableShrinkResourcesInReleaseBuilds": true
           },
           "ios": {

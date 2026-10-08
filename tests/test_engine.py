@@ -380,3 +380,46 @@ def test_maintenance_reserves_idle_engine_and_releases_on_failure(env):
         raise RuntimeError("repair failed")
     with eng.maintenance_guard():
         pass  # the guard was released after the failure
+
+
+def test_a_dispatcher_crash_fails_the_run_instead_of_hanging(site, eng, monkeypatch):
+    async def crash(_session):
+        raise RuntimeError("injected dispatcher failure")
+
+    monkeypatch.setattr(eng, "_download_dispatcher", crash)
+    eng.start("peapix", "quick")
+    finish(eng, timeout=10)
+    assert eng.run.result == "failed"
+    assert db.get_stat("last_run_result") == "failed"
+    with db.get_db() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM scrape_queue WHERE claimed_at IS NOT NULL").fetchone()[0] == 0
+
+
+def test_pausing_a_saturated_dispatcher_does_not_dispatch_one_more_item(site, eng, monkeypatch):
+    import threading
+
+    monkeypatch.setattr(settings, "CONCURRENT_DOWNLOADS", 1)
+    started, release = threading.Event(), threading.Event()
+    calls = []
+
+    async def download(_session, item, **_kwargs):
+        calls.append(item["id"])
+        if len(calls) == 1:
+            started.set()
+            await asyncio.to_thread(release.wait, 5)
+        return "rejected"
+
+    monkeypatch.setattr(engine_mod, "process_download", download)
+    try:
+        eng.start("peapix", "quick")
+        assert started.wait(5)
+        eng.pause()
+        release.set()
+        assert wait_until(lambda: eng.run.items_done == 1)
+        time.sleep(0.15)  # let the waiter acquire the freed semaphore
+        assert calls and len(calls) == 1
+        eng.start("peapix", "quick")
+        finish(eng)
+        assert len(calls) == 4
+    finally:
+        release.set()

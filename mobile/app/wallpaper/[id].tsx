@@ -5,7 +5,7 @@
  * below carries the metadata and the action bar is bottom-anchored so it is reachable with
  * one thumb.  Previous/next move through the library in the same order as the gallery.
  */
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useMemo, useState } from 'react';
@@ -48,6 +48,7 @@ export default function WallpaperDetailScreen() {
   const [sheetOpen, setSheetOpen] = useState(false);
   const [imageLoading, setImageLoading] = useState(true);
   const [imageFailed, setImageFailed] = useState(false);
+  const [imageRetry, setImageRetry] = useState(0);
 
   // Previous / next follow the "newest first" order of the library.
   const neighbours = useMemo(() => {
@@ -66,6 +67,10 @@ export default function WallpaperDetailScreen() {
   const toggleFav = useCallback(() => {
     if (!item) return;
     const added = toggleFavorite(item.key);
+    if (added === null) {
+      show({ tone: 'warning', message: 'The favorites limit is 20,000. Remove an item before adding another.' });
+      return;
+    }
     show({ tone: added ? 'success' : 'info', message: added ? 'Added to favourites.' : 'Removed from favourites.' });
   }, [item, show, toggleFavorite]);
 
@@ -99,7 +104,9 @@ export default function WallpaperDetailScreen() {
         <Image
           source={{ uri: thumbnailUrl(item) }}
           contentFit="cover"
-          cachePolicy="memory-disk"
+          cachePolicy="disk"
+          allowDownscaling
+          enforceEarlyResizing
           style={StyleSheet.absoluteFill}
           blurRadius={40}
           accessibilityElementsHidden
@@ -110,14 +117,17 @@ export default function WallpaperDetailScreen() {
 
       <View style={[styles.imageWrap, { height: imageHeight }]}>
         <Image
+          key={`${item.key}:${imageRetry}`}
           source={{ uri: fullImageUrl(item) }}
           placeholder={{ uri: thumbnailUrl(item) }}
           placeholderContentFit="contain"
           contentFit="contain"
           transition={reduceMotion ? 0 : 260}
-          cachePolicy="memory-disk"
+          cachePolicy="disk"
+          allowDownscaling
+          enforceEarlyResizing
           style={StyleSheet.absoluteFill}
-          onLoadStart={() => setImageLoading(true)}
+          onLoadStart={() => { setImageLoading(true); setImageFailed(false); }}
           onLoad={() => {
             setImageLoading(false);
             setImageFailed(false);
@@ -141,8 +151,9 @@ export default function WallpaperDetailScreen() {
           <View style={styles.imageOverlay}>
             <Ionicons name="alert-circle-outline" size={26} color={colors.warn} />
             <AppText variant="caption" tone="warn" align="center">
-              The full-resolution image could not be loaded. Pull to refresh the catalog, or try again on Wi-Fi.
+              The full-resolution image could not be loaded. Check your connection and image host; a Git LFS pointer is not an image.
             </AppText>
+            <Button title="Retry image" icon="refresh" inline onPress={() => { setImageFailed(false); setImageLoading(true); setImageRetry(value => value + 1); }} />
           </View>
         ) : null}
       </View>
@@ -214,12 +225,14 @@ export default function WallpaperDetailScreen() {
             </View>
           ) : null}
 
-          {actions.busy && actions.running === 'apply' ? (
+          {actions.busy ? (
             <View style={styles.progress}>
               <ProgressBar value={actions.progress} />
               <AppText variant="caption" tone="muted">
-                Downloading… {Math.round(actions.progress * 100)}%
+                {actions.progress >= 1 ? 'Finishing image validation / system action…' : `Downloading… ${Math.round(actions.progress * 100)}%`}
               </AppText>
+              <Button title="Cancel action" icon="close" variant="ghost" inline onPress={actions.cancel} />
+              <AppText variant="caption" tone="faint">Cancellation stops pending work; a system action already started cannot be undone.</AppText>
             </View>
           ) : null}
 
@@ -230,12 +243,13 @@ export default function WallpaperDetailScreen() {
               variant="primary"
               size="lg"
               loading={actions.running === 'apply'}
+              disabled={actions.busy}
               onPress={() => setSheetOpen(true)}
               testID="open-set-wallpaper"
             />
             <View style={styles.actionRow}>
-              <Button title="Save" icon="download-outline" loading={actions.running === 'save'} onPress={() => void actions.save()} style={styles.actionItem} />
-              <Button title="Share" icon="share-outline" loading={actions.running === 'share'} onPress={() => void actions.share()} style={styles.actionItem} />
+              <Button title="Save" disabled={actions.busy} icon="download-outline" loading={actions.running === 'save'} onPress={() => void actions.save()} style={styles.actionItem} />
+              <Button title="Share" disabled={actions.busy} icon="share-outline" loading={actions.running === 'share'} onPress={() => void actions.share()} style={styles.actionItem} />
             </View>
             <View style={styles.actionRow}>
               <Button title="Copy link" icon="link-outline" onPress={() => void actions.copyLink()} style={styles.actionItem} />

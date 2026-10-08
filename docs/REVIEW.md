@@ -1,141 +1,144 @@
 # Project review and release readiness
 
-Reviewed: **2026-10-07**, release **2.4.0**. Includes the 2.3 hardening and the Still Glass redesign.
-This is not a claim that every deployment or native platform is production-certified.
-See [DESIGN.md](DESIGN.md) for the visual-system audit and platform boundaries.
+Reviewed **2026-10-08**. Web/backend **2.5.0**; native client **1.2.0**, wallpaper bridge **0.3.0**.
+This review hardens the existing Still Glass product; it is **not unconditional production certification**.
 
-## Project map and scope
+## Architecture and scope
 
-- **Python application:** `main.py` owns CLI/desktop launch, `config.py` loads settings,
-  `engine.py` dispatches claimed scrape/download queues, parsers in `scrapers.py`
-  discover metadata, and `downloader.py` analyzes/deduplicates/stores images.
-- **Persistence:** SQLite/WAL, schema v2, atomic file writes, generated JSON catalog.
-  The DB, catalog and LFS image pointers in this checkout were intentionally preserved.
-- **HTTP:** FastAPI serves a tightly scoped set of files and library/control endpoints;
-  middleware protects Host, Origin and browser content policies. No built-in authentication.
-- **Browser:** framework-free catalog search and pagination, accessible viewer, local
-  favorites, PWA shell/catalog caching. No npm runtime dependency or bundling step.
-- **Mobile:** Expo/React Native, bundled/remote/local-server catalog sources, persisted
-  preferences, media downloads, Android wallpaper bridge and background rotation;
-  iOS deliberately uses the save-to-Photos workflow.
-- **Delivery:** Windows launchers, Python/Node/mobile tests, CI, documentation and Pages.
+- **Python:** `main.py` launches CLI/server/desktop; FastAPI serves the gallery and controls;
+  the engine dispatches durable scrape/download queues; parsers discover metadata; a bounded
+  CPU pool analyzes, hashes and stores images. SQLite/WAL is authoritative; JSON is a projection.
+- **Browser/PWA:** dependency-free DOM UI and pure catalog logic; local favorites, shareable
+  views, accessible viewer, desktop controls, and scope-specific offline shell/catalog caching.
+- **Mobile:** Expo SDK 57, React Native 0.86.3 and React 19.2.3; offline-first catalog,
+  local preferences/media cache, Android wallpaper bridge, OS-scheduled rotation, iOS Photos.
+- **Delivery:** Python/Node/Chromium/Jest gates, allow-listed static publication, Windows
+  launchers, native development/build profiles and operational documentation.
 
-Review combined code inspection across these subsystems with unit/integration tests,
-real Chromium smoke tests, dependency audits, and a disposable synthetic preview.
-It did **not** crawl live source sites, retrieve the full LFS archive, run native builds,
-or change wallpapers on real devices. The sandbox can reach package registries and
-GitHub, not Peapix/Windows10Spotlight.
+The tracked DB, catalog, bundled mobile catalog, images and LFS pointers were preserved.
+No live crawl, full LFS retrieval, signed native build, device wallpaper change or deployment
+was performed. This environment permits registries/GitHub, not the two source sites.
 
-## Findings addressed
+## Main improvements
 
-| Area | Finding | Resolution / regression coverage |
-|---|---|---|
-| Data safety | Better-quality downloads deleted the original before writing the replacement | Write new content-addressed files first; atomically replace DB metadata, suppression records and counters; only then remove old files. Disk/DB failure tests retain original bytes and metadata. |
-| Cancellation | Cancelling an executor await could clean up a file while a worker still wrote it | Shield the commit and drain it before releasing the dedupe lock; cancellation regression test. |
-| Deep links | Quality upgrades changed wallpaper IDs | Restore the original ID inside the replacement transaction. |
-| Concurrency | Maintenance checked idle state without reserving it | Engine-owned maintenance guard excludes concurrent starts/repairs and releases on exceptions. |
-| Engine shutdown | Restart joined a stopping thread while holding the lock that shutdown needed | Return busy immediately; publish completion under the same lock before another start. |
-| Memory | Automatic CPU pool could decode up to 32 large images simultaneously | Automatic mode now caps at four CPU workers; explicit operator settings remain available. HTML reads cap decompressed responses at 8 MiB, including chunked bodies. |
-| HTTP caching | Revision-based ETags could collide after restoring another database; concurrent cache misses repeated serialization | Hash catalog bytes, serialize under a single cache lock and database snapshot; support weak/list/wildcard validators. Stop the server before restoring its DB. |
-| Configuration/security | Non-finite floats and scheme-insensitive Origin comparison | Reject NaN/infinity; compare scheme as well as host and reject malformed origins. |
-| Deployment | Writable server lacked a public-gallery mode | `READ_ONLY=true` rejects every HTTP mutation, including future routes; UI hides unavailable controls. This is **not authentication** or filesystem read-only mode. |
-| API reference | Default CDN/inline Swagger assets were blocked by the app's own CSP | Pinned self-hosted Swagger UI, external initialization, no external validator. `/api/redoc` redirects to the same reference. |
-| Browser reliability | Malformed saved state/catalog rows could prevent rendering | Defensive favorites/preferences reads and catalog row validation; body-inclusive catalog timeout. |
-| User data | Browser favorites could not be backed up or restored | Versioned export/import, merge-only restore, validation and limits, cross-tab sync and storage-failure notices. |
-| UI | Missing offline/read-only feedback and incomplete menu keyboard navigation | Status banners, focus return, arrow/Home/End navigation and bounded menu height. |
-| Offline caching | Unawaited cache writes; arbitrary same-origin URLs cached indefinitely | Await quota-safe writes; restrict caching to shell allow-list; fall back to cached content on HTTP 5xx. |
-| Mobile cache | Persisted freshness timestamp was written but never read on cold start | Read and validate stored time; coalesce concurrent refreshes; preserve fallback error details. |
-| Publication | Publishing the repository root could expose the DB/source/logs on a static host | `scripts/build_site.py` and Pages workflow publish an explicit file allow-list. |
-| Repository hygiene | Generated mobile coverage HTML/JSON/XML was tracked | Removed reports; ignored coverage and browser traces. Source, fixtures, native modules and library assets retained. |
-
-### Durability boundaries
-
-SQLite and the filesystem do not share a transaction. A **hard process kill/power loss**
-between file creation and DB commit can leave new orphan files; a kill after commit
-but before cleanup can leave old orphan files. The old valid wallpaper is no longer
-deleted before the replacement commits. Use `--check` and inspect reported orphans;
-never promise zero orphan files after power loss. Graceful cancellation is tested.
-
-Favorites are keyed by filename, not database ID. A quality upgrade can change that
-filename, so a previous favorite may become unmatched even though its deep link
-survives. Backup/restore retains unmatched keys; cross-device account sync and
-filename migration are not implemented.
-
-## Dependency audit (2026-10-07)
-
-Commands and results in this environment:
-
-- Python: `pip-audit --vulnerability-service pypi` initially found advisories in the
-  environment's old **pip/setuptools**, not the installed application dependencies.
-  After upgrading pip to 26.2.1 and setuptools to 84.0.0, the audit reported **no known
-  vulnerabilities**. Audit tooling is not a runtime dependency. Results are a point-in-time
-  check of the installed Python 3.11/Linux environment, not every allowed version/OS.
-- Root browser-test tooling: `npm audit` reported **0 vulnerabilities**.
-- Mobile: `npm audit fix` applied compatible lockfile updates. The resulting audit
-  still reports **66 affected packages: 48 high, 18 moderate**. Underlying advisories
-  include `braces`, `decode-uri-component`, `node-forge`, `sprintf-js` and `uuid`;
-  transitive packages inherit those severities. The count is not 66 independent flaws.
-  Proposed automatic fixes include incompatible Expo/Jest/React Native changes and
-  even downgrades. **Do not use `npm audit fix --force` blindly.**
-
-Mobile release requires an Expo-compatible dependency upgrade or documented advisory
-triage/acceptance, followed by native builds and real-device testing. npm's severity
-alone does not establish application exploitability, and passing unit tests does not
-clear these advisories. Dependabot now covers both npm projects.
+| Area | Resolution |
+|---|---|
+| Process safety | OS advisory lock held for the entire API/desktop/CLI lifetime, before migrations or recovery. Competing instances fail; CLI exit code **3**. The sidecar is never unlinked. Factory paths must match process-wide storage settings. |
+| Hash lookup | Schema **3** adds eight case-normalized expression indexes. Query-plan tests confirm index use; radius ≥8 uses a full scan, avoiding false negatives. Future schema versions fail without being downgraded. |
+| Engine reliability | Supervise both dispatchers together, propagate failures, drain executor work before cancellation cleanup, synchronize snapshots, and reserve maintenance against concurrent starts. |
+| File/DB consistency | Transactional deduplication/suppression/stat changes; preserve shared references, LFS placeholders and originals on handled write/commit failures. Delete redundant files only after commit. |
+| Daily discovery | Same deterministic UTC daily selector in browser/mobile, independent of row order/title edits; open/favorite controls and midnight/resume updates. Identical valid catalogs are required for identical picks. This is not OS wallpaper automation. |
+| Browser UI | Persistent image-error/retry state; modal-safe clipboard fallback; sensible share fallback; favorites-view refresh on viewer close; metadata-aware render invalidation; Data Saver/static thumbnail warm-up. Still Glass retained. |
+| PWA | Scope-specific cleanup protects other apps; activation seeds the catalog so offline can work after one successful visit; await quota-safe cache writes and preserve legacy catalog fallback. Images are not bulk cached. |
+| Mobile media | **Save** always saves to Photos rather than applying Android wallpaper. Metadata/URL-based cache identity; staging, cancellation/timeouts, coalescing, native decoder validation, private-path checks, quotas/reservations, pinned per-image leases, partial cleanup, and correct JPEG/PNG/WebP sharing metadata. Android errors never silently save. |
+| Mobile catalog | Versioned origin/source/time envelope, source matching and defensively validated rows. Failed staged writes retain prior cache; intentional empty libraries remain empty; offline fallback is not reported as a successful refresh. |
+| Preferences/backups | Serialized writes and read-after-write consistency; validated hydration/history/settings; accurate same-tick favorite toggles; visible persistence failures; portable, merge-only favorites backups retain unmatched keys. |
+| Rotation | Strict filter pools, minimum elapsed interval, no arbitrary fallback on empty results, overlapping-run coalescing and ordered enable→disable→enable scheduling. Root-owned scheduling/foreground reconciliation, confirmed scheduler state, latest manual priority and plan/favorite/revision rechecks before native writes. |
+| Native bridge | Replace a removed SDK 57 Gradle script with the current module plugin; Both platforms validate private-cache files; Android bounds/120 MP, 2 MP validation/12 MP apply decode, process lock, policy checks and OS confirmation. Swift ImageIO validation, shared lock and truthful unsupported setting. Native compilation/device behavior still unverified. |
+| Hygiene/performance | Remove unused Expo application/device/gradient dependencies; direct Ionicons imports avoid app-level unrelated icon families (the SDK may ship its own UI fonts). Exact public-file build list excludes private/unreferenced files and rejects symlinks before replacing an artifact. Generated outputs stay ignored. |
+| Input handling | Reject traversal, credentials/non-HTTP links, unpaired UTF-16 and ambiguous catalog paths; null-prototype source counts avoid prototype-key collisions. Existing CSP, Host/Origin, read-only, CSV and TLS protections retained. |
 
 ## Verification
 
-Local verification: **241 pytest tests**, **21 Node tests**, **122 Jest tests** and
-**10 Chromium tests** passed. Ruff, TypeScript, ESLint, `pip check` and static
-artifact generation passed. Pytest emits one upstream Starlette/httpx deprecation warning;
-the client still works. This does not represent hosted CI execution on every OS.
+Local release checks (re-run after changes):
 
-Re-run rather than relying on these historical results:
+| Gate | Result |
+|---|---|
+| Ruff | Clean |
+| Python | **261 tests** |
+| DOM-free core/service worker | **29 Node tests** |
+| Real Chromium | **16 browser tests**, including first-visit/offline/scoped PWA behavior |
+| Mobile | TypeScript/ESLint clean; **207 Jest tests** in 22 suites, coverage floor enforced (82.97% statements / 71.29% branches / 87.34% lines) |
+| Metro | Web export and **Android/iOS Hermes JavaScript exports** succeeded |
+| Native configuration | Both-platform prebuild and resolved HTTPS/permission/background/privacy/minify policy passed; SDK compatibility passed with Reanimated 4.5.1 |
+| Module linking | Android and Apple resolvers discover the custom wallpaper class/pod |
+| Static artifact | Exact allow-list generation and private-file/symlink regressions |
+
+Browser tests use disposable synthetic data/images. Native services are mocked in Jest;
+Hermes exports prove JS bundling, **not** Kotlin/Swift/Gradle compilation or OS permissions.
+One upstream Starlette/httpx TestClient deprecation and a React Native StrictMode
+`findNodeHandle` diagnostic remain non-failing. Hosted CI/Windows execution is separate.
 
 ```bash
 python -m pip install --upgrade pip setuptools
 python -m pip install -r requirements-dev.txt
-ruff check .
-pytest
-node --test tests/js/*.test.mjs
-npm ci
+ruff check . && pytest
+npm ci && npm test
 npx playwright install --with-deps chromium
 npm run test:browser
+python scripts/build_site.py
 cd mobile
-npm ci
-npm run typecheck
-npm run lint
-npm run test:ci
+npm ci && npm run typecheck && npm run lint && npm run test:ci
+APP_VARIANT=production npm run verify:config
+EXPO_OFFLINE=1 npx expo install --check
+APP_VARIANT=production EXPO_OFFLINE=1 npx expo export --platform all
 npm audit
 ```
 
-Browser tests use a temporary database and synthetic images; no LFS download or live
-crawl is needed. They cover corrupt preference recovery, real favorites file round-trip,
-search/empty states, mobile-width overflow, menu focus, cross-tab favorites and API-docs
-CSP/network behavior. CI adds the same Chromium smoke job. Existing CI still tests Python
-3.10–3.13; Windows remains non-blocking until validated by the owner.
+## Dependency audit — 2026-10-08
 
-## Release blockers and prioritized follow-up
+- Root npm development tooling: **0 vulnerabilities**.
+- Mobile: **55 affected packages (48 high, 7 moderate)**, inheriting three advisory
+  families: [braces](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm),
+  [node-forge](https://github.com/advisories/GHSA-86w9-cpqp-85rv),
+  [sprintf-js](https://github.com/advisories/GHSA-hp3w-g68c-fv3c).
+  Counts are affected dependency nodes, **not 55 independent vulnerabilities**.
+- Compatible remediation removed the UUID and URI-decoder findings. Expo Router alone
+  uses the scoped `query-string@9.3.1` / `decode-uri-component@0.5.0` override: valid
+  parse/stringify/pick and long malformed-percent inputs are tested, and all-platform
+  Metro exports pass. Recheck this override after every Expo Router update.
+- Python: **no known vulnerabilities** in the installed Python 3.11/Linux environment,
+  audited with pip-audit 2.10.1 (PyPI service) after updating pip 26.2.1/setuptools 84.0.0.
+  This does not cover every version range or Windows-only packages. See the release checklist.
 
-1. **High:** resolve/triage mobile dependency advisories and produce signed Android/iOS
-   builds on supported SDKs. Verify home/lock/both, permissions, app suspension, rotation,
-   low-memory behavior and iOS Photos/Shortcuts on hardware.
-2. **High:** writable network deployments require authenticated TLS reverse proxy/VPN and
-   rate limits. `ALLOWED_HOSTS` prevents rebinding; anyone can send an allowed Host header.
-   Read-only galleries still expose the catalog and require normal abuse protections.
-3. **High:** validate image licensing, LFS quotas, source-site terms and robots/rate policies
-   before publishing or scheduling bulk crawls. Run a real-library repair/check with access
-   to the sources and real image files.
-4. **Medium:** create platform-specific Python dependency locks with hashes, an SBOM and
-   controlled update policy. Current requirements use version ranges, so CI success today
-   does not guarantee a future fresh install has identical versions.
-5. **Medium:** process-wide/machine-wide instance locking. Engine guards are in-process only:
-   use one server worker and never run CLI crawls against a live server's database.
-6. **Medium:** mobile download/catalog byte limits are not universally enforced during native
-   streaming; add streaming limits and test interrupted file-cache writes on devices.
-7. **Medium:** generate smaller viewer previews to reduce LFS bandwidth, then measure real
-   low-memory device performance. Keep pagination instead of adding unneeded virtualization.
-8. **Later:** stable favorite migration on upgrades, desktop rotation, duplicate review,
-   internationalization and richer monitoring. See [ROADMAP.md](ROADMAP.md).
+Checked published braces 3.0.3 / node-forge 1.4.0 / sprintf-js 1.1.3 still fall in their advisory ranges. Production verification and the EAS store hook fail audit without an automatic waiver.
 
-Deployment and rollback gates: [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md).
+Do **not** run `npm audit fix --force` blindly: suggestions include incompatible
+Expo/Jest/React Native changes/downgrades. Before distributing native apps, classify
+reachability of each advisory for build/test/runtime, resolve it or obtain explicit
+owner risk acceptance, and rerun native builds/device tests. Passing tests is not a waiver.
+
+## Durability and resource limits
+
+- SQLite and image files do not share a power-loss transaction. Hard kills can leave
+  orphans; `--check` reports them, but does not delete them. Back up stopped DB **and** images.
+- Locks are advisory/local-filesystem only, not distributed locks. Use one server worker.
+  External tools, aliases/hard links, network filesystems and different DBs sharing image
+  folders are outside the ownership guarantee. Do not delete a `.db.lock` to bypass it.
+- Favorites are filename-based: a quality upgrade/rebuilt archive can leave unmatched keys.
+  Backups preserve them; automatic migration and account sync are not implemented.
+- Native catalogs are capped at 100,000 rows / 32 MiB; transfers at 40 MiB per image;
+  backups at 20,000 keys / 2 MiB. Originals/partials have a 256 MiB managed quota, exports 64 MiB,
+  with free-disk checks/eviction and 24-hour stale cleanup. The display SDK cache is separate. Very long custom favorite
+  keys may exceed the backup byte cap before the count cap.
+- Streams are bounded where the platform exposes streaming/progress; fallback `text()`
+  validation cannot prevent initial response buffering, and native cancellation may overshoot.
+  Bounded native decoder validation is stronger than signatures, not proof against every codec/OS
+  failure. Pins/revisions are per JS runtime and native locks process-local. Device interruption,
+  headless/foreground races and low-memory tests remain.
+- OS scheduling is best effort; intervals are minimums, not precise alarms. iOS cannot
+  directly/automatically apply wallpaper through a public third-party API.
+
+## Release gates and prioritized follow-up
+
+1. **High:** triage remaining mobile advisories; signed Android/iOS builds; physical-device
+   home/lock/both, photo permission/limited access, suspension, rotation, interruption and low-RAM tests.
+2. **High:** real-library/LFS checks, backup restoration, live-source crawl/stop/resume;
+   validate copyright/source terms, robots/rate rules and LFS storage/bandwidth budgets.
+3. **High:** writable remote APIs require authenticated TLS reverse proxy/VPN and rate limits.
+   Host/Origin checks are not authentication. Prefer an allow-listed static site for public browsing.
+4. **Medium:** OS desktop tests (including Windows lock semantics), platform-specific Python
+   dependency locks/SBOM and final aggregate SDK cache/codec behavior review on real devices.
+5. **Later:** stable favorite identity/migration, smaller viewer previews, desktop rotation,
+   duplicate review, localization and richer monitoring. See [ROADMAP.md](ROADMAP.md).
+
+Deployment/rollback: [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md). Design: [DESIGN.md](DESIGN.md).
+
+## Native-focused 1.2 pass
+
+Adds scoped permissions/networking, bounded managed caches, serialized image/native operations,
+root scheduler/recovery, safe reset and startup watchdog, explicit failure/cancellation feedback,
+offline privacy notice, and separate compiler/audit release gates. Kotlin/Swift compiler jobs are
+configured but not executed in this sandbox. See [NATIVE_RELEASE.md](NATIVE_RELEASE.md) for
+complete evidence, remaining blockers and device acceptance matrix; [PRIVACY.md](PRIVACY.md) for
+publisher review. No signed binaries, credentials, real-device actions or store claims were produced.

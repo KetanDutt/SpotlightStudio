@@ -5,7 +5,7 @@
  * Picking a tag opens the gallery through the same `?tag=` deep link Browse already
  * understands, which means this screen works from anywhere (tab, modal, shared link).
  */
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { FlashList, type ListRenderItemInfo } from '@shopify/flash-list';
 import { useRouter } from 'expo-router';
 import React, { useCallback, useMemo, useState } from 'react';

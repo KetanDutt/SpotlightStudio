@@ -35,7 +35,7 @@ export interface RawWallpaper {
 export interface Wallpaper {
   raw: RawWallpaper;
   id: number;
-  /** `filename` – stable identity across catalog refreshes (favourites use it). */
+  /** `filename` – favourites use it; a backend quality upgrade can change it. */
   key: string;
   tags: string[];
   source: string;

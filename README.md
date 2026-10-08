@@ -3,7 +3,7 @@
 **An archive and gallery of Windows Spotlight wallpapers** — crawl them from Peapix and Windows10Spotlight, de-duplicate them by perceptual hash, keep the best resolution of every picture and browse the whole collection in the restrained **Still Glass** interface, either as a static GitHub Pages showcase or as a desktop app with crawler controls.
 
 [![CI](https://github.com/KetanDutt/SpotlightStudio/actions/workflows/ci.yml/badge.svg)](https://github.com/KetanDutt/SpotlightStudio/actions/workflows/ci.yml)
-![Version](https://img.shields.io/badge/version-2.4.0-739b8b)
+![Version](https://img.shields.io/badge/version-2.5.0-739b8b)
 ![Python](https://img.shields.io/badge/python-3.10%2B-3776ab)
 ![License](https://img.shields.io/badge/license-all%20rights%20reserved-lightgrey)
 
@@ -13,7 +13,7 @@
 |:---:|:---:|:---:|
 | <img src="docs/assets/screenshot-viewer.jpg" alt="Full-screen viewer with details, tags and actions" width="440"> | <img src="docs/assets/screenshot-light.jpg" alt="Still Glass light theme" width="440"> | <img src="docs/assets/screenshot-mobile.jpg" alt="Phone layout" width="170"> |
 
-<sub>The screenshots are rendered with generated placeholder images, not with the real wallpapers.</sub>
+<sub>Still Glass screenshots use generated placeholders, not real wallpapers; the new daily card is not shown in these snapshots.</sub>
 
 ---
 
@@ -23,33 +23,35 @@
 |---|---|
 | 🖼️ **~7,500 wallpapers** | 4K (Peapix) and Full HD (Windows10Spotlight), perceptually de-duplicated; the best resolution of each picture wins |
 | ⚡ **Fast** | 32 parallel downloads, one CPU job per image, atomic file writes; a 4 MB catalog (0.8 MB gzipped) that is parsed once and searched in memory in ~5 ms |
-| 🛡️ **Reliable** | queue items are *claimed*, never lost on stop/crash; automatic retries; a circuit breaker for network outages; page counts are auto-discovered |
-| 🔎 **Great browsing** | instant multi-term search, tag & resolution filters, favorites, shareable deep links (`#w=1234`), random wallpaper, keyboard shortcuts, light/dark theme |
+| 🛡️ **Reliable** | queue claims recover on restart; safe graceful stop and single-process ownership; automatic retries; a circuit breaker for network outages; page counts are auto-discovered |
+| 🔎 **Great browsing** | UTC daily spotlight, instant multi-term search, tag & resolution filters, portable favorites, shareable deep links (`#w=1234`), random wallpaper, keyboard shortcuts, light/dark theme |
 | 📱 **Installable PWA** | works on phones, offline-capable, accessible (keyboard, screen-reader, reduced-motion) |
 | 🤖 **Android / iOS app** | Expo client: offline search, favourites, history, **set the wallpaper on Android** (home/lock/both) with automatic rotation; on iOS it saves to Photos and guides you through the Shortcuts step ([details](docs/MOBILE.md#setting-a-wallpaper)) |
 | 🔒 **Locked down** | strict CSP, Host/Origin checks on the local API, no XSS from scraped titles, CSV-injection-safe exports, DB and logs are never served |
 
-## What’s new in 2.4 — Still Glass
+## What’s new in 2.5 — reliability and daily discovery
 
-- **A cohesive visual system:** warm neutrals, muted sage, photo-first captions,
-  floating navigation, quieter forms and lists, and intentional light/dark palettes.
-- **Across the product:** web gallery/list, crawler, viewer, menus, dialogs, toasts and
-  API reference; mobile browsing, search, favourites, history, directory, tags,
-  settings, detail, action/filter sheets and shared loading/error/empty states.
-- **Accessible interactions:** keyboard-contained filters, clear focus, 44px primary
-  touch controls, semantic text contrast checks, reduced motion/transparency,
-  and cancellable enter/exit transitions.
-- **Reusable foundations:** centralized web/native tokens, a shared native material
-  component, and coordinated app icons. No per-photo blur or animated blur effects.
-- **Existing capabilities retained:** favorites backup/restore, cross-tab sync,
-  read-only hosting, safe downloads, offline support and all 2.3 hardening remain.
+- **Daily spotlight:** web and mobile share one deterministic pick per UTC day when
+  using the same catalog. Explore it or favorite it; this does not change your wallpaper.
+- **Portable favorites:** export/import the same JSON backup on web and mobile,
+  merge without deleting existing favorites, and keep keys missing from today's catalog.
+- **Safer operations:** an OS-backed library lock rejects competing server/CLI instances
+  before startup changes; schema-3 hash indexes speed near-duplicate candidate selection.
+  Maintenance, cancellation and shutdown preserve originals and shared file references.
+- **Better feedback:** persistent image errors with retry, viewer favorites that refresh
+  correctly, live metadata updates, scoped first-visit/offline PWA caching and clearer refresh/reset outcomes.
+- **Mobile correctness:** Save means save to Photos, not set Android wallpaper; staged,
+  cancellable downloads, source-aware catalog caching, validated/serialized preferences,
+  and rotation that respects filters, intervals and the latest scheduling intent.
+- **Build/hygiene:** current Expo module plugin, bounded Android bitmap decoding, fewer
+  bundled fonts/unused dependencies, exact public-site file list and expanded regressions.
 
-See the [design system and consistency audit](docs/DESIGN.md) for materials, motion,
-component coverage, checks and platform boundaries.
+The [Still Glass design system](docs/DESIGN.md) is retained. Backend/web version is
+**2.5.0**; mobile **1.2.0** and bridge **0.3.0** have independent versions.
 
 **Release status:** automated checks pass locally, but production sign-off still needs
-real-device/native testing, real-library verification and mobile dependency-advisory
-resolution. See the [review and outstanding risks](docs/REVIEW.md) and
+real-device/native compilation, real-library verification and triage of **55 affected
+mobile dependency packages (49 high, 5 moderate)**. See the [review and outstanding risks](docs/REVIEW.md) and
 [release checklist](docs/RELEASE_CHECKLIST.md). Writable remote servers still need an
 authenticated proxy/VPN; Host checks are not authentication.
 
@@ -188,7 +190,7 @@ pytest                                  # 200+ tests, fully offline (a fake Peap
 node --test tests/js/*.test.mjs         # unit tests of the front-end logic
 ruff check .
 
-cd mobile                               # the Expo app (Node ≥ 20)
+cd mobile                               # the Expo app (supported Node 22.13+ LTS)
 npm ci && npm run verify                # typecheck + lint + Jest (110+ tests)
 npm run android                         # dev build on a device/emulator
 ```

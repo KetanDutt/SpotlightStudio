@@ -56,7 +56,7 @@ module.exports = defineConfig([
     },
   },
   {
-    files: ['scripts/**/*.js', 'eslint.config.js'],
+    files: ['scripts/**/*.{js,cjs,mjs}', 'plugins/**/*.cjs', 'eslint.config.js'],
     languageOptions: { globals: { ...TEST_GLOBALS, require: 'readonly', module: 'writable', __dirname: 'readonly' } },
   },
 ]);

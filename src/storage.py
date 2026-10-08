@@ -76,7 +76,7 @@ def write_thumbnail(filename: str, data: bytes) -> Path:
     return dest
 
 
-def delete_wallpaper_files(filename: str) -> int:
+def delete_wallpaper_files(filename: str, *, legacy: bool = True) -> int:
     """
     Remove the full image and its thumbnail (including legacy *flat* copies
     from the v1 layout).  Returns the number of files deleted; never raises.
@@ -84,7 +84,7 @@ def delete_wallpaper_files(filename: str) -> int:
     removed = 0
     flat = Path(filename).name
     for base in (settings.IMAGES_DIR, settings.THUMBS_DIR):
-        for rel in {filename, flat}:
+        for rel in ({filename, flat} if legacy else {filename}):
             try:
                 target = _safe_join(base, rel)
             except ValueError:

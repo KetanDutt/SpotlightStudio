@@ -137,7 +137,18 @@ def deduplicate_downloaded_wallpapers(max_distance: int = DEFAULT_MAX_DISTANCE) 
     if len(rows) < 2:
         return 0
 
-    rows.sort(key=lambda r: (-quality_score(r["width"], r["height"], r["file_size"]), r["id"]))
+    def usable(row: dict) -> bool:
+        try:
+            path = storage.image_path(row["filename"])
+            return path.is_file() and not is_lfs_pointer(path)
+        except ValueError:
+            return False
+
+    # Never discard a real original in favour of a missing file/LFS pointer just
+    # because its metadata claims a larger resolution.
+    available = {row["id"]: usable(row) for row in rows}
+    rows.sort(key=lambda r: (not available[r["id"]],
+                            -quality_score(r["width"], r["height"], r["file_size"]), r["id"]))
     index: dict[tuple[int, str], list[dict]] = defaultdict(list)
     removed = 0
 
@@ -148,24 +159,37 @@ def deduplicate_downloaded_wallpapers(max_distance: int = DEFAULT_MAX_DISTANCE) 
         keys = [(i, chunk) for i, chunk in enumerate(chunk_keys(phash))]
         keeper = None
         best = max_distance + 1
-        for key in keys:
-            for candidate in index.get(key, ()):
-                distance = hamming_hex(phash, candidate["phash"])
-                if distance < best:
-                    keeper, best = candidate, distance
+        # A candidate can share all eight chunks: compare it only once.
+        candidates = {candidate["id"]: candidate for key in keys
+                      for candidate in index.get(key, ())}
+        if max_distance >= len(keys):
+            candidates = {candidate["id"]: candidate for bucket in index.values()
+                          for candidate in bucket}
+        for candidate in candidates.values():
+            distance = hamming_hex(phash, candidate["phash"])
+            if distance < best:
+                keeper, best = candidate, distance
         if keeper is None:
-            for key in keys:
-                index[key].append(row)
+            if available[row["id"]]:
+                for key in keys:
+                    index[key].append(row)
             continue
 
-        merge_wallpaper_metadata(
-            keeper["id"], title=row["title"], tags=row["tags"], date_spotted=row["date_spotted"]
-        )
-        storage.delete_wallpaper_files(row["filename"])
-        if row["source_url"]:
-            add_suppressed_url(row["source_url"], reason="duplicate_lower_quality")
-        delete_wallpaper_by_id(row["id"])
-        increment_stat("duplicates_replaced")
+        # Commit all metadata/suppression/counters together BEFORE deleting any
+        # bytes. A DB failure must leave both originals and both rows recoverable.
+        with get_db(write=True) as conn:
+            merge_wallpaper_metadata(
+                keeper["id"], title=row["title"], tags=row["tags"], date_spotted=row["date_spotted"]
+            )
+            if row["source_url"] and row["source_url"] != keeper["source_url"]:
+                add_suppressed_url(row["source_url"], reason="duplicate_lower_quality")
+            delete_wallpaper_by_id(row["id"])
+            increment_stat("duplicates_replaced")
+            shared_file = conn.execute(
+                "SELECT 1 FROM wallpapers WHERE filename = ? LIMIT 1", (row["filename"],)
+            ).fetchone()
+        if not shared_file:
+            storage.delete_wallpaper_files(row["filename"], legacy=False)
         removed += 1
         log.info(
             "Dedupe: kept %s (%dx%d), removed %s (%dx%d)",
@@ -194,7 +218,7 @@ def create_missing_thumbnails() -> int:
             thumb, full = storage.thumb_path(filename), storage.image_path(filename)
         except ValueError:
             continue
-        if not thumb.exists() and full.is_file() and not is_lfs_pointer(full):
+        if (not thumb.is_file() or is_lfs_pointer(thumb)) and full.is_file() and not is_lfs_pointer(full):
             missing.append((full, thumb))
     if not missing:
         return 0
@@ -231,7 +255,7 @@ def verify_library(sample_limit: int = 20) -> dict:
 
     known_images = {r["filename"] for r in rows}
     missing_images: list[str] = []
-    missing_thumbs = lfs_pointers = invalid_hashes = 0
+    missing_thumbs = lfs_pointers = lfs_thumbs = invalid_hashes = 0
     for row in rows:
         if not is_valid_phash(row["phash"]):
             invalid_hashes += 1
@@ -245,6 +269,9 @@ def verify_library(sample_limit: int = 20) -> dict:
         elif is_lfs_pointer(full):
             lfs_pointers += 1
         if not thumb.is_file():
+            missing_thumbs += 1
+        elif is_lfs_pointer(thumb):
+            lfs_thumbs += 1
             missing_thumbs += 1
 
     orphans: list[str] = []
@@ -263,6 +290,7 @@ def verify_library(sample_limit: int = 20) -> dict:
         "missing_images": missing_images[:sample_limit],
         "missing_thumbnails_count": missing_thumbs,
         "lfs_pointer_count": lfs_pointers,
+        "lfs_thumbnail_count": lfs_thumbs,
         "orphan_images_count": len(orphans),
         "orphan_images": orphans[:sample_limit],
         "invalid_hash_count": invalid_hashes,

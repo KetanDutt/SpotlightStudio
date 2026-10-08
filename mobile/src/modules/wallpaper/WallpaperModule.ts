@@ -1,10 +1,10 @@
 /**
- * The native wallpaper bridge (Android).
+ * The native image-validation/wallpaper bridge (Android & iOS).
  *
  * The app ships a tiny Expo Module (`modules/wallpaper`) that talks to the Android
- * `WallpaperManager`.  On iOS – and in Expo Go, where no custom native code can exist –
- * `requireOptionalNativeModule` returns `null` and the UI falls back to the
- * "save to Photos + Shortcuts" flow.  Nothing here ever throws at import time.
+ * `WallpaperManager`. iOS implements image validation but explicitly refuses setting;
+ * Photos/manual application is a separate flow. Expo Go/web lack this custom module and
+ * support browsing, not image save/apply actions.
  */
 import { requireOptionalNativeModule } from 'expo-modules-core';
 
@@ -23,13 +23,15 @@ export interface WallpaperNativeModule {
   isSupported(): boolean;
   /** True on Android 7.0+ where `FLAG_LOCK` exists. */
   supportsSeparateLockScreen(): boolean;
+  /** Bounded validation of a private-cache image, available on Android AND iOS. */
+  validateImage(uri: string): Promise<{ valid: boolean; width: number; height: number }>;
   /** Applies `uri` (a `file://` path) to the requested screen(s). */
   setWallpaper(uri: string, mode: WallpaperMode): Promise<SetWallpaperResult>;
 }
 
 /**
  * `null` when the native module is not part of the running binary
- * (iOS, web, Expo Go, or a build predating the module).
+ * (web, Expo Go, or a build predating the module).
  */
 export const nativeWallpaper =
   requireOptionalNativeModule<WallpaperNativeModule>('SpotlightWallpaper') ?? null;

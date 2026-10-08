@@ -89,7 +89,10 @@ def local_host(host: str) -> str:
 
 
 def base_url(host: str, port: int) -> str:
-    return f"http://{local_host(host)}:{port}"
+    client_host = local_host(host)
+    if ":" in client_host and not client_host.startswith("["):
+        client_host = f"[{client_host}]"
+    return f"http://{client_host}:{port}"
 
 
 def port_in_use(host: str, port: int) -> bool:
@@ -358,14 +361,29 @@ def main(argv: list[str] | None = None) -> int:
     # An explicit --host/--port is authoritative (the API derives its Host allow-list from it).
     from src.config import settings
 
+    if not 1 <= args.port <= 65535:
+        build_parser().error("--port must be between 1 and 65535")
     settings.HOST, settings.PORT = args.host, args.port
     configure_logging()
-    if args.check:
-        return run_check()
-    if args.sync_catalog:
-        return run_sync_catalog()
-    if args.crawl:
-        return run_crawl(args.source, args.mode)
+    if args.check or args.sync_catalog or args.crawl:
+        from src.database import close_connection
+        from src.downloader import shutdown_cpu_pool
+        from src.locking import LibraryBusy, LibraryLock
+
+        try:
+            with LibraryLock(settings.DB_PATH):
+                try:
+                    if args.check:
+                        return run_check()
+                    if args.sync_catalog:
+                        return run_sync_catalog()
+                    return run_crawl(args.source, args.mode)
+                finally:
+                    shutdown_cpu_pool(wait=True)
+                    close_connection()
+        except LibraryBusy as exc:
+            log.error("%s", exc)
+            return 3
     if args.server:
         return run_server(args.host, args.port)
     return run_desktop(args.host, args.port)

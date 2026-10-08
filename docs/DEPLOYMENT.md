@@ -129,7 +129,7 @@ Run a *full* crawl (`--mode full`) occasionally, and *repair* (`--mode repair`) 
 
 1. Back up `data/wallpapers.db`.
 2. Pull the new version; `pip install -r requirements.txt` (the launchers do this automatically). `imagehash`, NumPy and SciPy are no longer needed and can be uninstalled.
-3. Start the app: the database is upgraded to schema v2 automatically (dates, labels and timestamps are normalised; nothing is deleted).
+3. Start the app: the database is upgraded to schema v3 automatically (v2 normalization plus hash-chunk indexes; wallpaper rows/files are not deleted by these migrations).
 4. Recommended once: **Repair metadata** to back-fill the missing Peapix titles/tags and the hash-like Windows10Spotlight titles.
 
 Behavioural changes to be aware of:
@@ -149,3 +149,11 @@ Behavioural changes to be aware of:
 
 See [REVIEW.md](REVIEW.md) for verified changes and remaining limitations, and
 [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md) for deployment, monitoring and rollback.
+
+### Library ownership
+
+Run one server worker on a local filesystem. Server/desktop/CLI operations acquire the
+same OS advisory lock before migrations or recovery; a busy CLI exits **3**. Stop the
+owner or use its API instead. A remaining `data/wallpapers.db.lock` is normal — never
+remove it to bypass ownership. The OS releases locks on exit; different DB files sharing
+an images directory, network filesystems and external SQLite tools are not coordinated.

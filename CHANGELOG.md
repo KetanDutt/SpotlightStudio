@@ -5,6 +5,77 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## Native [1.2.0] — 2026-10-08 (bridge 0.3.0)
+
+### Native reliability and UX
+- Bounded originals/partials (256 MiB), exports (64 MiB), disk safety/reservations,
+  last-used eviction, stale cleanup, consumer pins and serialized per-image operations.
+- Private-cache JPEG/PNG/WebP native decoder/completeness validation; Android sampled,
+  process-locked wallpaper writes with policy/target checks, confirmed ID and backup opt-out;
+  Swift ImageIO validator with explicit unsupported iOS setting.
+- Add-only Photos, no widening after denial, no Android 11+ gallery-read request/album browsing;
+  Android Apply failures no longer silently save or request Photos.
+- Cancel/navigation cleanup and truthful already-started system completion; root-owned rotation,
+  foreground reconciliation, plan/favorite/revision rechecks and latest manual priority.
+- Provider-independent recovery, splash watchdog, guarded/reset reload, serialized clearing,
+  StrictMode-safe theme writes and lower-memory preview caching/resizing.
+
+### Shipping policy and evidence
+- HTTPS-only preview/production, separate explicit development IDs, scoped legacy write consent,
+  blocked production overlay/read permissions and removed unused iOS background modes.
+- Offline privacy notice and reason declarations, resolved-native-config validation, EAS profile/
+  audit gate and native compiler CI jobs. Reanimated pinned to SDK expected 4.5.1.
+- **207 Jest tests**, clean types/lint/SDK compatibility, all-platform JS/Hermes exports,
+  Android/iOS prebuild and both autolinkers passed. Existing archive/design assets preserved.
+- **Not store certification:** 55 inherited affected dependency nodes, native compilation/device
+  QA, signing, hosting/content rights and publisher/privacy approvals remain release blockers.
+  See `docs/NATIVE_RELEASE.md`; no automated audit waiver or signed artifact was produced.
+
+## [2.5.0] — 2026-10-08
+
+### Added
+- Shared UTC daily spotlight on the web and mobile Browse screen; stable selection for
+  the same catalog, favorite/open actions, midnight and app-resume updates.
+- Portable version-1 mobile favorites backups compatible with the browser; merge-only
+  imports, unmatched-key retention, validation and size/count limits.
+- OS-backed, non-blocking library ownership for server/desktop/CLI lifetimes; a competing
+  process exits before migrations, claim recovery or maintenance (CLI exit code 3).
+- Schema v3 expression indexes for eight dHash chunks; wide-radius searches fall back to
+  a complete scan, and a future database schema is refused instead of downgraded.
+
+### Fixed
+- Engine dispatcher failures stop sibling dispatchers; cancellation drains executor work;
+  maintenance transactions preserve shared/LFS files and original data on failed commits.
+- API factories cannot claim a different library from the process-wide storage settings.
+- Mobile **Save** saves to Photos, never changes Android wallpaper; staged, cancellable,
+  coalesced transfers validate image headers, enforce completion/progress limits, clean
+  partials and share the correct JPEG/PNG/WebP MIME type.
+- Versioned mobile catalog cache records source/origin/freshness, rejects mismatched
+  provenance and preserves the previous file on failed writes. Empty catalogs remain empty.
+- Serialized preference writes, validated history/settings, synchronous favorite results,
+  visible persistence failures and ordered enable/disable/enable rotation scheduling.
+- Rotation respects interval and all filters; no arbitrary fallback when the pool is empty.
+- Scoped PWA cleanup no longer removes another gallery; first-visit activation seeds an
+  offline catalog; fallback/cache writes are awaited and quota-safe.
+- Viewer favorites refresh on close, metadata changes invalidate gallery rendering,
+  modal clipboard fallback works, and persistent image errors offer retry.
+- Reject unpaired UTF-16 paths; prototype-like source names cannot corrupt count maps.
+- KDE without its helper fails explicitly; an older GNOME's absent optional dark key
+  no longer negates a successful main wallpaper change.
+- Android bridge uses the current Expo module Gradle plugin (the old script was removed
+  from SDK 57), bounds/pixel checks and bounded bitmap sampling; truthful iOS exception.
+
+### Maintenance and release boundaries
+- Native app version **1.1.0**, bridge **0.2.0**; unused Expo dependencies removed and
+  direct Ionicons imports avoid bundling unrelated icon families.
+- Scoped Expo Router query-string/decoder compatibility override; parser regressions and
+  web/Android/iOS JavaScript exports verified. Remaining mobile advisories require triage.
+- Static publication uses an exact public-file allow-list and refuses source/output symlinks;
+  source validation runs before replacing an existing artifact.
+- Expanded backend/browser/mobile regressions and updated architecture, data, mobile,
+  operations and release-readiness documentation. Native compilation/hardware, live-source
+  crawling, LFS archive verification, authenticated hosting and licensing remain release gates.
+
 ## [2.4.0] — 2026-10-07
 
 ### Changed

@@ -121,6 +121,7 @@
     alert: '<path d="m21.7 18-8-14a2 2 0 0 0-3.4 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.7-3Z"/><path d="M12 9v4M12 17h.01"/>',
     refresh: '<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/>',
     image: '<rect width="18" height="18" x="3" y="3" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21"/>',
+    share: '<path d="M12 16V3m-4 4 4-4 4 4M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7"/>',
     link: '<path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/>',
   };
   const SVG_NS = "http://www.w3.org/2000/svg";
@@ -166,6 +167,8 @@
     cache: { key: "", list: [] },
     info: null,
     gallerySig: "",
+    dailySig: "",
+    dailyItem: null,
     tagsExpanded: false,
     pageDirty: false,
     status: null,
@@ -173,7 +176,7 @@
     lastSignature: "",
     lastCatalogLoad: 0,
     reloading: false,
-    lb: { item: null, list: [], index: -1, pushed: false, token: 0 },
+    lb: { item: null, list: [], index: -1, pushed: false, token: 0, loader: null },
   };
 
   const SOURCE_LABELS = C.SOURCE_LABELS;
@@ -268,6 +271,7 @@
     $("gallery").hidden = true;
     $("state-empty").hidden = true;
     $("pagination").replaceChildren();
+    $("daily-spotlight").hidden = true;
     $("error-text").textContent = message || "Check your connection and try again.";
     $("state-error").hidden = false;
     $("results-sub").textContent = "Could not load wallpapers";
@@ -340,18 +344,23 @@
 
   function registerServiceWorker() {
     if (!("serviceWorker" in navigator) || !/^https?:$/.test(location.protocol)) return;
-    window.addEventListener("load", () => {
-      navigator.serviceWorker.register("sw.js").catch(() => { /* offline support is optional */ });
-    });
+    const register = () => navigator.serviceWorker.register("sw.js").catch(() => { /* optional */ });
+    // Backend detection can finish AFTER window.load; don't miss registration.
+    if (document.readyState === "complete") register();
+    else window.addEventListener("load", register, { once: true });
   }
 
   /** The desktop app is always online and updates in place: drop any stale worker/caches. */
   function cleanupServiceWorkers() {
     if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.getRegistrations().then((list) => list.forEach((r) => r.unregister())).catch(() => {});
+      const scope = new URL("./", location.href).href;
+      navigator.serviceWorker.getRegistrations().then((list) =>
+        list.filter((r) => r.scope === scope).forEach((r) => r.unregister())).catch(() => {});
     }
     if (window.caches) {
-      caches.keys().then((keys) => keys.filter((k) => k.startsWith("spotlight")).forEach((k) => caches.delete(k))).catch(() => {});
+      const scopeKey = encodeURIComponent(new URL("./", location.href).pathname);
+      caches.keys().then((keys) => keys.filter((k) => k.startsWith(`spotlight-shell-${scopeKey}-`) ||
+        k.startsWith(`spotlight-data-${scopeKey}-`)).forEach((k) => caches.delete(k))).catch(() => {});
     }
   }
 
@@ -424,6 +433,7 @@
     renderGallery(info);
     renderPagination(info);
     renderLibrary();
+    renderDailySpotlight();
     syncControls();
     syncURL();
   }
@@ -516,6 +526,42 @@
     $("lib-bars").replaceChildren(...rows);
   }
 
+  function renderDailySpotlight() {
+    const box = $("daily-spotlight");
+    const s = app.state;
+    box.hidden = !app.catalog?.total || !!(s.q || s.source || s.quality || s.tag || s.fav) || s.page !== 1;
+    if (box.hidden) return;
+    const day = new Date().toISOString().slice(0, 10);
+    const signature = `${app.catalogVersion}|${day}`;
+    if (signature !== app.dailySig) {
+      app.dailySig = signature;
+      const item = app.dailyItem = C.dailyWallpaper(app.catalog);
+      $("daily-title").textContent = item.title;
+      $("daily-meta").textContent = [SOURCE_LABELS[item.source] || item.source,
+        C.QUALITY_LABELS[item.q], `${item.raw.width} × ${item.raw.height}`].join(" · ");
+      const img = h("img", { alt: "", width: 480, height: 270, decoding: "async", fetchpriority: "high" });
+      img.addEventListener("error", () => onThumbError(img, item), { once: true });
+      img.src = imgUrl(item, true); // never load the original until asked
+      $("daily-photo").replaceChildren(img);
+    }
+    syncDailyFavorite();
+  }
+
+  function syncDailyFavorite() {
+    const on = !!app.dailyItem && app.favorites.has(app.dailyItem.key);
+    $("daily-fav").setAttribute("aria-pressed", String(on));
+    $("daily-fav").setAttribute("aria-label", on ? "Remove daily wallpaper from favorites" : "Add daily wallpaper to favorites");
+  }
+
+  let dailyTimer = 0;
+  function scheduleDailySpotlight() {
+    clearTimeout(dailyTimer);
+    dailyTimer = setTimeout(() => {
+      renderDailySpotlight();
+      scheduleDailySpotlight();
+    }, 86400000 - (Date.now() % 86400000) + 50);
+  }
+
   /* ── gallery ───────────────────────────────────────────────────────── */
 
   function imgUrl(item, thumb) {
@@ -588,7 +634,10 @@
       gallery.replaceChildren();
       return;
     }
-    const sig = `${app.state.view}|${info.items.map((i) => `${i.id}:${i.title}`).join("|")}`;
+    // A quality upgrade keeps its ID/title but changes its filename and metadata.
+    // Compare all rendered fields, not only the title, without rebuilding unchanged pages.
+    const sig = JSON.stringify([app.state.view, info.items.map((i) => [i.id, i.key, i.title,
+      i.generated, i.source, i.q, i.raw.width, i.raw.height, i.raw.file_size, i.raw.date_spotted])]);
     if (sig === app.gallerySig) return syncFavoriteButtons(); // identical page → keep the DOM (no flicker)
     app.gallerySig = sig;
     gallery.classList.toggle("is-list", app.state.view === "list");
@@ -742,6 +791,7 @@
   }
 
   function syncFavoriteButtons() {
+    syncDailyFavorite();
     for (const card of $("gallery").children) {
       const on = app.favorites.has(card.dataset.key);
       const btn = card.querySelector(".card-fav");
@@ -835,13 +885,19 @@
     $("lb-next").disabled = app.lb.index >= app.lb.list.length - 1;
     syncFavoriteButtons();
 
+    // Abort the previous detached loader when navigating quickly.
+    if (app.lb.loader) {
+      app.lb.loader.onload = app.lb.loader.onerror = null;
+      app.lb.loader.removeAttribute("src");
+    }
+    $("lb-error").hidden = true;
     // Progressive loading: instantly show the (cached) thumbnail, then swap in the full image.
     lb.stage.classList.add("is-loading");
     lb.img.classList.remove("is-failed");
     lb.img.classList.add("is-preview");
     lb.img.alt = item.title;
     lb.img.src = imgUrl(item, true);
-    const loader = new Image();
+    const loader = app.lb.loader = new Image();
     loader.decoding = "async";
     loader.onload = () => {
       if (token !== app.lb.token) return;
@@ -854,7 +910,10 @@
       if (token !== app.lb.token) return;
       lb.stage.classList.remove("is-loading");
       lb.img.classList.add("is-failed");
-      toast("The full-resolution image could not be loaded.", "error");
+      $("lb-error-text").textContent = app.health?.lfs_pointers_detected
+        ? "Local images are Git LFS pointers. Run git lfs install && git lfs pull, then retry."
+        : "Check your connection and try again. The thumbnail may still be available.";
+      $("lb-error").hidden = false;
     };
     loader.src = full;
   }
@@ -862,7 +921,12 @@
   function preloadNeighbours() {
     for (const delta of [1, -1]) {
       const next = app.lb.list[app.lb.index + delta];
-      if (next) new Image().src = imgUrl(next, false);
+      // LFS originals cost megabytes. Preload only thumbnails on static hosts or
+      // constrained connections; local desktop browsing can warm originals.
+      const connection = navigator.connection;
+      const original = app.imageOpts.local && !connection?.saveData &&
+        !/^(slow-2g|2g|3g)$/.test(connection?.effectiveType || "");
+      if (next) new Image().src = imgUrl(next, !original);
     }
   }
 
@@ -896,7 +960,13 @@
   function onLightboxClosed() {
     app.lb.token += 1;
     app.lb.item = null;
+    if (app.lb.loader) {
+      app.lb.loader.onload = app.lb.loader.onerror = null;
+      app.lb.loader.removeAttribute("src");
+      app.lb.loader = null;
+    }
     lb.img.removeAttribute("src");
+    if (app.state.fav) app.pageDirty = true; // removing a favorite in the viewer changes this list
     if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
     if (app.pageDirty) {
       app.pageDirty = false;
@@ -942,17 +1012,33 @@
       area.style.setProperty("position", "fixed");
       area.style.setProperty("opacity", "0");
       area.value = text;
-      document.body.append(area);
+      const focused = document.activeElement;
+      (document.querySelector("dialog[open]") || document.body).append(area);
       area.select();
       let ok = false;
       try { ok = document.execCommand("copy"); } catch (_e) { ok = false; }
       area.remove();
+      if (focused?.isConnected) focused.focus();
       toast(ok ? okMessage : "Copy is not available in this browser.", ok ? "success" : "error");
     }
   }
 
   function permalink(item) {
     return `${location.origin}${location.pathname}#w=${item.id}`;
+  }
+
+  async function shareWallpaper() {
+    const item = app.lb.item;
+    if (!item) return;
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: item.title, url: permalink(item) });
+        return;
+      } catch (err) {
+        if (err.name === "AbortError") return; // cancelling is not an error
+      }
+    }
+    await copyText(permalink(item), "Link copied — ready to share");
   }
 
   function bindLightbox() {
@@ -963,6 +1049,8 @@
     $("lb-prev").addEventListener("click", () => stepLightbox(-1));
     $("lb-next").addEventListener("click", () => stepLightbox(1));
     $("lb-fullscreen").addEventListener("click", toggleFullscreen);
+    $("lb-share").addEventListener("click", shareWallpaper);
+    $("lb-retry").addEventListener("click", () => app.lb.item && showLightboxItem(app.lb.item));
     $("lb-fav").addEventListener("click", () => toggleFavorite(app.lb.item));
     $("lb-copy").addEventListener("click", () => app.lb.item && copyText(permalink(app.lb.item), "Link copied to clipboard"));
     $("lb-copy-image").addEventListener("click", () => {
@@ -1012,7 +1100,7 @@
   }
 
   function initCrawlerControls() {
-    const saved = store.get("crawl", {});
+    const saved = store.get("crawl", {}) || {};
     $("crawl-source").value = ["both", "peapix", "win10spotlight"].includes(saved.source) ? saved.source : "both";
     const hasLibrary = app.status && app.status.library_count > 0;
     $("crawl-mode").value = ["quick", "full", "repair"].includes(saved.mode) ? saved.mode : hasLibrary ? "quick" : "full";
@@ -1115,7 +1203,7 @@
   let pollTimer = 0;
   async function pollStatusOnce() {
     try {
-      const res = await fetch("/api/status", { cache: "no-store" });
+      const res = await fetchWithTimeout("/api/status", 8000, { cache: "no-store" });
       if (res.ok) applyStatus(await res.json());
     } catch (_) { /* server restarting – keep polling */ }
   }
@@ -1254,6 +1342,14 @@
       if (e.key === "Escape") { if (search.value) { search.value = ""; patchState({ q: "" }); } else search.blur(); }
       if (e.key === "Enter") { apply.cancel(); patchState({ q: search.value.trim() }); }
     });
+
+    // Daily pick: scoped to the full library, independent of gallery filters.
+    const openDaily = () => app.dailyItem && openLightbox(app.dailyItem, app.catalog.items);
+    $("daily-photo").addEventListener("click", openDaily);
+    $("daily-open").addEventListener("click", openDaily);
+    $("daily-fav").addEventListener("click", () => toggleFavorite(app.dailyItem));
+    scheduleDailySpotlight();
+    document.addEventListener("visibilitychange", () => { if (!document.hidden) renderDailySpotlight(); });
 
     // Top bar
     $("btn-shuffle").addEventListener("click", openRandom);

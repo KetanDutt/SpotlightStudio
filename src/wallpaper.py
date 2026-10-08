@@ -11,11 +11,14 @@ The non-Windows back-ends are best-effort conveniences; every failure surfaces a
 """
 from __future__ import annotations
 
+import logging
 import os
 import platform
 import shutil
 import subprocess
 from pathlib import Path
+
+log = logging.getLogger("wallpaper")
 
 
 class WallpaperError(RuntimeError):
@@ -72,7 +75,9 @@ def _set_macos(path: Path) -> None:
 def _set_linux(path: Path) -> None:
     desktop = (os.environ.get("XDG_CURRENT_DESKTOP") or "").lower()
     uri = path.as_uri()
-    if "kde" in desktop and shutil.which("plasma-apply-wallpaperimage"):
+    if "kde" in desktop:
+        if not shutil.which("plasma-apply-wallpaperimage"):
+            raise UnsupportedPlatform("KDE needs plasma-apply-wallpaperimage to change the wallpaper.")
         _run(["plasma-apply-wallpaperimage", str(path)])
         return
     if shutil.which("gsettings"):
@@ -84,7 +89,12 @@ def _set_linux(path: Path) -> None:
         value = str(path) if key == "picture-filename" else uri
         _run(["gsettings", "set", schema, key, value])
         if schema == "org.gnome.desktop.background":
-            _run(["gsettings", "set", schema, "picture-uri-dark", uri])
+            try:
+                _run(["gsettings", "set", schema, "picture-uri-dark", uri])
+            except WallpaperError as exc:
+                # Older GNOME versions have no separate dark key. The main
+                # wallpaper already succeeded; do not falsely report failure.
+                log.warning("The main wallpaper was applied, but the optional dark background was not: %s", exc)
         return
     raise UnsupportedPlatform(
         "Setting the wallpaper is supported on Windows, macOS, GNOME, Cinnamon, MATE and KDE."

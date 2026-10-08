@@ -1,12 +1,13 @@
 /**
- * Rotation hook – keeps the OS scheduler and the settings in sync and exposes a "run now"
+ * Rotation UI – observes the root-owned scheduler and exposes a "run now"
  * action that performs exactly the same work the background task would.
  */
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 
 import { getCapabilities } from '../core/platform';
+import { nativeSetterSupported } from '../services/wallpaper-controller';
 import type { RotationSettings } from '../core/types';
-import { runRotationOnce, syncRotationTask } from '../services/rotation';
+import { runRotationOnce, getRotationSchedule, watchRotationSchedule } from '../services/rotation';
 import { usePreferences } from '../providers/PreferencesProvider';
 
 export interface RotationController {
@@ -25,49 +26,36 @@ export interface RotationController {
 
 export function useRotation(): RotationController {
   const { rotation, updateRotation } = usePreferences();
-  const [status, setStatus] = useState('');
+  const { message: status } = useSyncExternalStore(watchRotationSchedule, getRotationSchedule, getRotationSchedule);
   const [running, setRunning] = useState(false);
   const [lastResult, setLastResult] = useState('');
   const alive = useRef(true);
+  const rotating = useRef(false);
 
-  useEffect(
-    () => () => {
-      alive.current = false;
-    },
-    [],
-  );
-
-  // The OS registration follows the settings; `syncRotationTask` is idempotent.
   useEffect(() => {
-    let cancelled = false;
-    void syncRotationTask(rotation).then((result) => {
-      if (!cancelled && alive.current) setStatus(result.message);
-    });
-    return () => {
-      cancelled = true;
-    };
-    // Only the properties the scheduler cares about – not `lastRunAt` (that would loop).
-  }, [rotation, rotation.enabled, rotation.intervalMinutes]);
+    alive.current = true;
+    return () => { alive.current = false; };
+  }, []);
 
   const rotateNow = useCallback(async () => {
+    if (rotating.current) return;
+    rotating.current = true;
     setRunning(true);
     setLastResult('');
     try {
-      const result = await runRotationOnce({ force: true, settings: { ...rotation, enabled: true } });
+      const result = await runRotationOnce({ force: true, settings: rotation });
       if (!alive.current) return;
       setLastResult(result.message);
       // Reflect the bookkeeping the run wrote (last run, counter) in the UI.
-      if (result.status === 'applied') {
-        updateRotation({
-          lastRunAt: Date.now(),
-          lastWallpaperId: result.wallpaperId ?? rotation.lastWallpaperId,
-          runCount: rotation.runCount + 1,
-          lastRunError: '',
-        });
+      if (result.status === 'applied' && result.bookkeeping) {
+        updateRotation(result.bookkeeping);
       } else if (result.status === 'failed') {
         updateRotation({ lastRunError: result.message });
       }
+    } catch {
+      if (alive.current) setLastResult('Rotation could not finish. Check device storage and retry.');
     } finally {
+      rotating.current = false;
       if (alive.current) setRunning(false);
     }
   }, [rotation, updateRotation]);
@@ -75,15 +63,14 @@ export function useRotation(): RotationController {
   const setEnabled = useCallback(
     async (enabled: boolean) => {
       updateRotation({ enabled });
-      const result = await syncRotationTask({ ...rotation, enabled });
-      if (alive.current) setStatus(result.message);
+      // The root scheduler is the owner; never register twice here.
     },
-    [rotation, updateRotation],
+    [updateRotation],
   );
 
   return {
     settings: rotation,
-    supported: getCapabilities().canRotateAutomatically,
+    supported: getCapabilities().canRotateAutomatically && nativeSetterSupported(),
     status,
     running,
     lastResult,

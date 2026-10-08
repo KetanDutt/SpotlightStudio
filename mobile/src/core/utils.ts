@@ -15,6 +15,8 @@ import type {
   Wallpaper,
 } from './types';
 
+import { validFavoriteKey } from './storage-utils';
+
 /* ───────────────────────────── constants ───────────────────────────── */
 
 export const HASH_TITLE = /^[0-9a-f]{32,64}$/i;
@@ -238,12 +240,60 @@ export function generatedTitle(item: Pick<Wallpaper, 'tags' | 'raw'>, tagShare: 
   return date ? `Spotlight wallpaper · ${date}` : 'Spotlight wallpaper';
 }
 
+export const MAX_CATALOG_ROWS = 100000;
+
+/** The same validation is used by the UI, disk cache and headless rotation. */
+export function normalizeCatalogRows(value: unknown): RawWallpaper[] {
+  if (!Array.isArray(value)) return [];
+  const ids = new Set<number>();
+  const keys = new Set<string>();
+  const rows: RawWallpaper[] = [];
+  const text = (v: unknown) => typeof v === 'string' ? v : '';
+  const number = (v: unknown) => typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : 0;
+  for (const candidate of value.slice(0, MAX_CATALOG_ROWS)) {
+    if (!candidate || typeof candidate !== 'object') continue;
+    const row = candidate as Record<string, unknown>;
+    if (typeof row.id !== 'number' || !Number.isSafeInteger(row.id) || row.id <= 0 ||
+        !validFavoriteKey(row.filename) || ids.has(row.id) || keys.has(row.filename)) continue;
+    ids.add(row.id);
+    keys.add(row.filename);
+    rows.push({
+      id: row.id, filename: row.filename, title: text(row.title), source: text(row.source),
+      source_url: text(row.source_url), page_url: text(row.page_url), tags: text(row.tags),
+      width: number(row.width), height: number(row.height), file_size: number(row.file_size),
+      date_spotted: text(row.date_spotted), downloaded_at: text(row.downloaded_at), quality: text(row.quality),
+    });
+  }
+  return rows;
+}
+
+/** UTC/day/ID selection mirrored exactly in static/js/core.js. Order and metadata do not matter. */
+export function dailyWallpaper(catalog: Catalog | null, now = new Date()): Wallpaper | undefined {
+  if (!catalog?.items.length || !Number.isFinite(now.getTime())) return undefined;
+  const day = now.toISOString().slice(0, 10);
+  let pick: Wallpaper | undefined;
+  let best = -1;
+  for (const item of catalog.items) {
+    const key = `${day}|${item.id}`;
+    let hash = 2166136261;
+    for (let i = 0; i < key.length; i++) hash = Math.imul(hash ^ key.charCodeAt(i), 16777619);
+    hash = Math.imul(hash ^ (hash >>> 16), 0x7feb352d);
+    hash = Math.imul(hash ^ (hash >>> 15), 0x846ca68b);
+    const score = (hash ^ (hash >>> 16)) >>> 0;
+    if (score > best || (score === best && item.id < (pick?.id ?? Infinity))) {
+      best = score;
+      pick = item;
+    }
+  }
+  return pick;
+}
+
 /**
  * Turn raw catalog rows into the view model used by the UI.
  * Raw rows are never mutated, so exports stay faithful to the source data.
  */
 export function buildCatalog(rawItems: unknown): Catalog {
-  const rows: RawWallpaper[] = Array.isArray(rawItems) ? (rawItems as RawWallpaper[]) : [];
+  const rows = normalizeCatalogRows(rawItems);
   const tagCount = new Map<string, number>();
   const items: Wallpaper[] = new Array(rows.length);
 
@@ -270,8 +320,8 @@ export function buildCatalog(rawItems: unknown): Catalog {
   const tagShare = new Map<string, number>();
   for (const [tag, count] of tagCount) tagShare.set(tag, count / total);
 
-  const qualityCounts: Record<string, number> = {};
-  const sourceCounts: Record<string, number> = {};
+  const qualityCounts: Record<string, number> = Object.create(null);
+  const sourceCounts: Record<string, number> = Object.create(null);
   let newestAdded = 0;
 
   for (const item of items) {

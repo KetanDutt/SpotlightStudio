@@ -1,63 +1,74 @@
-# Spotlight Studio — mobile app
+# Spotlight Studio — native app 1.2.0
 
-The Expo (React Native) client for the Spotlight Studio wallpaper library: browse and search
-the same catalog as the web gallery, keep favourites and history on the device, download
-wallpapers, **set them on Android** (home / lock / both) and rotate them in the background.
-On iOS the app saves pictures to a “Spotlight Studio” album and walks you through the
-Shortcuts step, because iOS has no public API to set the wallpaper.
+Expo SDK 57 / React Native client for the same Spotlight wallpaper catalog and Still Glass design.
+Browse/search offline, discover a UTC daily image, keep local favorites/history, back up favorites,
+export the catalog, save/share validated images and apply/rotate wallpapers on Android. iOS saves
+explicitly to Photos for manual application; it cannot directly set wallpaper.
 
-Full guide: [../docs/MOBILE.md](../docs/MOBILE.md).
+**Implementation and JS/config checks are complete; store release is still gated.**
+See [native release evidence](../docs/NATIVE_RELEASE.md) and the [full mobile guide](../docs/MOBILE.md).
 
-## Quick start
+## Development
 
-```bash
-npm ci                # exact dependency versions
-npm start             # Metro bundler (Expo Go)
-npm run android       # dev build with the native wallpaper module
-npm run ios           # same, on a Mac
-npm run verify        # typecheck + lint + tests
-```
-
-Requirements: **Node ≥ 20**, plus Android Studio (JDK 17) for `npm run android` or Xcode 16+
-for `npm run ios`. Cloud builds need only an EAS account:
+Use supported Node 22.13+ LTS (22.22.3 tested), JDK 17/Android SDK or compatible Xcode on macOS.
 
 ```bash
-npx eas-cli init                                  # once: links the project to your account
-npx eas-cli build --platform android --profile production
+npm ci
+APP_VARIANT=development npm start
+APP_VARIANT=development npm run android
+APP_VARIANT=development npm run ios       # macOS
+npm run verify                          # types, lint, 207 tests
+npm run test:ci                          # coverage
 ```
 
-## Scripts
+Use PowerShell environment syntax on Windows. Expo Go/web support browsing; full-image actions
+require the custom native bridge **0.3.0**. Native changes need a new binary. Development has separate
+`.dev` app IDs and `spotlightstudiodev` scheme, leaving a store installation intact.
 
-| Script | What it does |
+## 1.2 hardening
+
+- Private-cache JPEG/PNG/WebP native validation, bounded decoding and serialized Android writes.
+- Originals/partials: **256 MiB** quota; exports: **64 MiB** quota; free-disk checks, eviction,
+  stale-file cleanup, active-consumer pins and per-image leases.
+- Add-only Photos, no consent widening, no broad Android gallery-read permissions; Android apply
+  failures never silently save. iOS normally saves to Recent, not a mandatory app album.
+- Cancel/key-change cleanup, truthful unabortable system completion, root-owned rotation with
+  fresh plan/favorite checks, manual priority and confirmed scheduler state.
+- Outer provider-independent render recovery, 8-second splash watchdog, immediate reset reload,
+  race-safe preference clearing and StrictMode-safe theme writes.
+- HTTPS-only preview/production, narrower manifests/privacy declarations, offline privacy screen,
+  profile/config validation, release audit gate and Kotlin/Swift CI compilation jobs.
+
+## Configuration and scripts
+
+Copy `.env.example` to `.env.local` for development; all `EXPO_PUBLIC_*` values are public, not secrets.
+
+| Setting | Default |
 |---|---|
-| `npm start` / `npm run web` | Metro bundler (native / browser) |
-| `npm run android` · `npm run ios` | Prebuild and install a development build |
-| `npm run prebuild` | Generate the native projects (`android/`, `ios/` — git-ignored) |
-| `npm run build:android[:debug]` | Local Gradle release/debug build (needs the Android SDK) |
-| `npm run typecheck` | `tsc --noEmit` |
-| `npm run lint` | `eslint . --max-warnings 0` |
-| `npm test` · `npm run test:ci` | Jest (the second one with coverage and CI settings) |
-| `npm run verify` | typecheck + lint + tests — the gate used by CI |
-| `node scripts/sync-catalog.mjs` | Refresh the offline copy in `src/data/catalog.json` from `../data/wallpapers.json` |
+| `APP_VARIANT` | `production`; explicit `development` permits HTTP test networking |
+| `EXPO_PUBLIC_CATALOG_URL` | Repository catalog on GitHub |
+| `EXPO_PUBLIC_API_URL` | Empty; optional configured server |
+| `EXPO_PUBLIC_IMAGE_BASE` | API base when configured; otherwise GitHub `blob/main` |
 
-## Configuration
+Preview/production reject HTTP, credentials and invalid URL bases. Native clients need a
+phone-reachable host, never an assumed localhost backend. See the guide for trusted LAN/read-only use.
 
-Copy `.env.example` to `.env.local` (or set the variables in your EAS build profile) to
-point the app at your own catalog or server:
-
-| Variable | Default |
+| Command | Purpose |
 |---|---|
-| `EXPO_PUBLIC_CATALOG_URL` | this repository's `data/wallpapers.json` on GitHub |
-| `EXPO_PUBLIC_IMAGE_BASE` | this repository's `blob/main` image base on GitHub |
-| `EXPO_PUBLIC_API_URL` | *(empty)* — set it to your Spotlight Studio server for live data |
+| `npm run verify` | TypeScript, ESLint, deterministic Jest tests |
+| `npm run verify:config` | Resolved production manifests/permissions/versions/HTTPS policy |
+| `npm run verify:release` | JS/config plus high-severity npm audit; currently blocked by inherited advisories |
+| `npm run prebuild` | Generate ignored Android/iOS projects; does not compile them |
+| `npm run build:android[:debug]` | Local Gradle smoke build; not a certified/signed store artifact |
+| `npx expo export --platform all` | Web and native JS/Hermes bundling |
+| `node scripts/sync-catalog.mjs` | Deliberately refresh bundled catalog; verification never mutates the archive |
 
-## Where to look
+EAS profiles: development, HTTPS-only preview, iOS simulator, production. The post-install hook
+validates policy and **does not waive production audit failures**. Link your own EAS project and
+manage signing through store tooling; no credentials are committed.
 
-| | |
-|---|---|
-| `app/` | Routes (expo-router): gallery, search, directory, tags, detail, about, settings |
-| `src/core/` | Pure logic ported from `static/js/core.js` (filters, titles, quality classes) |
-| `src/services/` | Download, save, share, apply wallpaper, rotation, catalog export, storage |
-| `modules/wallpaper/` | The Expo Module bridging to Android's `WallpaperManager` |
-| `tests/` | Jest suites and the platform doubles |
-| `../docs/MOBILE.md` | The complete guide (builds, stores, rotation, troubleshooting) |
+Current evidence: **207 Jest tests**, types/lint/Expo compatibility clean, web/Android/iOS exports,
+both-platform prebuild and native autolinking pass. Native compiler/device/signing gates are pending;
+**55 affected npm packages (48 high / 7 moderate)** inherit three advisory families. The newly added
+native CI jobs have not been run here. Rights, real image/LFS serving and approved store/privacy
+metadata also require review. Read [../docs/NATIVE_RELEASE.md](../docs/NATIVE_RELEASE.md) before shipping.

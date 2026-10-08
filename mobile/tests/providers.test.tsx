@@ -203,3 +203,48 @@ describe('ThemeProvider', () => {
     await waitFor(() => expect(screen.getByTestId('child')).toBeTruthy());
   });
 });
+
+function PreferenceRegressionProbe() {
+  const { favorites, toggleFavorite, mergeFavorites, addHistory, history, storageError } = usePreferences();
+  return <View>
+    <Text testID="regression-favorites">{JSON.stringify([...favorites])}</Text>
+    <Text testID="regression-history">{JSON.stringify(history)}</Text>
+    <Text testID="regression-error">{storageError || ''}</Text>
+    <Text testID="regression-actions" onPress={() => {
+      const first = toggleFavorite('peapix/one.jpg');
+      const second = toggleFavorite('peapix/one.jpg');
+      if (first !== true || second !== false) throw new Error('stale toggle result');
+      mergeFavorites(['future/unknown.jpg']);
+      addHistory(101, 'save');
+      addHistory(102, 'share');
+    }}>Act</Text>
+  </View>;
+}
+
+it('StrictMode preferences return accurate same-tick toggles and do not duplicate history writes', async () => {
+  await render(<React.StrictMode><PreferencesProvider><PreferenceRegressionProbe /></PreferencesProvider></React.StrictMode>);
+  await waitFor(() => expect(screen.getByTestId('regression-actions')).toBeTruthy());
+  await act(async () => { screen.getByTestId('regression-actions').props.onPress(); });
+  expect(screen.getByTestId('regression-favorites').props.children).toBe('["future/unknown.jpg"]');
+  expect(JSON.parse(screen.getByTestId('regression-history').props.children).map((row: { id: number }) => row.id)).toEqual([102, 101]);
+});
+
+it('invalid stored history is dropped and failed preference persistence is visible', async () => {
+  await AsyncStorage.setItem(KEYS.history, JSON.stringify([{ id: 101, action: 'made-up', at: 1 }, { id: 102, action: 'save', at: 1e99 }]));
+  await render(<PreferencesProvider><PreferenceRegressionProbe /></PreferencesProvider>);
+  await waitFor(() => expect(screen.getByTestId('regression-actions')).toBeTruthy());
+  expect(screen.getByTestId('regression-history').props.children).toBe('[]');
+  const implementation = jest.mocked(AsyncStorage.setItem).getMockImplementation()!;
+  jest.mocked(AsyncStorage.setItem).mockRejectedValue(new Error('disk full'));
+  try {
+    await act(async () => { screen.getByTestId('regression-actions').props.onPress(); });
+    await waitFor(() => expect(screen.getByTestId('regression-error').props.children).toContain('could not be saved'));
+  } finally { jest.mocked(AsyncStorage.setItem).mockImplementation(implementation); }
+});
+
+it('intentionally empty network catalogs stay empty instead of showing the bundled library', async () => {
+  mockFetchOnce([]);
+  await render(<CatalogProvider><CatalogProbe /></CatalogProvider>);
+  await waitFor(() => expect(screen.getByTestId('origin').props.children).toBe('remote'));
+  expect(screen.getByTestId('count').props.children).toBe('0');
+});

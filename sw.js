@@ -11,9 +11,11 @@
  */
 "use strict";
 
-const VERSION = "2.4.0";
-const SHELL_CACHE = `spotlight-shell-${VERSION}`;
-const DATA_CACHE = "spotlight-data-v1"; // survives app updates: it is the offline copy of the catalog
+const VERSION = "2.5.0";
+const SCOPE_KEY = encodeURIComponent(new URL(self.registration.scope).pathname);
+const SHELL_PREFIX = `spotlight-shell-${SCOPE_KEY}-`;
+const SHELL_CACHE = `${SHELL_PREFIX}${VERSION}`;
+const DATA_CACHE = `spotlight-data-${SCOPE_KEY}-v1`; // survives app updates, isolated from other galleries
 
 const SHELL = [
   "./",
@@ -33,8 +35,11 @@ const SHELL = [
 self.addEventListener("install", (event) => {
   event.waitUntil((async () => {
     const cache = await caches.open(SHELL_CACHE);
-    // allSettled: one missing optional asset must not make the whole install fail.
-    await Promise.allSettled(SHELL.map((url) => cache.add(new Request(url, { cache: "reload" }))));
+    const requests = SHELL.map((url) => new Request(new URL(url, self.registration.scope), { cache: "reload" }));
+    // Do not replace a working offline app with a half-installed shell. Icons
+    // are optional; HTML, CSS and scripts (the first eight entries) are not.
+    await cache.addAll(requests.slice(0, 8));
+    await Promise.allSettled(requests.slice(8).map((request) => cache.add(request)));
     await self.skipWaiting();
   })());
 });
@@ -42,10 +47,27 @@ self.addEventListener("install", (event) => {
 self.addEventListener("activate", (event) => {
   event.waitUntil((async () => {
     for (const key of await caches.keys()) {
-      const outdatedShell = key.startsWith("spotlight-shell-") && key !== SHELL_CACHE;
-      const legacy = key.startsWith("spotlight-studio-"); // cache names used before v2.2
-      if (outdatedShell || legacy) await caches.delete(key);
+      const outdatedShell = key.startsWith(SHELL_PREFIX) && key !== SHELL_CACHE;
+      if (outdatedShell) await caches.delete(key);
     }
+    // Retain the previous offline catalog when upgrading from unscoped caches.
+    // Copy only this scope's URL and leave other galleries' legacy data alone.
+    try {
+      const catalogUrl = new URL("data/wallpapers.json", self.registration.scope).href;
+      const cache = await caches.open(DATA_CACHE);
+      if (!await cache.match(catalogUrl)) {
+        const old = await caches.match(catalogUrl);
+        if (old) await safePut(cache, catalogUrl, old);
+        else {
+          // The first page often fetched its catalog before this worker took
+          // control. Seed it now so offline works after ONE successful visit.
+          const response = await fetch(new Request(catalogUrl, { cache: "no-cache" }));
+          if (response.ok && (response.headers.get("content-type") || "").includes("application/json")) {
+            await safePut(cache, catalogUrl, response);
+          }
+        }
+      }
+    } catch (_) { /* cache storage can be unavailable */ }
     await self.clients.claim();
   })());
 });
@@ -54,31 +76,39 @@ async function safePut(cache, key, response) {
   try { await cache.put(key, response); } catch (_) { /* quota/private mode: network still works */ }
 }
 
+async function openCache(name) {
+  try { return await caches.open(name); } catch (_) { return null; }
+}
+
+async function cachedMatch(cache, key) {
+  try { return cache ? await cache.match(key) : null; } catch (_) { return null; }
+}
+
 async function networkFirst(request, cacheName, fallbackKey) {
-  const cache = await caches.open(cacheName);
+  const cache = await openCache(cacheName);
   try {
     const response = await fetch(request);
-    if (response && response.ok) await safePut(cache, fallbackKey || request, response.clone());
+    if (cache && response?.ok) await safePut(cache, fallbackKey || request, response.clone());
     // A transient server outage should not hide a usable offline catalog/shell.
     if (response && response.status >= 500) {
-      const cached = await cache.match(fallbackKey || request);
+      const cached = await cachedMatch(cache, fallbackKey || request);
       if (cached) return cached;
     }
     return response;
   } catch (err) {
-    const cached = await cache.match(fallbackKey || request);
+    const cached = await cachedMatch(cache, fallbackKey || request);
     if (cached) return cached;
     throw err;
   }
 }
 
 async function cacheFirst(request) {
-  const cached = await caches.match(request);
+  const cached = await cachedMatch(caches, request);
   if (cached) return cached;
   const response = await fetch(request);
   if (response && response.ok && response.type === "basic") {
-    const cache = await caches.open(SHELL_CACHE);
-    await safePut(cache, request, response.clone());
+    const cache = await openCache(SHELL_CACHE);
+    if (cache) await safePut(cache, request, response.clone());
   }
   return response;
 }
@@ -87,15 +117,19 @@ self.addEventListener("fetch", (event) => {
   const request = event.request;
   if (request.method !== "GET") return;
   const url = new URL(request.url);
-  if (url.origin !== self.location.origin) return;
+  if (url.origin !== self.location.origin || !url.href.startsWith(self.registration.scope)) return;
   if (url.pathname.startsWith("/api/") || url.pathname.includes("/images/") || url.pathname.endsWith("/sw.js")) return;
 
-  if (url.pathname.endsWith("/data/wallpapers.json")) {
-    event.respondWith(networkFirst(request, DATA_CACHE));
-  } else if (request.mode === "navigate") {
+  const catalogUrl = new URL("data/wallpapers.json", self.registration.scope);
+  const indexUrl = new URL("index.html", self.registration.scope);
+  if (url.pathname === catalogUrl.pathname && !url.search) {
+    event.respondWith(networkFirst(request, DATA_CACHE, catalogUrl.href));
+  } else if (request.mode === "navigate" &&
+      (url.pathname === new URL(self.registration.scope).pathname || url.pathname === indexUrl.pathname)) {
     // One canonical cached document, whatever the ?query / #hash of the visited URL.
     event.respondWith(
-      networkFirst(request, SHELL_CACHE, "index.html").catch(async () => (await caches.match("./")) || Response.error())
+      networkFirst(request, SHELL_CACHE, indexUrl.href).catch(async () =>
+        (await cachedMatch(caches, self.registration.scope)) || Response.error())
     );
   } else if (SHELL.some((path) => new URL(path, self.registration.scope).href === url.href)) {
     // Never cache arbitrary query URLs: that creates an unbounded storage sink.

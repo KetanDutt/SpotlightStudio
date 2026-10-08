@@ -16,6 +16,7 @@ Maintenance  ``/api/library/check``  ``/api/maintenance/{dedupe,thumbnails}``
 """
 from __future__ import annotations
 
+import asyncio
 import csv
 import hashlib
 import io
@@ -62,6 +63,7 @@ from src.database import (
 )
 from src.downloader import shutdown_cpu_pool
 from src.engine import DownloadEngine, EngineBusy, engine
+from src.locking import LibraryLock
 from src.security import (
     HostCheckMiddleware,
     OriginCheckMiddleware,
@@ -232,18 +234,30 @@ def create_app(cfg: Settings = settings, eng: DownloadEngine = engine) -> FastAP
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
-        maintenance.startup_tasks()
-        if not cfg.is_loopback_host and not cfg.READ_ONLY:
-            log.warning(
-                "The server listens on %s without authentication. Anyone who can reach this "
-                "port can control the crawler. Use READ_ONLY for a public gallery, or restrict access "
-                "with an authenticated reverse proxy/firewall. ALLOWED_HOSTS is not authentication.",
-                cfg.HOST,
-            )
-        yield
-        eng.shutdown(timeout=20)
-        shutdown_cpu_pool()
-        close_connection()
+        # Acquire before migrations/claim recovery, even on a READ_ONLY HTTP server:
+        # startup still writes state and this process owns the crawler's queues.
+        # Storage/engine helpers intentionally use process-wide settings. Refuse a
+        # factory config that would lock/serve one library but mutate another.
+        if any(getattr(cfg, name).resolve() != getattr(settings, name).resolve()
+               for name in ("DB_PATH", "CATALOG_PATH", "IMAGES_DIR")):
+            raise RuntimeError("Library paths must match src.config.settings; use a separate process for each library.")
+        with LibraryLock(settings.DB_PATH):
+            try:
+                maintenance.startup_tasks()
+                if not cfg.is_loopback_host and not cfg.READ_ONLY:
+                    log.warning(
+                        "The server listens on %s without authentication. Anyone who can reach this "
+                        "port can control the crawler. Use READ_ONLY for a public gallery, or restrict access "
+                        "with an authenticated reverse proxy/firewall. ALLOWED_HOSTS is not authentication.",
+                        cfg.HOST,
+                    )
+                yield
+            finally:
+                if not await asyncio.to_thread(eng.shutdown, timeout=20):
+                    log.warning("Waiting for in-flight library work before releasing ownership…")
+                    await asyncio.to_thread(eng.wait)
+                await asyncio.to_thread(shutdown_cpu_pool, wait=True)
+                close_connection()
 
     app = FastAPI(
         title="Spotlight Studio API",

@@ -1,4 +1,5 @@
 """Hermetic browser-test server. Uses disposable synthetic images, never the real DB."""
+import shutil
 import sys
 import tempfile
 from pathlib import Path
@@ -33,4 +34,21 @@ if __name__ == "__main__":
                 source="peapix", source_url="", page_url="", width=640, height=360,
                 file_size=len(data), tags="fixture", date_spotted="2026-10-07",
             ))
-        uvicorn.run(create_app(settings, DownloadEngine()), host="0.0.0.0", port=8877)
+        # A separate allow-listed, static-only mount exercises real PWA installs.
+        # No DB/source/logs are copied or served; the library stays disposable.
+        database.export_catalog_json()
+        site = root / "site"
+        site.mkdir()
+        project = Path(__file__).resolve().parents[2]
+        html = (project / "index.html").read_text()
+        (site / "index.html").write_text(html)
+        for name in ("sw.js", "manifest.webmanifest"):
+            shutil.copy2(project / name, site / name)
+        for folder in ("css", "js", "icons"):
+            shutil.copytree(project / "static" / folder, site / "static" / folder)
+        (site / "data").mkdir()
+        shutil.copy2(settings.CATALOG_PATH, site / "data" / "wallpapers.json")
+        from starlette.staticfiles import StaticFiles
+        app = create_app(settings, DownloadEngine())
+        app.mount("/showcase", StaticFiles(directory=site, html=True), name="static-showcase")
+        uvicorn.run(app, host="0.0.0.0", port=8877)
