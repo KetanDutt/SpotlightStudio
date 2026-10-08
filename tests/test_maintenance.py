@@ -143,3 +143,57 @@ def test_storage_helpers(env):
     img.save(buf, "JPEG")
     assert dhash_hex(img) == "0" * 64 and random.random() >= 0
     assert storage.count_lfs_pointers() == (0, 0)
+
+
+def test_dedupe_db_failure_rolls_back_before_any_file_is_deleted(env, monkeypatch):
+    import pytest
+
+    base = random_phash()
+    keeper = add_wallpaper_with_files(phash=base, tags="keeper", width=1280, height=720)
+    victim = add_wallpaper_with_files(phash=_near(base), tags="victim")
+    signature = db.library_signature()
+
+    def fail(*_args):
+        raise RuntimeError("injected DB failure after deletion")
+
+    monkeypatch.setattr(maintenance, "increment_stat", fail)
+    with pytest.raises(RuntimeError, match="injected DB failure"):
+        maintenance.deduplicate_downloaded_wallpapers()
+    assert db.library_signature() == signature
+    assert db.get_wallpaper(keeper["id"])["tags"] == "keeper"
+    assert db.get_wallpaper(victim["id"]) is not None
+    assert not db.is_url_suppressed(victim["source_url"])
+    for row in (keeper, victim):
+        assert storage.image_path(row["filename"]).is_file()
+        assert storage.thumb_path(row["filename"]).is_file()
+
+
+def test_dedupe_never_keeps_missing_bytes_instead_of_a_real_original(env):
+    base = random_phash()
+    absent = add_wallpaper(phash=base, width=3840, height=2160)
+    real = add_wallpaper_with_files(phash=_near(base), width=640, height=360)
+    assert maintenance.deduplicate_downloaded_wallpapers() == 1
+    assert db.get_wallpaper(real["id"]) is not None
+    assert db.get_wallpaper(absent["id"]) is None
+    assert storage.image_path(real["filename"]).is_file()
+
+
+def test_dedupe_does_not_delete_a_shared_image_file(env):
+    base = random_phash()
+    good = add_wallpaper_with_files(phash=base, filename="peapix/shared.jpg", width=1280, height=720)
+    add_wallpaper(phash=_near(base), filename=good["filename"], width=640, height=360)
+    assert maintenance.deduplicate_downloaded_wallpapers() == 1
+    assert storage.image_path(good["filename"]).is_file()
+    assert storage.thumb_path(good["filename"]).is_file()
+
+
+def test_lfs_thumbnail_is_reported_and_rebuilt_from_real_original(env):
+    row = add_wallpaper_with_files()
+    thumb = storage.thumb_path(row["filename"])
+    thumb.write_text("version https://git-lfs.github.com/spec/v1\noid sha256:00\nsize 1\n")
+    report = maintenance.verify_library()
+    assert not report["ok"] and report["lfs_thumbnail_count"] == 1
+    assert report["missing_thumbnails_count"] == 1
+    assert maintenance.create_missing_thumbnails() == 1
+    assert not storage.is_lfs_pointer(thumb)
+    assert maintenance.verify_library()["ok"]

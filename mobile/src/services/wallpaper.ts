@@ -4,16 +4,17 @@
  * Android  : the bundled native module calls `WallpaperManager` and can address the home
  *            screen, the lock screen or both.
  * iOS      : Apple does not allow third-party apps to change the wallpaper.  The honest
- *            behaviour is to save the image to the Photos library, open the album and tell
+ *            behaviour is to save the image to the Photos library and tell
  *            the user how to finish with the Shortcuts "Set Wallpaper" action.
  *
- * Every platform therefore ends up doing *something useful*; the UI only renders the result.
+ * Unsupported Android/native failures are explicit errors, not implicit Photos saves.
  */
 import { nativeWallpaper } from '../modules/wallpaper';
 import { getCapabilities } from '../core/platform';
 import type { Wallpaper, WallpaperMode } from '../core/types';
 import type { MediaResult } from './media';
-import { downloadWallpaper, saveToLibrary } from './media';
+import { withDownloadedWallpaper, saveToLibrary } from './media';
+import { beginManualWallpaperIntent, nativeSetterSupported, setNativeWallpaper } from './wallpaper-controller';
 
 export type ApplyStatus = 'applied' | 'saved';
 
@@ -22,7 +23,7 @@ export interface ApplyOutcome {
   /** What actually happened on the device (may differ from the request on old Androids). */
   mode: WallpaperMode;
   /** Why the image could not be applied directly (only for `status: 'saved'`). */
-  reason?: 'unsupported-platform' | 'native-unavailable' | 'native-error';
+  reason?: 'unsupported-platform';
   message: string;
 }
 
@@ -43,98 +44,37 @@ export function availableModes(): WallpaperMode[] {
   }
 }
 
-function fallbackMessage(reason: 'unsupported-platform' | 'native-unavailable' | 'native-error'): string {
-  if (reason === 'unsupported-platform') {
-    return 'Saved to your photo library. iOS does not allow apps to set the wallpaper directly – open it in Photos (or the Shortcuts “Set Wallpaper” action) to finish.';
-  }
-  if (reason === 'native-unavailable') {
-    return 'Saved to your photo library. Wallpapers can be applied directly in the Android build of this app – open it from a “Set as wallpaper” action in your Gallery for now.';
-  }
-  return 'Saved to your photo library. The system refused to set the wallpaper directly, so finish from the Gallery app.';
-}
-
 export interface ApplyOptions {
-  /** Progress callback for the (possibly several hundred megabyte) download. */
   onProgress?: (received: number, total: number) => void;
-  /** Stop a download when the user leaves the screen. */
   signal?: AbortSignal;
 }
 
-/**
- * Apply a wallpaper.  Returns `applied` on Android (native path) and `saved` when the
- * device cannot set it – in both cases the picture is on the device afterwards.
- */
-export async function applyWallpaper(
-  item: Wallpaper,
-  mode: WallpaperMode,
-  options: ApplyOptions = {},
-): Promise<MediaResult<ApplyOutcome>> {
-  const reason = !getCapabilities().canSetWallpaper
-    ? ('unsupported-platform' as const)
-    : nativeWallpaper
-      ? null
-      : ('native-unavailable' as const);
-
-  if (reason === null && nativeWallpaper) {
-    try {
-      const supported = nativeWallpaper.isSupported();
-      if (!supported) {
-        const saved = await saveToLibrary(item);
-        if (!saved.ok) return saved;
-        return {
-          ok: true,
-          value: { status: 'saved', mode, reason: 'native-error', message: fallbackMessage('native-error') },
-        };
-      }
-
-      const effectiveMode: WallpaperMode =
-        mode !== 'home' && !nativeWallpaper.supportsSeparateLockScreen() ? 'home' : mode;
-
-      const downloaded = await downloadWallpaper(item, {
-        onProgress: options.onProgress,
-        signal: options.signal,
-      });
-      if (!downloaded.ok) return downloaded;
-
-      const result = await nativeWallpaper.setWallpaper(downloaded.value.uri, effectiveMode);
-      return {
-        ok: true,
-        value: {
-          status: 'applied',
-          mode: effectiveMode,
-          message:
-            result?.target && result.target !== effectiveMode
-              ? `Applied to ${describeMode(result.target as WallpaperMode).toLowerCase()}.`
-              : `Applied to ${describeMode(effectiveMode).toLowerCase()}.`,
-        },
-      };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      const saved = await saveToLibrary(item);
-      if (!saved.ok) return { ok: false, error: `${message} – and saving it also failed: ${saved.error}` };
-      return {
-        ok: true,
-        value: { status: 'saved', mode, reason: 'native-error', message: fallbackMessage('native-error') },
-      };
-    }
+/** Apply is explicit. An Android failure never requests Photos consent or saves silently. */
+export async function applyWallpaper(item: Wallpaper, mode: WallpaperMode, options: ApplyOptions = {}): Promise<MediaResult<ApplyOutcome>> {
+  if (options.signal?.aborted) return { ok: false, error: 'Wallpaper action canceled.' };
+  if (!getCapabilities().canSetWallpaper) {
+    if (!getCapabilities().canSaveToPhotos) return { ok: false, error: 'Use the native app to save or apply this image.' };
+    const saved = await saveToLibrary(item, options);
+    if (!saved.ok) return saved;
+    return { ok: true, value: { status: 'saved', mode, reason: 'unsupported-platform',
+      message: 'Saved to your photo library. iOS does not allow apps to set the wallpaper directly; finish in Photos, Settings or Shortcuts.' } };
   }
-
-  const saved = await saveToLibrary(item);
-  if (!saved.ok) return saved;
-  return {
-    ok: true,
-    value: {
-      status: 'saved',
-      mode,
-      reason: reason ?? 'unsupported-platform',
-      message: fallbackMessage(reason ?? 'unsupported-platform'),
-    },
-  };
+  if (!nativeWallpaper) return { ok: false, error: 'Wallpaper changes require a development or production Android build. Use Save for the manual Gallery flow.' };
+  if (!nativeSetterSupported()) return { ok: false, error: 'Wallpaper changes are unavailable in this build or restricted by device policy. Use an updated native build; saving to Photos is a separate action.' };
+  const bridge = nativeWallpaper;
+  const intent = beginManualWallpaperIntent();
+  return withDownloadedWallpaper(item, options, async downloaded => {
+    const effectiveMode = mode !== 'home' && !bridge.supportsSeparateLockScreen() ? 'home' : mode;
+    const result = await setNativeWallpaper(downloaded.uri, effectiveMode, { signal: options.signal, intent });
+    const actualMode = result.target as WallpaperMode;
+    return { ok: true, value: { status: 'applied', mode: actualMode,
+      message: `Applied to ${describeMode(actualMode).toLowerCase()}.` } };
+  });
 }
 
 /** Download the full-resolution image *without* touching the wallpaper (used by "Save"). */
-export async function saveWallpaper(item: Wallpaper): Promise<MediaResult<{ uri: string }>> {
-  const saved = await saveToLibrary(item);
+export async function saveWallpaper(item: Wallpaper, options: ApplyOptions = {}): Promise<MediaResult<{ uri: string }>> {
+  const saved = await saveToLibrary(item, options);
   if (!saved.ok) return saved;
   return { ok: true, value: { uri: saved.value.uri } };
 }

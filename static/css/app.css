@@ -542,3 +542,26 @@ body.has-sidebar { overflow: hidden; }
 @media (max-width: 960px) {
   .sidebar.is-open { transition: transform var(--duration-normal) var(--ease); }
 }
+
+/* Daily discovery stays photo-first, without another floating/blurred surface. */
+.daily-spotlight { display: grid; grid-template-columns: minmax(180px, .8fr) minmax(0, 1fr); gap: var(--space-6); margin-bottom: var(--space-6); padding: var(--space-3); border: 1px solid var(--stroke); border-radius: var(--r-lg); background: var(--bg-elev); }
+.daily-photo { display: block; padding: 0; border: 0; border-radius: var(--r-md); background: var(--fill); overflow: hidden; cursor: pointer; aspect-ratio: 16 / 9; align-self: center; }
+.daily-photo img { display: block; width: 100%; height: 100%; object-fit: cover; transition: transform var(--duration-normal) var(--ease); }
+.daily-photo:hover img { transform: scale(1.025); }
+.daily-info { align-self: center; min-width: 0; padding: var(--space-3) var(--space-3) var(--space-3) 0; }
+.daily-info h2 { margin: var(--space-2) 0; font-size: clamp(1.15rem, 2vw, 1.6rem); font-weight: 550; letter-spacing: -.025em; line-height: 1.2; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.daily-meta { margin-bottom: var(--space-3); color: var(--text-2); font-size: var(--type-caption); }
+.daily-actions { display: flex; gap: var(--space-2); margin-top: var(--space-4); flex-wrap: wrap; }
+.daily-actions .btn-icon[aria-pressed="true"] { color: var(--danger); background: var(--danger-fill); }
+.lb-error { position: absolute; display: flex; flex-direction: column; align-items: center; gap: var(--space-3); max-width: min(380px, calc(100% - 80px)); padding: var(--space-5); border: 1px solid var(--stroke-2); border-radius: var(--r-lg); background: var(--bg-elev); box-shadow: var(--shadow-2); text-align: center; }
+.lb-error > span { color: var(--warn); }
+.lb-error p { color: var(--text-2); font-size: var(--type-caption); line-height: 1.5; }
+@media (max-width: 640px) {
+  .daily-spotlight { grid-template-columns: minmax(0, 1fr); gap: var(--space-2); }
+  .daily-photo { max-height: 220px; width: 100%; }
+  .daily-info { padding: var(--space-3); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .daily-photo img { transition: none; }
+  .daily-photo:hover img { transform: none; }
+}

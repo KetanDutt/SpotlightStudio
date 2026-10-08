@@ -2,7 +2,7 @@
  * Chip – the filter/tag pill used across the gallery.  Selected chips use the accent
  * tint; the optional `onRemove` turns it into a removable "active filter" chip.
  */
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import React, { createElement } from 'react';
 import { StyleSheet, View } from 'react-native';
 

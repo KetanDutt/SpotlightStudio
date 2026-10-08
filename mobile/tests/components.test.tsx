@@ -47,7 +47,7 @@ import { SetWallpaperSheet } from '../src/components/wallpaper/SetWallpaperSheet
 import { TagRail } from '../src/components/wallpaper/TagRail';
 import { WallpaperCard } from '../src/components/wallpaper/WallpaperCard';
 import { WallpaperRow } from '../src/components/wallpaper/WallpaperRow';
-import { buildCatalog, downloadFilename } from '../src/core/utils';
+import { buildCatalog } from '../src/core/utils';
 import { PreferencesProvider } from '../src/providers/PreferencesProvider';
 import { ThemeProvider } from '../src/theme/ThemeProvider';
 import { cloneRows } from './fixtures';
@@ -193,7 +193,7 @@ describe('SetWallpaperSheet (Android)', () => {
 
     await waitForCall(native.nativeWallpaper.setWallpaper);
     const [uri, mode] = native.nativeWallpaper.setWallpaper.mock.calls[0] as unknown as [string, string];
-    expect(uri).toContain(`file:///cache/spotlight-studio/wallpapers/${downloadFilename(item)}`);
+    expect(uri).toMatch(/file:\/\/\/cache\/spotlight-studio\/wallpapers\/wallpaper-101-[0-9a-f]+\.jpg$/);
     expect(mode).toBe('home');
   });
 

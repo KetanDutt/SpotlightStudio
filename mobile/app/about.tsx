@@ -1,5 +1,5 @@
 /** About – what the app is, where the wallpapers come from, and how to get the desktop app. */
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { useRouter } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import React from 'react';
@@ -65,7 +65,7 @@ export default function AboutScreen() {
             title="Loaded from"
             subtitle={
               meta.origin === 'local-api'
-                ? `Your Spotlight Studio server (${meta.baseUrl})`
+                ? 'Your configured Spotlight Studio server'
                 : meta.origin === 'remote'
                   ? 'The published catalog bundled with the repository, cached on this device'
                   : meta.origin === 'bundled'
@@ -105,6 +105,8 @@ export default function AboutScreen() {
             onPress={() => open(`${REPO_URL}/tree/main/docs`)}
             divider
           />
+          <Row icon="shield-checkmark-outline" title="Privacy & permissions" subtitle="Readable offline · no account or analytics" divider
+            onPress={() => router.push('/privacy')} />
           <Row
             icon="bug-outline"
             title="Report a problem"

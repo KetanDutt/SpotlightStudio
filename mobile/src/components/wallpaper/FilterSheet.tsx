@@ -2,7 +2,7 @@
  * Filter sheet: source, resolution class, sort order and the active tag.
  * Mirrors the web sidebar so both clients filter identically (same buckets, same order).
  */
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import React from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 

@@ -1,30 +1,32 @@
 /**
  * Settings – appearance, automatic rotation, data & storage, about.
  *
- * The rotation section is the *only* place that talks to the OS scheduler; every change is
+ * The app root owns OS scheduling; this screen changes preferences. Every change is
  * applied immediately (no "save" button) and the resulting state is reported back verbatim,
  * because background execution on Android is at the mercy of the battery optimiser and the
  * user deserves to know exactly what the system will do.
  */
-import { Directory, Paths } from 'expo-file-system';
 import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import React, { useCallback, useState } from 'react';
-import { ScrollView, StyleSheet, View } from 'react-native';
+import { Alert, Platform, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useToast } from '../../src/components/feedback/ToastProvider';
+import { useAppRestart } from '../../src/components/feedback/StartupGate';
+import { cacheUsage, clearAppCache, withCacheMaintenance } from '../../src/services/cache';
 import { AppText } from '../../src/components/ui/AppText';
 import { Button } from '../../src/components/ui/Button';
 import { Chip } from '../../src/components/ui/Chip';
 import { Row, SectionCard, SwitchRow } from '../../src/components/ui/SectionCard';
 import { Segmented } from '../../src/components/ui/Segmented';
 import { ScreenHeader } from '../../src/components/ui/ScreenHeader';
-import { APP_VERSION, GITHUB_OWNER, GITHUB_REPO } from '../../src/core/config';
+import { APP_VERSION, GITHUB_OWNER, GITHUB_REPO, LIMITS } from '../../src/core/config';
 import { CAPABILITIES_NOTE, PLATFORM_COPY, capabilities } from '../../src/core/platform';
 import { describeMode } from '../../src/services/wallpaper';
+import { exportFavorites, importFavorites } from '../../src/services/favorites';
 import { ALBUM_NAME } from '../../src/services/media';
-import { ROTATION_TASK } from '../../src/services/rotation';
+import { ROTATION_DEFAULTS, ROTATION_TASK, syncRotationTask } from '../../src/services/rotation';
 import { fmtBytes, fmtInt, fmtRelative, topTags } from '../../src/core/utils';
 import { navigation, spacing } from '../../src/theme/tokens';
 import { useTheme, type ThemePreference } from '../../src/theme/ThemeProvider';
@@ -33,6 +35,11 @@ import { useCatalog } from '../../src/providers/CatalogProvider';
 import { usePreferences } from '../../src/providers/PreferencesProvider';
 
 import { clearAll } from '../../src/services/storage';
+
+function confirmDestructive(title: string, message: string, action: () => void) {
+  if (Platform.OS === 'web') { if (globalThis.confirm(`${title}\n\n${message}`)) action(); }
+  else Alert.alert(title, message, [{ text: 'Cancel', style: 'cancel' }, { text: title, style: 'destructive', onPress: action }]);
+}
 
 const INTERVALS = [
   { value: 30, label: '30m' },
@@ -48,15 +55,16 @@ export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
   const { show } = useToast();
   const { meta, catalog, refresh, refreshing } = useCatalog();
-  const { favoriteCount, clearFavorites, history, resetRotation } = usePreferences();
+  const { favorites, favoriteCount, clearFavorites, mergeFavorites, history, resetRotation, storageError } = usePreferences();
   const { preference, setPreference } = useTheme();
   const rotation = useRotation();
+  const restart = useAppRestart();
+  const [resetting, setResetting] = useState(false);
   // `Directory.size` is synchronous in expo-file-system, so the cache can be measured
   // lazily instead of keeping an effect around for it.
   const measureCache = useCallback((): number | null => {
     try {
-      const dir = new Directory(Paths.cache, 'spotlight-studio');
-      return dir.exists ? dir.size ?? 0 : 0;
+      return cacheUsage().appBytes;
     } catch {
       return null;
     }
@@ -66,10 +74,10 @@ export default function SettingsScreen() {
 
   const clearCache = useCallback(async () => {
     try {
-      const dir = new Directory(Paths.cache, 'spotlight-studio');
-      if (dir.exists) dir.delete();
-      await Image.clearDiskCache();
-      show({ tone: 'success', message: 'Cached downloads and thumbnails removed.' });
+      clearAppCache();
+      const thumbnailsCleared = await Image.clearDiskCache();
+      show({ tone: thumbnailsCleared === false ? 'warning' : 'success', message: thumbnailsCleared === false
+        ? 'Cached downloads removed. Some thumbnails could not be cleared.' : 'Cached downloads and thumbnails removed. Saved Photos and favorites are kept.' });
     } catch (error) {
       show({ tone: 'error', message: `Could not clear the cache: ${error instanceof Error ? error.message : String(error)}` });
     } finally {
@@ -77,9 +85,25 @@ export default function SettingsScreen() {
     }
   }, [measureCache, show]);
 
+  const resetApp = useCallback(async () => {
+    setResetting(true);
+    try {
+      await withCacheMaintenance(async clear => {
+        const schedule = await syncRotationTask({ ...ROTATION_DEFAULTS, enabled: false });
+        if (schedule.registered || !schedule.confirmed) throw new Error('Could not stop automatic rotation. Disable it first and retry.');
+        clear();
+        if (!await clearAll()) throw new Error('Preferences could not be removed. Your current preferences are still shown; retry before restarting.');
+        restart(); // Reload providers and navigation: no stale in-memory data after reset.
+      });
+    } catch (error) {
+      show({ tone: 'error', title: 'Reset failed', message: error instanceof Error ? error.message : String(error) });
+      void syncRotationTask(rotation.settings);
+    } finally { setResetting(false); setCacheSize(measureCache()); }
+  }, [measureCache, restart, rotation.settings, show]);
+
   const originLabel =
     meta.origin === 'local-api'
-      ? `Local server · ${meta.baseUrl}`
+      ? 'Configured private server'
       : meta.origin === 'remote'
         ? 'Published catalog (cached on this device)'
         : meta.origin === 'bundled'
@@ -124,7 +148,7 @@ export default function SettingsScreen() {
           footer={
             rotation.supported
               ? `Runs in the background as “${ROTATION_TASK}”. The system decides the exact moment – expect it roughly every ${rotation.settings.intervalMinutes} minutes when the phone is idle and not in battery saver.`
-              : PLATFORM_COPY.iosRotationBlocked.body
+              : capabilities.canRotateAutomatically ? rotation.status : PLATFORM_COPY.iosRotationBlocked.body
           }
         >
           {rotation.supported ? (
@@ -217,6 +241,7 @@ export default function SettingsScreen() {
                 subtitle={rotation.running ? 'Working…' : 'Test the setup – applies the next wallpaper immediately'}
                 onPress={() => void rotation.rotateNow()}
                 divider
+                disabled={rotation.running || resetting}
                 testID="rotate-now"
               />
               <Row
@@ -255,9 +280,9 @@ export default function SettingsScreen() {
             </>
           ) : (
             <View style={styles.block}>
-              <AppText variant="subheading">{PLATFORM_COPY.iosRotationBlocked.title}</AppText>
+              <AppText variant="subheading">{capabilities.canRotateAutomatically ? 'Rotation unavailable in this build or device' : PLATFORM_COPY.iosRotationBlocked.title}</AppText>
               <AppText variant="caption" tone="muted">
-                {CAPABILITIES_NOTE}
+                {capabilities.canRotateAutomatically ? rotation.status : CAPABILITIES_NOTE}
               </AppText>
             </View>
           )}
@@ -277,24 +302,27 @@ export default function SettingsScreen() {
             title="Refresh catalog"
             subtitle={meta.loadedAt ? `Last updated ${fmtRelative(new Date(meta.loadedAt).toISOString())}` : 'Not loaded yet'}
             onPress={() => {
-              void refresh().then(() => show({ tone: 'success', message: 'Catalog refreshed.' }));
-              setCacheSize(measureCache());
+              void refresh().then((fresh) => {
+                show({ tone: fresh ? 'success' : 'warning', message: fresh ? 'Catalog refreshed.' : 'Refresh failed. Your offline catalog is still available.' });
+                setCacheSize(measureCache());
+              });
             }}
             value={refreshing ? 'Refreshing…' : undefined}
             divider
-            disabled={refreshing}
+            disabled={refreshing || resetting}
           />
           <Row
             icon="trash-outline"
             title="Clear cached images"
-            subtitle={`Downloaded wallpapers and thumbnails · ${cacheSize == null ? 'unknown' : fmtBytes(cacheSize)}`}
+            subtitle={`App cache: ${cacheSize == null ? 'unknown' : fmtBytes(cacheSize)} · originals capped at ${fmtBytes(LIMITS.wallpaperCacheBytes)}. Thumbnails have a separate SDK cache.`}
+            disabled={resetting}
             onPress={() => void clearCache()}
             divider
           />
           <Row
             icon="albums-outline"
             title="Photo album"
-            subtitle={`Saved pictures go to “${ALBUM_NAME}” in your photo library`}
+            subtitle={Platform.OS === 'ios' ? `Saved to Photos / Recent. “${ALBUM_NAME}” album only with existing full Photos access.` : 'Saved to your gallery. No broad gallery-read permission requested.'}
             divider
           />
           <Row
@@ -304,11 +332,27 @@ export default function SettingsScreen() {
             subtitle="Stored on this device only"
             onPress={() => {
               if (!favoriteCount) return;
-              clearFavorites();
-              show({ message: 'Favourites cleared.' });
+              confirmDestructive('Clear favourites?', 'This removes local favorites. Export a backup first if you want to keep them.', () => {
+                clearFavorites();
+                show({ message: 'Favourites cleared.' });
+              });
             }}
             divider
           />
+          <Row icon="download-outline" title="Back up favourites" subtitle="Portable JSON file · compatible with the web gallery" divider
+            onPress={() => void exportFavorites(favorites).then(result => show(result.ok
+              ? { tone: 'success', message: 'Backup ready. Keep a copy outside the app using the share sheet.' }
+              : { tone: 'error', title: 'Backup failed', message: result.error }))} />
+          <Row icon="cloud-upload-outline" title="Restore favourites" subtitle="Merge a backup without replacing current favourites" divider
+            onPress={() => void importFavorites().then(result => {
+              if (!result.ok) { show({ tone: 'error', title: 'Restore failed', message: result.error }); return; }
+              if (result.value === null) return;
+              try {
+                const added = mergeFavorites(result.value);
+                show({ tone: 'success', message: `${fmtInt(added)} favorites added.` });
+              } catch (error) { show({ tone: 'error', title: 'Restore failed', message: String(error) }); }
+            })} />
+          {storageError ? <View style={styles.block}><AppText variant="caption" tone="warn">{storageError}</AppText></View> : null}
           <Row
             icon="search-outline"
             title="Search the catalog"
@@ -352,25 +396,24 @@ export default function SettingsScreen() {
           <Row
             icon="download-outline"
             title="Favourites and settings are local"
-            subtitle="Nothing is uploaded; the app only ever downloads wallpapers."
+            subtitle="No account or analytics. Sharing sends only what you explicitly choose."
             divider
           />
           <Row
             icon="warning-outline"
-            title="Reset app data"
+            title={resetting ? 'Resetting app data…' : 'Reset app data'}
+            disabled={resetting}
             destructive
             subtitle="Favourites, history, rotation settings and cached catalog"
             onPress={() => {
-              void clearAll().then(() => {
-                show({
-                  tone: 'warning',
-                  title: 'App data cleared',
-                  message: 'Restart the app to start from a clean state.',
-                });
+              confirmDestructive('Reset app data?', 'Favorites, history, settings and the catalog cache will be removed. Back up favorites first. Photos already saved to your library are not deleted.', () => {
+                void resetApp();
               });
             }}
             divider
           />
+          <Row icon="shield-checkmark-outline" title="Privacy & permissions" subtitle="What stays on your device and what contacts a server" divider
+            onPress={() => router.push('/privacy')} />
           <Row icon="code-slash-outline" title="Version" value={APP_VERSION} divider />
           <Row
             icon="phone-portrait-outline"
@@ -378,7 +421,7 @@ export default function SettingsScreen() {
             value={capabilities.name}
             subtitle={
               capabilities.canSetWallpaper
-                ? `Direct “set wallpaper” supported${capabilities.canSetHomeAndLockSeparately ? ' (home, lock or both)' : ''}. Fallback: ${describeMode('home')}.`
+                ? `Android supports ${describeMode('home').toLowerCase()} changes with a native build; device policy may restrict them. Photos saving is a separate action.`
                 : PLATFORM_COPY.iosShortcut.body
             }
             divider

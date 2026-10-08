@@ -170,3 +170,110 @@ test('Still Glass: text and primary-action tokens meet AA contrast in both theme
     for (const { pair, ratio } of ratios) expect(ratio, pair).toBeGreaterThanOrEqual(4.5);
   }
 });
+
+test('daily spotlight is a shared UTC pick with favorites and filter-aware visibility', async ({ page }) => {
+  const errors = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await page.goto('/');
+  await expect(page.locator('#daily-spotlight')).toBeVisible();
+  const expected = await page.evaluate(async () => {
+    const rows = await (await fetch('/api/catalog')).json();
+    return SpotlightCore.dailyWallpaper(SpotlightCore.buildCatalog(rows)).id;
+  });
+  await page.locator('#daily-fav').click();
+  await expect(page.locator('#daily-fav')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('#fav-count')).toHaveText('1');
+  await page.locator('#daily-open').click();
+  await expect(page).toHaveURL(new RegExp(`#w=${expected}$`));
+  await expect(page.locator('#lb-fav')).toHaveAttribute('aria-pressed', 'true');
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#lightbox')).not.toBeVisible();
+  await page.locator('#search').fill('fixture');
+  await expect(page.locator('#daily-spotlight')).toBeHidden();
+  await page.locator('#search-clear').click();
+  await expect(page.locator('#daily-spotlight')).toBeVisible();
+  expect(errors).toEqual([]);
+});
+
+test('viewer shows a persistent image failure and can retry without closing', async ({ page }) => {
+  let blocked = true;
+  await page.route('**/images/peapix/**', route => blocked ? route.abort('failed') : route.continue());
+  await page.goto('/');
+  await expect(page.locator('.card')).toHaveCount(24);
+  await page.locator('.card-main').first().click();
+  await expect(page.locator('#lb-error')).toBeVisible();
+  await expect(page.locator('#lb-error')).toContainText('Check your connection');
+  blocked = false;
+  await page.locator('#lb-retry').click();
+  await expect(page.locator('#lb-error')).toBeHidden();
+  await expect(page.locator('#lb-img')).toBeVisible();
+  expect(await page.locator('#lb-img').evaluate(image => image.complete && image.naturalWidth > 0)).toBe(true);
+});
+
+test('legacy clipboard fallback remains inside the modal viewer', async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true });
+    Object.defineProperty(navigator, 'share', { value: undefined, configurable: true });
+    document.execCommand = command => {
+      window.copyInsideDialog = command === 'copy' && Boolean(document.activeElement.closest('dialog[open]'));
+      return true;
+    };
+  });
+  await page.goto('/');
+  await page.locator('.card-main').first().click();
+  await page.locator('#lb-share').click();
+  await expect(page.locator('#lightbox #toasts')).toContainText('Link copied');
+  expect(await page.evaluate(() => window.copyInsideDialog)).toBe(true);
+});
+
+test('removing a viewer favorite updates the filtered gallery when it closes', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('.card')).toHaveCount(24);
+  await page.locator('.card-fav').nth(0).click();
+  await page.locator('.card-fav').nth(1).click();
+  await page.locator('#btn-favs').click();
+  await expect(page.locator('.card')).toHaveCount(2);
+  await page.locator('.card-main').first().click();
+  await page.locator('#lb-fav').click();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.card')).toHaveCount(1);
+  await expect(page.locator('#fav-count')).toHaveText('1');
+});
+
+test('same-ID metadata changes are rendered on live catalog refresh', async ({ page }) => {
+  let changed = false;
+  await page.route('**/api/catalog', async route => {
+    const response = await route.fetch();
+    const rows = await response.json();
+    if (changed) rows.forEach(row => { row.title = 'Upgraded photograph'; row.width = 1280; row.quality = 'HD'; });
+    await route.fulfill({ response, json: rows });
+  });
+  await page.route('**/api/status', async route => {
+    const response = await route.fetch();
+    const status = await response.json();
+    status.library_signature = changed ? 'metadata-upgraded' : 'initial-metadata';
+    await route.fulfill({ response, json: status });
+  });
+  await page.goto('/');
+  await expect(page.locator('.card')).toHaveCount(24);
+  changed = true;
+  await expect(page.locator('.card-title').first()).toHaveText('Upgraded photograph', { timeout: 10000 });
+});
+
+test('PWA keeps its scoped shell/catalog offline even after visiting the desktop app', async ({ page, context }) => {
+  await page.route('https://github.com/**', route => route.abort());
+  await page.goto('/showcase/?app=web');
+  await expect(page.locator('.card')).toHaveCount(24);
+  await page.evaluate(() => navigator.serviceWorker.ready);
+  await expect.poll(() => page.evaluate(() => Boolean(navigator.serviceWorker.controller))).toBe(true);
+  // Desktop cleanup must not unregister the /showcase/ worker or delete its caches.
+  const desktop = await context.newPage();
+  await desktop.goto('/');
+  await expect(desktop.locator('.card')).toHaveCount(24);
+  await desktop.close();
+  await context.setOffline(true);
+  await page.reload();
+  await expect(page.locator('.card')).toHaveCount(24);
+  await expect(page.locator('#daily-spotlight')).toBeVisible();
+  await expect(page.locator('#offline-banner')).toBeVisible();
+});

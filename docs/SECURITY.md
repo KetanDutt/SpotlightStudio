@@ -68,5 +68,29 @@ A generic static server serving the repository root does not inherit FastAPI's p
 HTML scraping is capped at 8 MiB of decompressed bytes; automatic CPU workers are capped at
 four (explicit concurrency settings can still exhaust constrained hosts).
 
-See [REVIEW.md](REVIEW.md#dependency-audit-2026-10-07) for current audit findings and unresolved
+See [REVIEW.md](REVIEW.md#dependency-audit--2026-10-08) for current audit findings and unresolved
 mobile advisories. Self-hosted Swagger UI attribution/version is recorded alongside its assets.
+
+## Ownership and mobile limits
+
+OS library locks prevent competing application startups before claim recovery; they are
+advisory and local-filesystem only. They do not authorize API callers or protect against
+other tools, aliases/hard links or different DBs sharing image folders. Never bypass a
+live `.db.lock` by deleting it. Static publication now copies exact public files and
+rejects symlinked inputs; do not place secrets in any intentionally public source file.
+
+Mobile production/preview accept only credential-free HTTPS fetch/link URLs and safe relative image keys;
+explicit development builds may use test HTTP.
+invalid UTF-16/prototype-like input is handled defensively. Catalog/provenance, favorites
+and preferences are validated, but AsyncStorage/cache are not encrypted secret stores.
+Limits/cancellation are application safeguards, not universal kernel-level network quotas.
+Native private-path/type/bounds/completeness and bounded decoder checks are stronger than image signatures,
+not a universal codec/memory guarantee. Production manifests block broad gallery-read, camera, microphone,
+location and overlay permissions; iOS has add-only consent and no unused background modes. Managed cache
+quotas/pins and guarded reset protect app-owned data, not every SDK cache or separate JS runtime.
+The offline privacy notice discloses host logs and recipient/OS policies; see [PRIVACY.md](PRIVACY.md).
+Remaining advisories and native/device/signing gates are in [NATIVE_RELEASE.md](NATIVE_RELEASE.md).
+
+Desktop wallpaper support requires a real desktop session: Windows SPI, macOS automation,
+GNOME/Cinnamon gsettings or KDE's plasma helper. Headless services/other desktop environments
+are not certified; unsupported helpers/permissions fail instead of gaining extra privileges.

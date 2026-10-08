@@ -11,6 +11,7 @@
  * ```
  */
 import Constants from 'expo-constants';
+import { validFavoriteKey } from './storage-utils';
 
 const extra = (Constants.expoConfig?.extra ?? {}) as Record<string, unknown>;
 
@@ -29,7 +30,7 @@ const ENV_API_URL = process.env.EXPO_PUBLIC_API_URL;
 
 export const APP_NAME = 'Spotlight Studio';
 export const APP_TAGLINE = 'Windows Spotlight wallpapers for your phone';
-export const APP_VERSION = Constants.expoConfig?.version ?? '1.0.0';
+export const APP_VERSION = Constants.expoConfig?.version ?? '1.2.0';
 export const API_VERSION = Number(extra.apiVersion ?? 1);
 
 /** Owner/repo used to resolve images and the catalog when nothing else is configured. */
@@ -49,24 +50,34 @@ export const GITHUB_CATALOG_URL = clean(
  *
  * `EXPO_PUBLIC_IMAGE_BASE` overrides it (e.g. `http://192.168.0.9:8765` for your own server).
  */
-export const IMAGE_BASE = clean(
-  ENV_IMAGE_BASE,
-  `https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/blob/${GITHUB_BRANCH}`,
-);
-
 /** Optional Spotlight Studio server (must be reachable from the phone/emulator). */
 export const API_BASE = clean(ENV_API_URL, '');
 
-/** http(s) + local-network hosts are fine; the app never fetches `file:` or `content:`. */
+export const IMAGE_BASE = clean(
+  ENV_IMAGE_BASE,
+  API_BASE || `https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/blob/${GITHUB_BRANCH}`,
+);
+
+/** Production is HTTPS-only; explicit development builds may use a local HTTP server. */
 export function isFetchableUrl(url: string): boolean {
-  return /^https?:\/\/[^\s]+$/i.test(url);
+  if (typeof url !== 'string' || /[\s\x00-\x1f\x7f]/.test(url)) return false;
+  try {
+    const parsed = new URL(url);
+    return (parsed.protocol === 'https:' || (__DEV__ && parsed.protocol === 'http:')) && Boolean(parsed.hostname) &&
+      !parsed.username && !parsed.password;
+  } catch {
+    return false;
+  }
 }
 
 /** Remote image URL for a wallpaper row (`thumbs` are ~20× smaller). */
 export function imageUrl(filename: string, thumb = false, base = IMAGE_BASE): string {
-  const path = `images/${thumb ? 'thumbs/' : ''}${filename}`;
-  if (!base) return '';
-  return `${base.replace(/\/+$/, '')}/${path}?raw=true`;
+  if (!validFavoriteKey(filename) || !isFetchableUrl(base)) return '';
+  const path = `images/${thumb ? 'thumbs/' : ''}${filename.split('/').map(encodeURIComponent).join('/')}`;
+  const root = new URL(base);
+  if (root.search || root.hash) return '';
+  const githubBlob = root.hostname === 'github.com' && /\/blob\//.test(root.pathname);
+  return `${base.replace(/\/+$/, '')}/${path}${githubBlob ? '?raw=true' : ''}`;
 }
 
 /** Remote thumbnail URL used by the gallery grid. */
@@ -78,7 +89,7 @@ export const CACHE_POLICY = {
   /** expo-image policy for thumbnails: keep them on disk, they are tiny. */
   thumb: 'disk' as const,
   /** expo-image policy for full images. */
-  full: 'memory-disk' as const,
+  full: 'disk' as const,
   /** Wallpapers are static files – 30 days is a good trade-off for phones on mobile data. */
   catalogMaxAgeMs: 30 * 24 * 60 * 60 * 1000,
 };
@@ -86,8 +97,17 @@ export const CACHE_POLICY = {
 export const LIMITS = {
   /** Hard cap when reading a catalog from the network (the real file is ~4 MB). */
   catalogBytes: 32 * 1024 * 1024,
+  catalogReadDeadlineMs: 3000,
   /** Wallpapers above this size are refused instead of silently filling the phone. */
   maxWallpaperBytes: 40 * 1024 * 1024,
+  /** Prevent a failed/slow transfer from staying live forever. */
+  wallpaperTimeoutMs: 120000,
+  /** App-owned original-image cache, including temporary downloads. */
+  wallpaperCacheBytes: 256 * 1024 * 1024,
+  /** User-generated temporary share files are bounded separately. */
+  exportCacheBytes: 64 * 1024 * 1024,
+  diskSafetyBytes: 16 * 1024 * 1024,
+  partialMaxAgeMs: 24 * 60 * 60 * 1000,
   /** How many history entries are kept. */
   history: 200,
   /** Toast/undo lifetime. */

@@ -4,7 +4,7 @@
  * Screens use these instead of hand-rolled placeholders so a slow network, an empty
  * favourites list and a failed download all look like the same product.
  */
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import React from 'react';
 import { StyleSheet, View } from 'react-native';
 

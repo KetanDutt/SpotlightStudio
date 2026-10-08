@@ -30,7 +30,7 @@ Windows10Spotlight lists most posts under their file name (`dfffe373d9c78e79e0d6
 
 ## Database — `data/wallpapers.db`
 
-SQLite, WAL journal while the app runs (the committed file is in `DELETE` mode; `-wal`/`-shm` are git-ignored). The schema version is stored in `PRAGMA user_version` and upgraded automatically at start-up — **back up the file before upgrading across major versions** (the app never downgrades).
+SQLite, WAL journal while the app runs (the committed file is in `DELETE` mode; `-wal`/`-shm` are git-ignored). The schema version is stored in `PRAGMA user_version` and upgraded automatically at start-up — **back up the stopped DB and images before any schema upgrade** (the app never downgrades).
 
 ### Tables
 
@@ -52,6 +52,7 @@ Indexes: `source`, `source_url`, `page_url`, `downloaded_at`, `date_spotted`, `q
 |---|---|
 | 1 | original schema (≤ 2.1.0) |
 | 2 | `claimed_at` on both queues, `retries` on `scrape_queue`, new indexes, redundant indexes dropped; **data normalisation**: `date_spotted` → ISO, legacy quality labels (`FHD`, `UHD`) → canonical, naive timestamps → UTC-aware, tags → lower-case/unique. Unparseable dates are left untouched — nothing is ever discarded. |
+| 3 | Eight `LOWER(SUBSTR(phash, …))` expression indexes for dHash candidate lookups; no wallpaper rows/files are rewritten. A newer unsupported schema is refused. |
 
 Add a migration by writing `_migrate_to_vN(conn)`, registering it in `_MIGRATIONS` and bumping `SCHEMA_VERSION` in `src/database.py`; `tests/test_database.py::test_migration_from_v1_is_lossless_and_normalises` shows how to test it against a fixture of the old schema.
 
@@ -71,14 +72,25 @@ Add a migration by writing `_migrate_to_vN(conn)`, registering it in `_MIGRATION
 * Files are written to `*.part` and renamed, so a crash never leaves a truncated image.
 * The repository tracks `images/**` with **Git LFS** (`.gitattributes`). Without LFS the files are 130-byte pointers; `python main.py --check` and the UI both report that.
 
-## Browser favorites backup (version 1)
+## Portable browser/mobile favorites backup (version 1)
 
 ```json
 {"format":"spotlight-favorites","version":1,"favorites":["peapix/example.jpg"]}
 ```
 
-Exported from the browser More options menu. Import validates the entire document before
+Exported from the browser More options menu or mobile Settings → Favorites backup. Import validates the entire document before
 merging; existing favorites are never deleted. Relative keys must not contain traversal,
 URL schemes, query/fragment delimiters or control characters. Unknown catalog keys survive
 restore. At most 20,000 keys and a 2 MiB file are accepted. Image files and mobile preferences
-are not included. Browser and mobile export formats are not interchangeable.
+are not included. This favorites format is interchangeable between browser and mobile. Catalog exports are different documents; they cannot be imported as favorites.
+
+## Mobile private catalog cache (version 1)
+
+`cache/spotlight-studio/wallpapers.json` is **not** the public catalog format. It wraps
+`wallpapers` with `format: "spotlight-catalog"`, `version: 1`, `origin: "api" | "remote"`,
+`source` (validated fetch URL), and `savedAt` (milliseconds since epoch). It is staged
+before replacement, limited to 32 MiB / 100,000 rows and checked against build-time source
+settings. An API cache must match the configured `/api/catalog` URL; a remote cache must
+match the published catalog URL. Unknown/future envelopes are ignored, never interpreted
+as the current format. Legacy plain-array caches are usable only without an API configured;
+origin cannot be safely inferred from that array. Cache metadata is private to the device.

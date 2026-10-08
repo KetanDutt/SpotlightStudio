@@ -30,6 +30,7 @@ Schema versions (``PRAGMA user_version``)
 1  original schema
 2  queue claims + retry counters, page_url / title indexes, normalised dates,
    canonical quality labels, tz-aware timestamps
+3  expression indexes for the eight perceptual-hash chunks
 """
 from __future__ import annotations
 
@@ -44,7 +45,7 @@ from pathlib import Path
 from typing import Any
 
 from src.config import settings
-from src.hashing import CHUNK_HEX_LEN, chunk_keys, hamming_hex, is_valid_phash
+from src.hashing import CHUNK_HEX_LEN, CHUNKS, chunk_keys, hamming_hex, is_valid_phash
 from src.utils import (
     atomic_write_bytes,
     canonical_quality,
@@ -59,7 +60,7 @@ from src.utils import (
 
 log = logging.getLogger("database")
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 #: Columns published in the static catalog / ``/api/catalog`` (everything except ``phash``).
 CATALOG_FIELDS: tuple[str, ...] = (
@@ -305,16 +306,34 @@ def _migrate_to_v2(conn: sqlite3.Connection) -> None:
         log.info("Migration v2: normalised %d wallpaper rows.", len(updates))
 
 
-_MIGRATIONS = {2: _migrate_to_v2}
+# Fixed SQL expressions must match the predicates verbatim for SQLite to use
+# expression indexes. Binding the SUBSTR offsets as query parameters forces a scan.
+_HASH_CHUNKS_SQL = tuple(
+    f"LOWER(SUBSTR(phash, {i * CHUNK_HEX_LEN + 1}, {CHUNK_HEX_LEN}))" for i in range(CHUNKS)
+)
+
+
+def _migrate_to_v3(conn: sqlite3.Connection) -> None:
+    """Index candidates, not whole-image distances; no wallpaper data is rewritten."""
+    for i, expression in enumerate(_HASH_CHUNKS_SQL):
+        conn.execute(f"CREATE INDEX IF NOT EXISTS idx_wallpapers_hash_{i} "
+                     f"ON wallpapers({expression})")
+
+
+_MIGRATIONS = {2: _migrate_to_v2, 3: _migrate_to_v3}
 
 
 def init_db() -> None:
     """Create / upgrade the schema.  Safe to call repeatedly and from any thread."""
     settings.ensure_dirs()
     conn = _get_conn()
-    conn.executescript(_BASELINE_SQL)  # IF NOT EXISTS → no-op on existing databases
-
     current = conn.execute("PRAGMA user_version").fetchone()[0]
+    if current > SCHEMA_VERSION:
+        raise RuntimeError(
+            f"Database schema v{current} is newer than supported v{SCHEMA_VERSION}. "
+            "Use a compatible app version or restore a pre-upgrade backup."
+        )
+    conn.executescript(_BASELINE_SQL)  # IF NOT EXISTS → no-op on existing databases
     for version in range(current + 1, SCHEMA_VERSION + 1):
         migrate = _MIGRATIONS.get(version)
         with get_db(write=True) as tx:
@@ -606,15 +625,19 @@ def find_duplicate_wallpaper(phash: str, max_distance: int = 4) -> dict | None:
     exact = get_wallpaper_by_phash(phash)
     if exact:
         return exact
-    if max_distance <= 0 or not is_valid_phash(phash):
+    if max_distance < 0 or not is_valid_phash(phash):
         return None
 
-    clauses = " OR ".join("SUBSTR(phash, ?, ?) = ?" for _ in range(8))
-    params: list[Any] = []
-    for i, chunk in enumerate(chunk_keys(phash)):
-        params.extend([i * CHUNK_HEX_LEN + 1, CHUNK_HEX_LEN, chunk])
+    # At distance >= CHUNKS two hashes need not share a chunk. Fall back to a
+    # full scan rather than silently missing duplicates for a wider review radius.
+    clauses = " OR ".join(f"{expression} = ?" for expression in _HASH_CHUNKS_SQL)
     with get_db() as conn:
-        candidates = conn.execute(f"SELECT * FROM wallpapers WHERE {clauses}", params).fetchall()
+        if max_distance < CHUNKS:
+            candidates = conn.execute(
+                f"SELECT * FROM wallpapers WHERE {clauses} ORDER BY id", chunk_keys(phash)
+            ).fetchall()
+        else:
+            candidates = conn.execute("SELECT * FROM wallpapers ORDER BY id").fetchall()
 
     best: dict | None = None
     best_distance = max_distance + 1

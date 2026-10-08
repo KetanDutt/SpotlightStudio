@@ -1,8 +1,8 @@
 Pod::Spec.new do |s|
   s.name           = 'SpotlightWallpaper'
-  s.version        = '0.1.0'
+  s.version        = '0.3.0'
   s.summary        = 'Wallpaper bridge for Spotlight Studio (iOS implementation).'
-  s.description    = 'iOS deliberately exposes no wallpaper API, so this module reports the real capabilities and returns a clear error instead of pretending to work.'
+  s.description    = 'Validates supported images in the private app cache with bounded ImageIO decoding. iOS reports unsupported wallpaper setting honestly.'
   s.author         = 'Ketan Dutt'
   s.homepage       = 'https://github.com/KetanDutt/SpotlightStudio'
   s.license        = { :type => 'All Rights Reserved' }

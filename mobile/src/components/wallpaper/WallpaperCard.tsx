@@ -1,5 +1,5 @@
 /** Photo-first gallery tile. Captions sit on a quiet surface, never over the photograph. */
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { Image } from 'expo-image';
 import React, { memo } from 'react';
 import { StyleSheet, View } from 'react-native';

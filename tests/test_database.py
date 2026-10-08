@@ -385,3 +385,41 @@ def test_clean_download_queue_removes_stale_rows(env):
     db.add_suppressed_url("https://img/2.jpg")
     assert db.clean_download_queue() == 2
     assert db.download_queue_size() == 0
+
+
+def test_hash_candidate_query_uses_all_eight_expression_indexes(env):
+    clauses = " OR ".join(f"{expression} = ?" for expression in db._HASH_CHUNKS_SQL)
+    with db.get_db() as conn:
+        plan = conn.execute(f"EXPLAIN QUERY PLAN SELECT * FROM wallpapers WHERE {clauses}",
+                            ["01234567"] * 8).fetchall()
+    detail = " ".join(row["detail"] for row in plan)
+    assert "MULTI-INDEX OR" in detail
+    for i in range(8):
+        assert f"idx_wallpapers_hash_{i}" in detail
+    assert "SCAN wallpapers" not in detail
+
+
+def test_wide_duplicate_radius_does_not_require_an_identical_chunk(env):
+    # One flipped bit in EVERY chunk: within 8 bits, but no chunk matches.
+    base = "1" * 64
+    row = add_wallpaper(phash=base)
+    query = f"{int(base, 16) ^ sum(1 << (i * 32) for i in range(8)):064x}"
+    assert db.find_duplicate_wallpaper(query, max_distance=7) is None
+    assert db.find_duplicate_wallpaper(query, max_distance=8)["id"] == row["id"]
+
+
+def test_newer_schema_is_refused_without_rewriting_its_version(env):
+    with db.get_db(write=True) as conn:
+        conn.execute(f"PRAGMA user_version={db.SCHEMA_VERSION + 1}")
+    with pytest.raises(RuntimeError, match="newer than supported"):
+        db.init_db()
+    with db.get_db() as conn:
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION + 1
+
+
+def test_indexed_candidates_include_legacy_uppercase_hashes(env, add):
+    from src.database import find_duplicate_wallpaper, get_db
+    row = add(phash='abcdef01' * 8)
+    with get_db() as connection:
+        connection.execute('UPDATE wallpapers SET phash = UPPER(phash) WHERE id = ?', (row['id'],))
+    assert find_duplicate_wallpaper('abcdef01' * 8, max_distance=0)['id'] == row['id']

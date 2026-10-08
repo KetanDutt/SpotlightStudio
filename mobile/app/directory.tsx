@@ -7,7 +7,7 @@
  * resolution or a tag opens the gallery pre-filtered through the same deep-link mechanism
  * the shared links use.
  */
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { useRouter } from 'expo-router';
 import { useColors } from '../src/theme/ThemeProvider';
 import React, { useCallback, useMemo, useState } from 'react';

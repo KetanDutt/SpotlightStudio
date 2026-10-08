@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>Spotlight Studio — Windows Spotlight wallpaper gallery</title>
   <meta name="description" content="Browse, search and download thousands of Windows Spotlight wallpapers in 4K and Full HD. A fast, installable gallery with favorites, tags and shareable links." />
-  <meta name="app-version" content="2.4.0" />
+  <meta name="app-version" content="2.5.0" />
   <meta name="color-scheme" content="dark light" />
   <meta name="theme-color" content="#151918" />
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob: https://github.com https://*.githubusercontent.com; font-src 'self'; connect-src 'self'; manifest-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'" />
@@ -24,11 +24,11 @@
   <link rel="preconnect" href="https://github.com" />
   <link rel="preconnect" href="https://media.githubusercontent.com" />
 
-  <link rel="stylesheet" href="static/css/tokens.css?v=2.4.0" />
-  <link rel="stylesheet" href="static/css/app.css?v=2.4.0" />
-  <script src="static/js/theme-init.js?v=2.4.0"></script>
-  <script src="static/js/core.js?v=2.4.0" defer></script>
-  <script src="static/js/app.js?v=2.4.0" defer></script>
+  <link rel="stylesheet" href="static/css/tokens.css?v=2.5.0" />
+  <link rel="stylesheet" href="static/css/app.css?v=2.5.0" />
+  <script src="static/js/theme-init.js?v=2.5.0"></script>
+  <script src="static/js/core.js?v=2.5.0" defer></script>
+  <script src="static/js/app.js?v=2.5.0" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to wallpapers</a>
@@ -202,6 +202,20 @@
         </div>
         <div class="active-filters" id="active-filters"></div>
 
+        <section class="daily-spotlight" id="daily-spotlight" aria-labelledby="daily-label" hidden>
+          <button class="daily-photo" id="daily-photo" type="button" aria-labelledby="daily-label daily-title"></button>
+          <div class="daily-info">
+            <p class="collection-eyebrow" id="daily-label">Daily spotlight</p>
+            <h2 id="daily-title"></h2>
+            <p class="daily-meta" id="daily-meta"></p>
+            <p class="hint">A fresh perspective each UTC day. The same pick on devices using the same catalog.</p>
+            <div class="daily-actions">
+              <button class="btn" id="daily-open" type="button"><span data-icon="image"></span>Explore wallpaper</button>
+              <button class="btn btn-icon" id="daily-fav" type="button" aria-pressed="false" aria-label="Add daily wallpaper to favorites"><span data-icon="heart"></span></button>
+            </div>
+          </div>
+        </section>
+
         <div class="skeleton-grid" id="state-loading" aria-hidden="true"></div>
 
         <div class="state" id="state-empty" hidden>
@@ -247,6 +261,12 @@
     <figure class="lb-stage" id="lb-stage">
       <img id="lb-img" class="lb-img" alt="" decoding="async" draggable="false" />
       <div class="lb-spinner" id="lb-spinner" aria-hidden="true"></div>
+      <div class="lb-error" id="lb-error" role="status" hidden>
+        <span data-icon="alert" data-size="26"></span>
+        <strong>Full-resolution image unavailable</strong>
+        <p id="lb-error-text">Check your connection and try again. The thumbnail may still be available.</p>
+        <button class="btn" id="lb-retry" type="button"><span data-icon="refresh"></span>Retry image</button>
+      </div>
     </figure>
     <section class="lb-panel">
       <div class="lb-heading">
@@ -262,6 +282,7 @@
         <a class="btn btn-primary" id="lb-download" href="#" download rel="noopener"><span data-icon="download"></span>Download full resolution</a>
         <button class="btn desktop-only" type="button" id="lb-setwp"><span data-icon="monitor"></span>Set as wallpaper</button>
         <a class="btn" id="lb-source" href="#" target="_blank" rel="noopener noreferrer"><span data-icon="external"></span>Source page</a>
+        <button class="btn" type="button" id="lb-share"><span data-icon="share"></span>Share</button>
         <button class="btn" type="button" id="lb-copy" title="Copy a link to this wallpaper (C)"><span data-icon="link"></span>Copy link</button>
         <button class="btn" type="button" id="lb-copy-image" title="Copy the direct image URL"><span data-icon="copy"></span>Image URL</button>
       </div>

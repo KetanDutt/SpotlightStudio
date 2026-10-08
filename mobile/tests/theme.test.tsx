@@ -1,6 +1,8 @@
 import React from 'react';
 import { AccessibilityInfo, Text } from 'react-native';
-import { act, render } from '@testing-library/react-native';
+import { act, render, renderHook, waitFor } from '@testing-library/react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { KEYS, getJson } from '../src/services/storage';
 import { ThemeProvider, useTheme } from '../src/theme/ThemeProvider';
 import { PALETTES, TOUCH_TARGET, durations, navigation } from '../src/theme/tokens';
 
@@ -57,4 +59,32 @@ it('subscribes to motion/transparency changes and removes listeners', async () =
   } finally {
     subscribe.mockRestore(); motion.mockRestore(); transparency.mockRestore();
   }
+});
+
+
+it('StrictMode theme toggles persist once per intent, including two changes in one tick', async () => {
+  await AsyncStorage.clear();
+  function Wrapper({ children }: { children: React.ReactNode }) { return <React.StrictMode><ThemeProvider>{children}</ThemeProvider></React.StrictMode>; }
+  const { result } = await renderHook(() => useTheme(), { wrapper: Wrapper });
+  await waitFor(() => expect(result.current.ready).toBe(true));
+  const write = jest.mocked(AsyncStorage.setItem); write.mockClear();
+  await act(async () => { result.current.toggle(); result.current.toggle(); });
+  expect(result.current.preference).toBe('light');
+  expect(await getJson(KEYS.theme, 'auto')).toBe('light');
+  expect(write.mock.calls.filter(([key]) => key === KEYS.theme)).toHaveLength(2);
+});
+
+it('makes theme persistence failures visible without undoing the active appearance', async () => {
+  const { result } = await renderHook(() => useTheme(), { wrapper: ThemeProvider });
+  await waitFor(() => expect(result.current.ready).toBe(true));
+  const write = jest.mocked(AsyncStorage.setItem);
+  const original = write.getMockImplementation()!;
+  write.mockRejectedValueOnce(new Error('disk full'));
+  try {
+    await act(async () => { result.current.setPreference('dark'); });
+    expect(result.current.preference).toBe('dark');
+    expect(result.current.storageError).toMatch(/could not be saved/);
+    await act(async () => { result.current.setPreference('auto'); });
+    expect(result.current.storageError).toBeNull();
+  } finally { write.mockImplementation(original); }
 });

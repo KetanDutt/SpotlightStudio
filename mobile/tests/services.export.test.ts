@@ -95,7 +95,7 @@ describe('exportCatalogCsv', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
-    expect(result.value.name).toBe('spotlight-studio-catalog-20261007-1830.csv');
+    expect(result.value.name).toMatch(/^spotlight-studio-catalog-20261007-1830-\d+-\d+\.csv$/);
     expect(result.value.rows).toBe(catalog.items.length);
     expect(result.value.uri.startsWith('file:///cache/')).toBe(true);
 
@@ -125,7 +125,7 @@ describe('exportCatalogJson', () => {
     const result = await exportCatalogJson(catalog.items, FIXED_DATE);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.value.name).toBe('spotlight-studio-catalog-20261007-1830.json');
+    expect(result.value.name).toMatch(/^spotlight-studio-catalog-20261007-1830-\d+-\d+\.json$/);
     expect(Sharing.shareAsync).toHaveBeenCalledWith(result.value.uri, expect.objectContaining({ mimeType: 'application/json' }));
   });
 });

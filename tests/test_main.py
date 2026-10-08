@@ -131,3 +131,13 @@ def test_sigterm_is_mapped_to_a_graceful_keyboard_interrupt():
             handler(signal.SIGTERM, None)
     finally:
         signal.signal(signal.SIGTERM, previous)
+
+
+def test_ipv6_urls_and_invalid_ports(monkeypatch):
+    assert cli.base_url("::1", 8765) == "http://[::1]:8765"
+    assert cli.base_url("[::1]", 8765) == "http://[::1]:8765"
+    monkeypatch.setattr(cli, "configure_logging", lambda: None)
+    for port in ("0", "65536", "-1"):
+        with pytest.raises(SystemExit) as error:
+            cli.main(["--server", "--port", port])
+        assert error.value.code == 2

@@ -107,6 +107,10 @@ export default function SearchScreen() {
   const onToggleFavorite = useCallback(
     (item: Wallpaper) => {
       const added = toggleFavorite(item.key);
+      if (added === null) {
+        show({ tone: 'warning', message: 'The favorites limit is 20,000. Remove an item before adding another.' });
+        return;
+      }
       show({ tone: added ? 'success' : 'info', message: added ? `Added “${item.title}” to favourites.` : 'Removed from favourites.' });
     },
     [show, toggleFavorite],

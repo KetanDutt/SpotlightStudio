@@ -1,6 +1,7 @@
 # Architecture
 
-Spotlight Studio has three parts that share one SQLite database and one set of image files:
+The backend and browser/desktop UI use one local SQLite archive and its image files.
+The separate Expo client consumes catalog JSON and image URLs; it never shares the DB file:
 
 ```
 ┌───────────────────────────── Browser / PyWebView window ─────────────────────────────┐
@@ -61,6 +62,10 @@ Spotlight Studio has three parts that share one SQLite database and one set of i
 
 ## Concurrency model
 
+* An **OS-backed library lock** covers the full server/CLI lifetime, before migrations,
+  claim recovery or engine startup. It rejects competing instances (CLI exit 3). Keep one
+  worker on a local filesystem, never unlink the sidecar, and give separate libraries
+  separate DB/catalog/image folders. Storage settings are process-wide.
 * One **engine thread** owns an asyncio loop. Two *dispatchers* (not N polling workers) claim work and spawn tasks, bounded by semaphores (`CONCURRENT_SCRAPERS`, `CONCURRENT_DOWNLOADS`), so an idle engine polls the DB only a few times per second.
 * CPU work (decode, hash, resize, JPEG encode, file writes) runs in a shared `ThreadPoolExecutor`. Doing decode+hash+thumbnail as **one** job means at most *pool-size* decoded 4K bitmaps (~25 MB each) exist at the same time, instead of one per in-flight download.
 * **SQLite**: one connection per thread (WAL, `busy_timeout` 30 s), autocommit mode with explicit transactions. Nested `get_db()` blocks join the outermost transaction; write paths use `BEGIN IMMEDIATE` to avoid lock-upgrade failures. Streaming exports use their own connection because a generator may resume on another worker thread.
@@ -70,7 +75,7 @@ Spotlight Studio has three parts that share one SQLite database and one set of i
 
 | Failure | Behaviour |
 |---|---|
-| Stop, window closed, crash | queue rows are **claimed**, not deleted, while in flight. Stop releases them; a crash leaves `claimed_at` set and the next start releases all claims. Nothing is lost. |
+| Graceful stop / process crash | queue rows are **claimed**, not deleted, while in flight. Stop releases them; a crash leaves `claimed_at` set and the next start releases all claims. Pending claims recover; hard-kill file/DB boundaries can still leave orphans. |
 | Transient HTTP error (timeout, 5xx, 429) | the item is retried up to `MAX_RETRIES`, each time **at the back** of the queue. A Peapix UHD download is *not* silently replaced by a lower resolution — except on the very last retry, so slow links still get an image. |
 | Permanent error (404/403/410, corrupt image, too small, too large) | dropped immediately and counted as an error |
 | Network down / site down | a **circuit breaker** opens after 10 consecutive transient failures, pauses dispatching with back-off (15 s → 120 s) and does *not* consume retries |
@@ -81,7 +86,9 @@ Spotlight Studio has three parts that share one SQLite database and one set of i
 ## De-duplication
 
 * **Hash**: 256-bit dHash — greyscale, resize to 17×16 (Lanczos), compare horizontal neighbours → 64 hex characters. The implementation in `src/hashing.py` is bit-identical to `imagehash.dhash(img, hash_size=16)` (a test compares them), so existing hashes stay valid while NumPy/SciPy (~50 MB) are no longer required.
-* **Near-duplicates**: Hamming distance ≤ 4 (1.6 % of the bits). By the pigeonhole principle two such hashes share at least four of their eight 32-bit chunks, so candidate rows are found with one indexed-style `SUBSTR` query instead of comparing all 7,500 hashes.
+* **Near-duplicates**: Hamming distance ≤ 4 (1.6 % of the bits). By the pigeonhole principle two such hashes share at least four of their eight 32-bit chunks, so candidate rows are found with one indexed `LOWER(SUBSTR(phash, …))` OR query using eight schema-3 expression indexes instead of comparing all 7,500 hashes.
+* Radius ≥8 cannot rely on an identical chunk: use a complete scan. Future schemas are
+  refused rather than silently downgraded; migrations are startup changes even in HTTP read-only mode.
 * **Policy**: score = `width × height × 1000 + file size`. If the existing copy is at least as good the new one is skipped (its URL is suppressed so it is never fetched again) and its tags/title are merged into the survivor; if the new one is better it replaces the old files and *inherits* the union of tags and the more informative title.
 * **Concurrency**: downloads run in parallel, and the Peapix and Windows10Spotlight copies of one picture are often in flight together. The duplicate check, the file writes and the row insert are therefore a single critical section (a per-event-loop `asyncio.Lock` in `downloader.py`); fetching and the CPU-heavy decode/hash/thumbnail step stay parallel. Which copy reaches the store first is timing-dependent: the worse one is then skipped (*duplicate*) or stored and superseded (*replaced*), and the library ends up identical either way.
 * A library-wide sweep (`maintenance.deduplicate_downloaded_wallpapers`) repeats this offline: rows are visited best-first so the best copy always survives.
@@ -143,3 +150,15 @@ concurrent starts and repairs receive `EngineBusy`. It is an in-process guard, n
 against another server or CLI process. Automatic Pillow concurrency is capped at four workers.
 Catalog serialization uses a process-local mutex and a consistent SQLite read snapshot; ETags
 hash the actual bytes. Public HTTP read-only mode is enforced in middleware, not only the UI.
+
+## Client reliability in 2.5
+
+Web/mobile daily discovery shares a UTC-day/ID hash selector, not random state or OS scheduling.
+Mobile catalog provenance lives in a versioned cache envelope; preference writes serialize
+and reads wait for pending writes. Media staging avoids publishing failed transfers, with
+private native decoder validation rather than a guarantee against every codec/OS failure. Managed
+cache reservations/pins and per-image queues protect consumers and bound originals/exports. Rotation
+coalesces runs, restores scheduling at root, serializes OS writes, honors newer manual intents, and
+rechecks plan/favorites/revisions before applying. Reset excludes active cache work and remounts
+providers; an outer provider-independent boundary and startup watchdog protect recovery.
+See [DATA.md](DATA.md), [MOBILE.md](MOBILE.md) and [REVIEW.md](REVIEW.md) for exact limits.

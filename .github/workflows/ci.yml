@@ -59,8 +59,8 @@ jobs:
       - run: node --test tests/js/*.test.mjs
 
   mobile:
-    # The Expo app: types, lint and Jest.  No Android SDK / Xcode here – store builds happen
-    # through EAS or on a developer machine (see docs/MOBILE.md).
+    # Fast JS/config gate; Kotlin/Swift compilation is in mobile-native.yml.
+    # Signed store builds and device QA remain separate release gates.
     name: Mobile app
     runs-on: ubuntu-latest
     defaults:
@@ -78,6 +78,18 @@ jobs:
       - run: npm run lint
       # `--ci --coverage --runInBand` – the coverage floor guards the ported core logic.
       - run: npm run test:ci
+      - run: npm run verify:config
+      - run: npx expo export --platform all --output-dir /tmp/spotlight-mobile-export
+      # Audit evidence stays visible. Do not waive failures in the shipping release command.
+      - name: Record dependency audit
+        if: always()
+        run: npm audit --json > dependency-audit.json || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mobile-dependency-audit
+          path: mobile/dependency-audit.json
+          retention-days: 7
 
   browser:
     name: Browser smoke tests

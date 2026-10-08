@@ -1,47 +1,45 @@
-/**
- * Preferences provider – everything the user changes, in one place.
- *
- * Favourites are stored as a `Set` of wallpaper *filenames* (stable across catalog
- * refreshes), history keeps the last actions, and rotation settings drive the Android
- * background task.  All of it is persisted through `services/storage`.
- */
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-
+/** Local user data: defensive reads, synchronous event snapshots and serialized writes. */
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { HistoryAction, HistoryItem, RotationSettings } from '../core/types';
 import { ROTATION_DEFAULTS, coerceRotation } from '../core/rotation';
-import { KEYS, asStringArray, getJson, setJson } from '../services/storage';
+import { MAX_FAVORITES, asStringArray, normalizeFavorites, validFavoriteKey, withLimit } from '../core/storage-utils';
+import { KEYS, getJson, setJson } from '../services/storage';
 
 export { ROTATION_DEFAULTS };
-export type { RotationSettings };
-
-export type { HistoryItem };
+export type { RotationSettings, HistoryItem };
 
 interface PreferencesContextValue {
   favorites: Set<string>;
   favoriteCount: number;
   isFavorite: (key: string) => boolean;
-  toggleFavorite: (key: string) => boolean;
-  /** Bumped on every favourite change – lets memoised lists know they must re-filter. */
+  toggleFavorite: (key: string) => boolean | null;
   favoritesVersion: number;
   clearFavorites: () => void;
-
+  /** Merge a portable backup without discarding existing/unknown catalog keys. */
+  mergeFavorites: (keys: string[]) => number;
   recentSearches: string[];
   addRecentSearch: (term: string) => void;
   clearRecentSearches: () => void;
-
   history: HistoryItem[];
   addHistory: (id: number, action: HistoryAction) => void;
   clearHistory: () => void;
-
   rotation: RotationSettings;
   updateRotation: (patch: Partial<RotationSettings>) => void;
   resetRotation: () => void;
+  storageError: string | null;
 }
 
 const PreferencesContext = createContext<PreferencesContextValue | null>(null);
-
 const MAX_RECENT_SEARCHES = 8;
 const MAX_HISTORY = 200;
+const ACTIONS = new Set<HistoryAction>(['download', 'share', 'copy-link', 'open-source', 'save']);
+
+function validHistory(value: unknown): value is HistoryItem {
+  if (!value || typeof value !== 'object') return false;
+  const row = value as HistoryItem;
+  return Number.isSafeInteger(row.id) && row.id > 0 && ACTIONS.has(row.action) &&
+    Number.isFinite(row.at) && row.at > 0 && row.at <= 8640000000000000;
+}
 
 export function PreferencesProvider({ children }: { children: React.ReactNode }) {
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
@@ -50,141 +48,117 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [rotation, setRotation] = useState<RotationSettings>(ROTATION_DEFAULTS);
   const [ready, setReady] = useState(false);
+  const [storageError, setStorageError] = useState<string | null>(null);
+  const favoriteSnapshot = useRef(favorites);
+  const searchSnapshot = useRef(recentSearches);
+  const historySnapshot = useRef(history);
+  const rotationSnapshot = useRef(rotation);
+  const failedKeys = useRef(new Set<string>());
+  const mounted = useRef(true);
+
+  const persist = useCallback((key: string, value: unknown) => {
+    void setJson(key, value).then((saved) => {
+      if (saved) failedKeys.current.delete(key);
+      else failedKeys.current.add(key);
+      if (mounted.current) setStorageError(failedKeys.current.size
+        ? 'Some preferences could not be saved. Keep a favorites backup before closing the app.' : null);
+    });
+  }, []);
 
   useEffect(() => {
+    mounted.current = true;
     let alive = true;
-    Promise.all([
-      getJson<string[]>(KEYS.favorites, []),
-      getJson<string[]>(KEYS.recentSearches, []),
-      getJson<HistoryItem[]>(KEYS.history, []),
-      getJson<unknown>(KEYS.rotation, ROTATION_DEFAULTS),
-    ]).then(([favoriteKeys, searches, historyRows, rotationValue]) => {
+    void Promise.all([
+      getJson<unknown>(KEYS.favorites, []), getJson<unknown>(KEYS.recentSearches, []),
+      getJson<unknown>(KEYS.history, []), getJson<unknown>(KEYS.rotation, ROTATION_DEFAULTS),
+    ]).then(([keys, searches, rows, settings]) => {
       if (!alive) return;
-      setFavorites(new Set(asStringArray(favoriteKeys)));
-      setRecentSearches(asStringArray(searches).slice(0, MAX_RECENT_SEARCHES));
-      setHistory(Array.isArray(historyRows) ? historyRows.filter((h) => h && typeof h.id === 'number' && typeof h.action === 'string') : []);
-      setRotation(coerceRotation(rotationValue));
+      favoriteSnapshot.current = new Set(normalizeFavorites(keys));
+      searchSnapshot.current = withLimit(asStringArray(searches).map((term) => term.trim().slice(0, 120)), MAX_RECENT_SEARCHES);
+      historySnapshot.current = Array.isArray(rows) ? rows.filter(validHistory).slice(0, MAX_HISTORY) : [];
+      rotationSnapshot.current = coerceRotation(settings);
+      setFavorites(favoriteSnapshot.current);
+      setRecentSearches(searchSnapshot.current);
+      setHistory(historySnapshot.current);
+      setRotation(rotationSnapshot.current);
       setReady(true);
     });
-    return () => {
-      alive = false;
-    };
+    return () => { alive = false; mounted.current = false; };
   }, []);
 
-  // ── favourites ────────────────────────────────────────────────────────────
-  const isFavorite = useCallback((key: string) => favorites.has(key), [favorites]);
+  const publishFavorites = useCallback((next: Set<string>) => {
+    favoriteSnapshot.current = next;
+    setFavorites(next);
+    setFavoritesVersion((version) => version + 1);
+    persist(KEYS.favorites, [...next]);
+  }, [persist]);
 
+  const isFavorite = useCallback((key: string) => favoriteSnapshot.current.has(key), []);
   const toggleFavorite = useCallback((key: string) => {
-    let added = false;
-    setFavorites((current) => {
-      const next = new Set(current);
-      if (next.has(key)) next.delete(key);
-      else {
-        next.add(key);
-        added = true;
-      }
-      void setJson(KEYS.favorites, [...next]);
-      return next;
-    });
-    setFavoritesVersion((v) => v + 1);
+    if (!validFavoriteKey(key)) return null;
+    const next = new Set(favoriteSnapshot.current);
+    const added = !next.has(key);
+    if (added && next.size >= MAX_FAVORITES) return null;
+    if (added) next.add(key);
+    else next.delete(key);
+    publishFavorites(next);
     return added;
-  }, []);
+  }, [publishFavorites]);
+  const clearFavorites = useCallback(() => publishFavorites(new Set()), [publishFavorites]);
+  const mergeFavorites = useCallback((keys: string[]) => {
+    if (!keys.every(validFavoriteKey)) throw new Error('The backup contains invalid favorites.');
+    const current = favoriteSnapshot.current;
+    const next = new Set([...current, ...keys]);
+    if (next.size > MAX_FAVORITES) throw new Error('The combined favorites exceed the 20,000-item backup limit.');
+    publishFavorites(next);
+    return next.size - current.size;
+  }, [publishFavorites]);
 
-  const clearFavorites = useCallback(() => {
-    setFavorites(new Set());
-    setFavoritesVersion((v) => v + 1);
-    void setJson(KEYS.favorites, []);
-  }, []);
-
-  // ── recent searches ───────────────────────────────────────────────────────
+  const publishSearches = useCallback((next: string[]) => {
+    searchSnapshot.current = next;
+    setRecentSearches(next);
+    persist(KEYS.recentSearches, next);
+  }, [persist]);
   const addRecentSearch = useCallback((term: string) => {
-    const trimmed = term.trim();
+    const trimmed = term.trim().slice(0, 120);
     if (trimmed.length < 2) return;
-    setRecentSearches((current) => {
-      const next = [trimmed, ...current.filter((s) => s.toLowerCase() !== trimmed.toLowerCase())].slice(0, MAX_RECENT_SEARCHES);
-      void setJson(KEYS.recentSearches, next);
-      return next;
-    });
-  }, []);
+    publishSearches([trimmed, ...searchSnapshot.current.filter((item) => item.toLowerCase() !== trimmed.toLowerCase())]
+      .slice(0, MAX_RECENT_SEARCHES));
+  }, [publishSearches]);
+  const clearRecentSearches = useCallback(() => publishSearches([]), [publishSearches]);
 
-  const clearRecentSearches = useCallback(() => {
-    setRecentSearches([]);
-    void setJson(KEYS.recentSearches, []);
-  }, []);
-
-  // ── history ───────────────────────────────────────────────────────────────
+  const publishHistory = useCallback((next: HistoryItem[]) => {
+    historySnapshot.current = next;
+    setHistory(next);
+    persist(KEYS.history, next);
+  }, [persist]);
   const addHistory = useCallback((id: number, action: HistoryAction) => {
-    setHistory((current) => {
-      const next = [{ id, action, at: Date.now() }, ...current].slice(0, MAX_HISTORY);
-      void setJson(KEYS.history, next);
-      return next;
-    });
-  }, []);
+    const row = { id, action, at: Date.now() };
+    if (validHistory(row)) publishHistory([row, ...historySnapshot.current].slice(0, MAX_HISTORY));
+  }, [publishHistory]);
+  const clearHistory = useCallback(() => publishHistory([]), [publishHistory]);
 
-  const clearHistory = useCallback(() => {
-    setHistory([]);
-    void setJson(KEYS.history, []);
-  }, []);
-
-  // ── rotation ──────────────────────────────────────────────────────────────
   const updateRotation = useCallback((patch: Partial<RotationSettings>) => {
-    setRotation((current) => {
-      const next = coerceRotation({ ...current, ...patch });
-      void setJson(KEYS.rotation, next);
-      return next;
-    });
-  }, []);
+    const next = coerceRotation({ ...rotationSnapshot.current, ...patch });
+    rotationSnapshot.current = next;
+    setRotation(next);
+    persist(KEYS.rotation, next);
+  }, [persist]);
+  const resetRotation = useCallback(() => updateRotation({ ...ROTATION_DEFAULTS, tags: [] }), [updateRotation]);
 
-  const resetRotation = useCallback(() => {
-    setRotation(ROTATION_DEFAULTS);
-    void setJson(KEYS.rotation, ROTATION_DEFAULTS);
-  }, []);
+  const value = useMemo<PreferencesContextValue>(() => ({
+    favorites, favoriteCount: favorites.size, isFavorite, toggleFavorite, favoritesVersion, clearFavorites, mergeFavorites,
+    recentSearches, addRecentSearch, clearRecentSearches, history, addHistory, clearHistory,
+    rotation, updateRotation, resetRotation, storageError,
+  }), [favorites, isFavorite, toggleFavorite, favoritesVersion, clearFavorites, mergeFavorites, recentSearches,
+    addRecentSearch, clearRecentSearches, history, addHistory, clearHistory, rotation, updateRotation, resetRotation, storageError]);
 
-  const value = useMemo<PreferencesContextValue>(
-    () => ({
-      favorites,
-      favoriteCount: favorites.size,
-      isFavorite,
-      toggleFavorite,
-      favoritesVersion,
-      clearFavorites,
-      recentSearches,
-      addRecentSearch,
-      clearRecentSearches,
-      history,
-      addHistory,
-      clearHistory,
-      rotation,
-      updateRotation,
-      resetRotation,
-    }),
-    [
-      favorites,
-      isFavorite,
-      toggleFavorite,
-      favoritesVersion,
-      clearFavorites,
-      recentSearches,
-      addRecentSearch,
-      clearRecentSearches,
-      history,
-      addHistory,
-      clearHistory,
-      rotation,
-      updateRotation,
-      resetRotation,
-    ],
-  );
-
-  // Avoid rendering screens before the first preferences are loaded – otherwise a
-  // favourite set could briefly look empty and flash the wrong "add to favourites" state.
   if (!ready) return null;
-
   return <PreferencesContext.Provider value={value}>{children}</PreferencesContext.Provider>;
 }
 
 export function usePreferences(): PreferencesContextValue {
-  const ctx = useContext(PreferencesContext);
-  if (!ctx) throw new Error('usePreferences() must be used inside <PreferencesProvider>.');
-  return ctx;
+  const context = useContext(PreferencesContext);
+  if (!context) throw new Error('usePreferences() must be used inside <PreferencesProvider>.');
+  return context;
 }

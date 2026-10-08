@@ -1,5 +1,5 @@
 /** History – what was downloaded, saved, shared or applied, newest first. */
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import React, { useCallback, useMemo, useState } from 'react';
@@ -139,7 +139,9 @@ export default function HistoryScreen() {
                   accessibilityLabel={favorite ? 'Remove from favourites' : 'Add to favourites'}
                   accessibilityState={{ selected: favorite }}
                   hitSlop={8}
-                  onPress={() => toggleFavorite(item.key)}
+                  onPress={() => {
+                    if (toggleFavorite(item.key) === null) show({ tone: 'warning', message: 'The favorites limit is 20,000.' });
+                  }}
                   style={styles.heart}
                 >
                   <Ionicons name={favorite ? 'heart' : 'heart-outline'} size={19} color={favorite ? colors.danger : colors.textMuted} />

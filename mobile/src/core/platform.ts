@@ -77,7 +77,7 @@ export const isWeb = platform === 'web';
 
 /** What the platform can and cannot do – shown verbatim in Settings. */
 export const CAPABILITIES_NOTE = [
-  'Android: this app uses the system WallpaperManager, so it can set the home screen, the lock screen or both — and it can rotate them in the background.',
+  'Android: an updated native build uses WallpaperManager to change home, lock or both screens, subject to device policy. Rotation is opt-in and best-effort; the OS decides timing.',
   'iOS: Apple does not expose a wallpaper API. Wallpapers are saved to your photo library; use the Shortcuts “Set Wallpaper” action (or Photos → Share → Use as Wallpaper) to apply them.',
 ].join('\n\n');
 
@@ -89,7 +89,7 @@ export const PLATFORM_COPY = {
   },
   iosShortcut: {
     title: 'One-time setup in Shortcuts',
-    body: 'iOS does not let apps change the wallpaper directly. Save the picture, then use the Shortcuts app with a “Set Wallpaper” action — pick this app as the source.',
+    body: 'iOS does not let apps change the wallpaper directly. Save the picture, then choose it in Photos, Settings, or a Shortcuts “Set Wallpaper” action.',
   },
   iosRotationBlocked: {
     title: 'Automatic rotation needs Android',

@@ -1,8 +1,8 @@
 # Suggested improvements
 
-Ideas still **not** implemented after 2.3.0 — either because they need decisions only the owner can make, access to real accounts/hardware, or simply more room than one release. Effort: **S** ≤ a day · **M** a few days · **L** a week or more.
+Ideas still **not** implemented after 2.5.0 — either because they need decisions only the owner can make, access to real accounts/hardware, or simply more room than one release. Effort: **S** ≤ a day · **M** a few days · **L** a week or more.
 
-Immediate release blockers and prioritized security work are in [REVIEW.md](REVIEW.md#release-blockers-and-prioritized-follow-up).
+Immediate release blockers and prioritized security work are in [REVIEW.md](REVIEW.md#release-gates-and-prioritized-follow-up).
 
 ## High value, small effort
 
@@ -11,7 +11,6 @@ Immediate release blockers and prioritized security work are in [REVIEW.md](REVI
 | **Run "Repair metadata" once on the real library and commit the result** | 57 % of Windows10Spotlight titles are file hashes and every Peapix row lacks tags; the tooling is ready (`python main.py --crawl --mode repair`) but it needs the real sites. It makes search, tags and titles dramatically better for every visitor of the showcase. | S |
 | **A scheduled GitHub Action that only *verifies* the catalog** (`--check`, JSON validity, link check) | catches broken pushes before they reach Pages without touching LFS quotas | S |
 | **Preview tier for the viewer** — generate a ~1280 px WebP (≈ 100–150 KB) next to each full image and show *that* in the viewer; keep the original for *Download* | the viewer currently loads 1–2 MB per image from LFS; this cuts bandwidth by ~90 % and is the main lever against GitHub LFS quotas | M |
-| **Daily "wallpaper of the day"** card on the home page (deterministic pick by date) | delight, no backend needed | S |
 | **Colour palette per wallpaper** (3 dominant colours at download time, stored in the DB) and a *Browse by colour* filter | highly requested in wallpaper galleries; cheap with Pillow's `quantize` | M |
 
 ## Quality of the library
@@ -52,10 +51,24 @@ Immediate release blockers and prioritized security work are in [REVIEW.md](REVI
 | **Virtualised grid / infinite scroll** option | pagination is fine at 24–96 per page; infinite scroll only pays off beyond that | M |
 | **Image zoom / pan** in the viewer (pinch, wheel) | wallpapers are detailed | M |
 | **Internationalisation** (the strings are already centralised in a few places) | wider audience | M |
-| **Share targets**: Web Share API on mobile, "copy as markdown" | convenience | S |
+| **Copy as Markdown** (Web Share API/fallbacks are implemented) | richer portable citations/links | S |
 
 ## Deliberately out of scope
 
 * **Re-hosting or redistributing images outside this repository's current model** — the wallpapers are third-party content.
 * **Accounts, comments, uploads** — it is an archive, not a social site.
-* **Tracking / analytics** — the privacy stance (no third-party requests) is a feature.
+* **Tracking / analytics** — the privacy stance (no analytics requests) is a feature.
+
+## Completed in 2.5 / mobile 1.1
+
+OS-backed application library ownership; indexed hash candidates and wide-radius correctness;
+UTC daily discovery; portable mobile favorites backups; source-provenance catalog caching;
+staged/cancellable media; preference write serialization; strict rotation pools/intervals;
+scoped first-visit PWA offline caching. The Still Glass UI remains the visual foundation.
+
+## Remaining priority
+
+Native-device certification/advisory triage, platform dependency locks/SBOM, aggregate mobile
+aggregate SDK cache/codec behavior verification (managed quota/stale-part cleanup and bounded native validation are implemented), stable favorite migration
+and real-library/source-rights verification. Desktop OS rotation and account synchronization
+remain proposals, not shipped features. Distributed ownership is intentionally unsupported.

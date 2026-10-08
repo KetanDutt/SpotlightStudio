@@ -19,9 +19,10 @@ export interface SegmentedProps<T extends string> {
   onChange: (value: T) => void;
   accessibilityLabel?: string;
   testID?: string;
+  disabled?: boolean;
 }
 
-export function Segmented<T extends string>({ options, value, onChange, accessibilityLabel, testID }: SegmentedProps<T>) {
+export function Segmented<T extends string>({ options, value, onChange, accessibilityLabel, testID, disabled = false }: SegmentedProps<T>) {
   const colors = useColors();
   return (
     <View
@@ -36,10 +37,11 @@ export function Segmented<T extends string>({ options, value, onChange, accessib
           <Touchable
             key={option.value}
             accessibilityRole="tab"
-            accessibilityState={{ selected }}
+            accessibilityState={{ selected, disabled }}
             accessibilityLabel={option.label}
             onPress={() => onChange(option.value)}
             plain
+            disabled={disabled}
             style={[
               styles.segment,
               selected ? { backgroundColor: colors.surface, borderColor: colors.strokeStrong } : { borderColor: 'transparent' },

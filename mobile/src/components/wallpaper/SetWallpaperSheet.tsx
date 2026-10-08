@@ -2,13 +2,13 @@
  * "Set wallpaper" sheet – the heart of the app.
  *
  * Android : pick the target screen (home / lock / both) and apply it natively.
- * iOS     : explain that Apple does not allow it, save the picture to the album and show
+ * iOS     : explain that Apple does not allow it, save the picture to Photos and show
  *           the exact steps to finish with the Shortcuts action.
  *
  * The sheet never lies about what happened: the result line is driven by the real outcome.
  */
-import { Ionicons } from '@expo/vector-icons';
-import React, { useMemo, useState } from 'react';
+import Ionicons from '@expo/vector-icons/Ionicons';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Linking, ScrollView, StyleSheet, View } from 'react-native';
 
 import { PLATFORM_COPY, getCapabilities } from '../../core/platform';
@@ -32,6 +32,8 @@ export interface SetWallpaperSheetProps {
 export function SetWallpaperSheet({ item, visible, onClose }: SetWallpaperSheetProps) {
   const colors = useColors();
   const actions = useWallpaperActions(item);
+  const cancel = actions.cancel;
+  useEffect(() => { if (!visible) cancel(); }, [visible, cancel]);
   const modes = useMemo(() => availableModes(), []);
   const [mode, setMode] = useState<WallpaperMode>(modes.includes('home') ? 'home' : modes[0]);
 
@@ -45,7 +47,7 @@ export function SetWallpaperSheet({ item, visible, onClose }: SetWallpaperSheetP
   return (
     <Sheet
       visible={visible}
-      onClose={onClose}
+      onClose={() => { actions.cancel(); onClose(); }}
       title={item ? item.title : 'Set wallpaper'}
       subtitle={item ? `${item.raw.width} × ${item.raw.height} · ${item.raw.source === 'peapix' ? 'Peapix' : 'Windows 10 Spotlight'}` : undefined}
       testID="set-wallpaper-sheet"
@@ -57,12 +59,12 @@ export function SetWallpaperSheet({ item, visible, onClose }: SetWallpaperSheetP
               APPLY TO
             </AppText>
             {options.length > 1 ? (
-              <Segmented options={options} value={mode} onChange={setMode} accessibilityLabel="Wallpaper target" />
+              <Segmented options={options} value={mode} onChange={setMode} disabled={actions.busy} accessibilityLabel="Wallpaper target" />
             ) : (
               <View style={[styles.notice, { backgroundColor: colors.fill, borderColor: colors.stroke }]}>
                 <Ionicons name="information-circle-outline" size={18} color={colors.textMuted} />
                 <AppText variant="caption" tone="muted" style={styles.noticeText}>
-                  This Android version only supports the home screen. Android 7.0+ also allows the lock screen.
+                  Separate targets are unavailable in this build or device. Direct wallpaper changes require an updated native Android build and may be restricted by device policy.
                 </AppText>
               </View>
             )}
@@ -83,12 +85,14 @@ export function SetWallpaperSheet({ item, visible, onClose }: SetWallpaperSheetP
           </View>
         )}
 
-        {actions.busy && actions.running === 'apply' ? (
+        {actions.busy ? (
           <View style={styles.progress}>
             <ProgressBar value={actions.progress} />
             <AppText variant="caption" tone="muted">
-              Downloading the full-resolution image{percent > 0 ? ` · ${percent}%` : ''}…
+              {actions.progress >= 1 ? 'Validating image / finishing system action…' : `Downloading the full-resolution image${percent > 0 ? ` · ${percent}%` : ''}…`}
             </AppText>
+            <Button title="Cancel action" icon="close" variant="ghost" inline onPress={cancel} />
+            <AppText variant="caption" tone="faint">A system action already started cannot be undone.</AppText>
           </View>
         ) : null}
 
@@ -98,7 +102,7 @@ export function SetWallpaperSheet({ item, visible, onClose }: SetWallpaperSheetP
           variant="primary"
           size="lg"
           loading={actions.running === 'apply'}
-          disabled={!item}
+          disabled={!item || actions.busy}
           onPress={async () => {
             const done = await actions.apply(mode);
             if (done) onClose();
@@ -125,18 +129,10 @@ export function SetWallpaperSheet({ item, visible, onClose }: SetWallpaperSheetP
             title="Save a copy to the gallery"
             icon="images-outline"
             loading={actions.running === 'save'}
-            disabled={!item}
+            disabled={!item || actions.busy}
             onPress={() => void actions.save()}
           />
-        ) : (
-          <Button
-            title="Save to photo library"
-            icon="images-outline"
-            loading={actions.running === 'save'}
-            disabled={!item}
-            onPress={() => void actions.save()}
-          />
-        )}
+        ) : null}
 
         {item?.raw.source_url ? (
           <AppText variant="caption" tone="faint" align="center">

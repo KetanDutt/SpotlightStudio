@@ -6,7 +6,7 @@ import { useMotionValue } from '../../hooks/useMotionValue';
  * an optional action ("Undo", "View").  Using a provider means every screen can show one
  * with `useToast().show(...)` and they never stack more than two deep.
  */
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, Easing, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
