@@ -11,7 +11,7 @@
  */
 "use strict";
 
-const VERSION = "2.5.0";
+const VERSION = "2.6.0";
 const SCOPE_KEY = encodeURIComponent(new URL(self.registration.scope).pathname);
 const SHELL_PREFIX = `spotlight-shell-${SCOPE_KEY}-`;
 const SHELL_CACHE = `${SHELL_PREFIX}${VERSION}`;

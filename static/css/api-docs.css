@@ -1,17 +1,46 @@
-/* Keep the self-hosted interactive reference in the same material/type system.
-   Swagger itself remains unmodified and retains its operation semantics. */
+/* Keep the self-hosted interactive reference in the same Liquid Glass material
+   and type system as the gallery. Swagger itself remains unmodified and retains
+   its operation semantics; every override reads from tokens.css. */
 * { box-sizing: border-box; }
-body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.6 var(--font); }
+html { scrollbar-width: thin; scrollbar-color: var(--stroke-2) transparent; }
+body {
+  margin: 0; color: var(--text); font: 14px/1.6 var(--font);
+  -webkit-font-smoothing: antialiased;
+  background-color: var(--bg);
+  background-image:
+    radial-gradient(1100px 720px at 12% -8%, var(--ambient-a), transparent 70%),
+    radial-gradient(900px 640px at 88% 108%, var(--ambient-b), transparent 70%);
+  background-attachment: fixed;
+}
 a { color: var(--accent); }
-:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
-.reference-header { max-width: 1420px; margin: 24px auto 0; padding: 16px 24px; display: flex; align-items: center; gap: 24px; border: 1px solid var(--stroke); border-radius: var(--r-xl); background: var(--glass); backdrop-filter: var(--blur); box-shadow: var(--highlight), var(--shadow-1); }
-.reference-header a { text-decoration: none; min-height: 44px; display: inline-flex; align-items: center; }
-.reference-brand { font-size: 17px; font-weight: 650; color: var(--text); }
-.reference-header span { color: var(--text-3); }
-.reference-schema { margin-left: auto; }
+:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+::selection { background: var(--selection); color: var(--text); }
+
+/* Floating glass header — primary material, same as the gallery top bar. */
+.reference-header {
+  max-width: 1420px; margin: 24px auto 0; padding: 12px 16px;
+  display: flex; align-items: center; gap: 20px;
+  border: 1px solid var(--stroke); border-radius: var(--r-xl);
+  background: var(--glass-primary);
+  -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur);
+  box-shadow: var(--shadow-1), var(--highlight);
+}
+.reference-header a { text-decoration: none; min-height: 44px; display: inline-flex; align-items: center; border-radius: var(--r-sm); }
+.reference-brand { font-size: 17px; font-weight: 600; letter-spacing: -.02em; color: var(--text); padding: 0 8px; }
+.reference-brand:hover { color: var(--accent); }
+.reference-header > span { color: var(--text-3); font-size: 13px; }
+.reference-schema { margin-left: auto; padding: 0 14px; border-radius: var(--r-pill); background: var(--fill); border: 1px solid var(--stroke); font-size: 13px; font-weight: 500; color: var(--text-2); transition: background-color var(--duration-fast), color var(--duration-fast), border-color var(--duration-fast); }
+.reference-schema:hover { background: var(--fill-hover); color: var(--text); border-color: var(--stroke-2); }
+
+/* Swagger chrome — quiet surfaces, hairlines, semantic accent. */
 .swagger-ui { color: var(--text); }
 .swagger-ui, .swagger-ui .info .title, .swagger-ui .btn { font-family: var(--font); }
-.swagger-ui .info .title { font-size: 36px; font-weight: 500; letter-spacing: -.035em; }
+.swagger-ui .info { margin: 32px 0 16px; }
+.swagger-ui .info .title { font-size: clamp(26px, 4vw, 38px); font-weight: 600; letter-spacing: -.035em; }
+.swagger-ui .info .title small { background: var(--accent); color: var(--accent-ink); border-radius: var(--r-sm); }
+.swagger-ui .info .title small pre { color: var(--accent-ink); }
+.swagger-ui .info .title small.version-stamp { background: var(--accent-fill); border: 1px solid var(--accent-edge); border-radius: var(--r-sm); padding: 2px 8px; }
+.swagger-ui .info .title small.version-stamp pre { color: var(--accent); background: none; }
 .swagger-ui .info .title, .swagger-ui .info p, .swagger-ui .info li, .swagger-ui .info h2,
 .swagger-ui .info h3, .swagger-ui .opblock-tag, .swagger-ui .opblock-tag small,
 .swagger-ui .opblock .opblock-summary-description, .swagger-ui .opblock .opblock-summary-path,
@@ -23,34 +52,32 @@ a { color: var(--accent); }
 .swagger-ui .tab li, .swagger-ui label, .swagger-ui .markdown p, .swagger-ui .markdown li,
 .swagger-ui select, .swagger-ui input, .swagger-ui textarea, .swagger-ui .btn { color: var(--text); }
 .swagger-ui a.nostyle, .swagger-ui .info a, .swagger-ui .renderedMarkdown a { color: var(--accent); }
-.swagger-ui .scheme-container, .swagger-ui section.models, .swagger-ui .opblock .opblock-section-header { background: var(--bg-elev); border-color: var(--stroke); box-shadow: none; }
-.swagger-ui .opblock { border-radius: var(--r-md); box-shadow: none; border-color: var(--stroke-2); background: var(--fill); margin-bottom: 16px; }
-.swagger-ui .opblock .opblock-summary { padding: 10px; border-color: var(--stroke); }
-.swagger-ui .opblock .opblock-summary-method { background: var(--accent); color: var(--accent-ink); text-shadow: none; border-radius: var(--r-sm); }
-.swagger-ui .opblock-tag { border-color: var(--stroke); font-weight: 500; }
-.swagger-ui .opblock-tag:hover, .swagger-ui .model-box { background: var(--fill); }
-.swagger-ui select, .swagger-ui input, .swagger-ui textarea { background: var(--bg-elev); border: 1px solid var(--stroke-2); border-radius: var(--r-sm); box-shadow: none; min-height: 44px; }
-.swagger-ui .btn { border-color: var(--stroke-2); border-radius: var(--r-sm); min-height: 44px; box-shadow: none; }
-.swagger-ui .btn.execute { background: var(--accent); color: var(--accent-ink); border: 0; }
+.swagger-ui .scheme-container, .swagger-ui section.models, .swagger-ui .opblock .opblock-section-header { background: var(--bg-elev); border: 1px solid var(--stroke); border-radius: var(--r-md); box-shadow: none; }
+.swagger-ui .opblock { border-radius: var(--r-md); box-shadow: none; border: 1px solid var(--stroke-2); background: var(--fill); margin-bottom: 14px; }
+.swagger-ui .opblock .opblock-summary { padding: 10px 12px; border-color: var(--stroke); }
+.swagger-ui .opblock .opblock-summary-method { background: var(--accent); color: var(--accent-ink); text-shadow: none; border-radius: var(--r-sm); font-weight: 600; }
+.swagger-ui .opblock-tag { border-color: var(--stroke); font-weight: 600; border-radius: var(--r-sm); }
+.swagger-ui .opblock-tag:hover, .swagger-ui .model-box { background: var(--fill-hover); }
+.swagger-ui select, .swagger-ui input, .swagger-ui textarea { background: var(--bg-inset); border: 1px solid var(--stroke); border-radius: var(--r-sm); box-shadow: none; min-height: 44px; transition: border-color var(--duration-fast), box-shadow var(--duration-fast); }
+.swagger-ui select:focus, .swagger-ui input:focus, .swagger-ui textarea:focus { outline: none; border-color: var(--accent-edge); box-shadow: 0 0 0 3px var(--accent-fill); }
+.swagger-ui .btn { border-color: var(--stroke-2); border-radius: var(--r-sm); min-height: 44px; box-shadow: var(--highlight); transition: background-color var(--duration-fast), filter var(--duration-fast); }
+.swagger-ui .btn:hover { background: var(--fill-hover); }
+.swagger-ui .btn.execute { background: var(--accent-grad); color: var(--accent-ink); border: 0; font-weight: 600; box-shadow: var(--shadow-1), inset 0 1px 0 rgba(255, 255, 255, .25); }
+.swagger-ui .btn.execute:hover { filter: brightness(1.06); }
 .swagger-ui svg { fill: var(--text-2); }
-.swagger-ui .info .title small { background: var(--accent); }
-.swagger-ui .info .title small pre { color: var(--accent-ink); }
-.swagger-ui .dialog-ux .modal-ux { background: var(--bg-elev); border: 1px solid var(--stroke); border-radius: var(--r-xl); color: var(--text); }
-.swagger-ui .dialog-ux .modal-ux-header h3 { color: var(--text); }
-@media (max-width: 760px) {
-  .reference-header { margin: 12px; padding: 12px 16px; gap: 12px; flex-wrap: wrap; }
-  .reference-header span { display: none; }
-  .reference-schema { font-size: 12px; }
-  .swagger-ui .info .title { font-size: 28px; }
-}
-@supports not (backdrop-filter: blur(1px)) { .reference-header { background: var(--bg-elev); } }
-@media (prefers-reduced-transparency: reduce) { .reference-header { background: var(--bg-elev); backdrop-filter: none; } }
-@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; } }
-/* Match Swagger's method-specific specificity without changing vendored assets. */
-.swagger-ui .opblock[class*="opblock-"] { background: var(--fill); border-color: var(--stroke-2); }
-.swagger-ui .opblock[class*="opblock-"] .opblock-summary { border-color: var(--stroke); }
-.swagger-ui .opblock[class*="opblock-"] .opblock-summary-method { background: var(--accent); color: var(--accent-ink); }
-.swagger-ui .info :is(li, p) code { color: var(--accent); background: var(--fill); }
-.swagger-ui .info .title small.version-stamp { background: var(--accent-fill); }
-.swagger-ui .info .title small.version-stamp pre { color: var(--accent); }
+.swagger-ui .info :is(li, p) code { color: var(--accent); background: var(--fill); border-radius: 6px; }
+.swagger-ui .dialog-ux .modal-ux { background: var(--glass-float); border: 1px solid var(--stroke-2); border-radius: var(--r-xl); color: var(--text); box-shadow: var(--shadow-3), var(--highlight); -webkit-backdrop-filter: var(--blur-strong); backdrop-filter: var(--blur-strong); }
+.swagger-ui .dialog-ux .modal-ux-header h3 { color: var(--text); font-weight: 600; }
+.swagger-ui .dialog-ux .modal-ux-content { color: var(--text-2); }
 .swagger-ui .expand-operation svg, .swagger-ui .opblock-summary-control svg, .swagger-ui svg use { fill: var(--text-2); }
+
+@media (max-width: 760px) {
+  .reference-header { margin: 12px; padding: 10px 12px; gap: 12px; flex-wrap: wrap; }
+  .reference-header > span { display: none; }
+  .reference-schema { font-size: 12px; }
+}
+@supports not (backdrop-filter: blur(1px)) { .reference-header, .swagger-ui .dialog-ux .modal-ux { background: var(--bg-elev); } }
+@media (prefers-reduced-transparency: reduce) { .reference-header, .swagger-ui .dialog-ux .modal-ux { background: var(--bg-elev); -webkit-backdrop-filter: none; backdrop-filter: none; } }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; } }
+
+/* Self-hosted API reference: no inline code, CDN dependency or external validator. */
