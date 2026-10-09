@@ -1,0 +1,12 @@
+{
+  "expo": {
+    "extra": {
+      "eas": {
+        "projectId": "08354be0-9897-420d-8125-3bcc61e557e8"
+      }
+    },
+    "android": {
+      "package": "com.ketandutt.spotlightstudiowebtests"
+    }
+  }
+}
