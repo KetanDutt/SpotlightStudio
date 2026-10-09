@@ -31,6 +31,28 @@ This project follows [Semantic Versioning](https://semver.org/).
   QA, signing, hosting/content rights and publisher/privacy approvals remain release blockers.
   See `docs/NATIVE_RELEASE.md`; no automated audit waiver or signed artifact was produced.
 
+## [2.6.0] — 2026-10-09
+
+### Changed
+- Web/PWA interface refined into the **Liquid Glass** design language: a four-strength
+  glass material system (primary / secondary / tinted / floating) with controlled blur
+  and saturation, a layered ambient background with fine grain, and a centralized token
+  layer (`static/css/tokens.css`) for colour, materials, radii, spacing, type, motion and
+  z-layers in both themes.
+- Premium interaction pass across every surface: tactile buttons with press compression,
+  spring-sliding segmented indicator, glass popovers/menus, spring dialogs, floating glass
+  toasts, staggered card entrances, gentle photo elevation, refined list rows, pills,
+  inputs with animated focus rings, semantic status tints, and polished skeleton, empty,
+  error, offline and read-only states.
+- Consistency fixes: all selection, chip and pagination accents now come from the accent
+  tokens (a stray hard-coded blue is gone), select chevrons and status pills use semantic
+  theme-aware tokens, and the API reference page shares the same materials and motion.
+- Theme switches crossfade the base layer; `prefers-reduced-motion`,
+  `prefers-reduced-transparency` and `forced-colors` remain first-class, and all motion
+  stays GPU-friendly (transform/opacity/filter only).
+- Versioned asset URLs, service-worker shell cache and API-docs cache busters bumped to
+  2.6.0 together. No functionality, routes, APIs, data or user flows changed.
+
 ## [2.5.0] — 2026-10-08
 
 ### Added

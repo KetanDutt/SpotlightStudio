@@ -1,9 +1,9 @@
 # Spotlight Studio
 
-**An archive and gallery of Windows Spotlight wallpapers** — crawl them from Peapix and Windows10Spotlight, de-duplicate them by perceptual hash, keep the best resolution of every picture and browse the whole collection in the restrained **Still Glass** interface, either as a static GitHub Pages showcase or as a desktop app with crawler controls.
+**An archive and gallery of Windows Spotlight wallpapers** — crawl them from Peapix and Windows10Spotlight, de-duplicate them by perceptual hash, keep the best resolution of every picture and browse the whole collection in the restrained **Liquid Glass** interface, either as a static GitHub Pages showcase or as a desktop app with crawler controls.
 
 [![CI](https://github.com/KetanDutt/SpotlightStudio/actions/workflows/ci.yml/badge.svg)](https://github.com/KetanDutt/SpotlightStudio/actions/workflows/ci.yml)
-![Version](https://img.shields.io/badge/version-2.5.0-739b8b)
+![Version](https://img.shields.io/badge/version-2.6.0-739b8b)
 ![Python](https://img.shields.io/badge/python-3.10%2B-3776ab)
 ![License](https://img.shields.io/badge/license-all%20rights%20reserved-lightgrey)
 
@@ -11,9 +11,9 @@
 
 | Viewer | Light theme | Mobile |
 |:---:|:---:|:---:|
-| <img src="docs/assets/screenshot-viewer.jpg" alt="Full-screen viewer with details, tags and actions" width="440"> | <img src="docs/assets/screenshot-light.jpg" alt="Still Glass light theme" width="440"> | <img src="docs/assets/screenshot-mobile.jpg" alt="Phone layout" width="170"> |
+| <img src="docs/assets/screenshot-viewer.jpg" alt="Full-screen viewer with details, tags and actions" width="440"> | <img src="docs/assets/screenshot-light.jpg" alt="Liquid Glass light theme" width="440"> | <img src="docs/assets/screenshot-mobile.jpg" alt="Phone layout" width="170"> |
 
-<sub>Still Glass screenshots use generated placeholders, not real wallpapers; the new daily card is not shown in these snapshots.</sub>
+<sub>Liquid Glass screenshots use generated placeholders, not real wallpapers; the new daily card is not shown in these snapshots.</sub>
 
 ---
 
@@ -46,8 +46,8 @@
 - **Build/hygiene:** current Expo module plugin, bounded Android bitmap decoding, fewer
   bundled fonts/unused dependencies, exact public-site file list and expanded regressions.
 
-The [Still Glass design system](docs/DESIGN.md) is retained. Backend/web version is
-**2.5.0**; mobile **1.2.0** and bridge **0.3.0** have independent versions.
+The [Liquid Glass design system](docs/DESIGN.md) is retained. Backend/web version is
+**2.6.0**; mobile **1.2.0** and bridge **0.3.0** have independent versions.
 
 **Release status:** automated checks pass locally, but production sign-off still needs
 real-device/native compilation, real-library verification and triage of **55 affected
