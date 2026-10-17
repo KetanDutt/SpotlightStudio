@@ -51,6 +51,7 @@ from src.database import (
     download_queue_size,
     export_catalog_json,
     get_all_wallpapers,
+    get_daily_wallpaper,
     get_db,
     get_random_wallpaper,
     get_source_stats,
@@ -435,6 +436,27 @@ def create_app(cfg: Settings = settings, eng: DownloadEngine = engine) -> FastAP
         if not row:
             raise HTTPException(status_code=404, detail="No wallpaper matches the filters.")
         return row
+
+    @app.get("/api/wallpapers/daily", response_model=WallpaperModel, tags=["Wallpapers"],
+             summary="Daily spotlight wallpaper")
+    def daily_wallpaper(
+        date: str = Query("", max_length=20, description="Optional UTC date (YYYY-MM-DD); defaults to today.")
+    ) -> dict:
+        """Deterministic daily spotlight wallpaper matching web and native clients."""
+        row = get_daily_wallpaper(day=date if date else None)
+        if not row:
+            raise HTTPException(status_code=404, detail="No wallpaper available in library.")
+        return row
+
+    @app.get("/api/wallpapers/daily/image", tags=["Wallpapers"],
+             summary="Redirect to today's daily wallpaper image")
+    def daily_wallpaper_image(
+        date: str = Query("", max_length=20, description="Optional UTC date (YYYY-MM-DD); defaults to today.")
+    ) -> RedirectResponse:
+        row = get_daily_wallpaper(day=date if date else None)
+        if not row:
+            raise HTTPException(status_code=404, detail="No wallpaper available in library.")
+        return RedirectResponse(url=f"/images/{row['filename']}", status_code=302)
 
     @app.get("/api/wallpapers/{wallpaper_id}", response_model=WallpaperModel,
              tags=["Wallpapers"], summary="Get one wallpaper")

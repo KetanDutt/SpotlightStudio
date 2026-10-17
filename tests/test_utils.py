@@ -110,3 +110,14 @@ def test_atomic_write_and_lfs_detection(tmp_path):
     big = tmp_path / "big.jpg"
     big.write_bytes(b"version https://git-lfs.github.com/spec/v1\n" + b"x" * 5000)
     assert not utils.is_lfs_pointer(big)  # too large to be a pointer
+
+
+def test_daily_score_deterministic_and_matches_client():
+    # Parity check against JavaScript's FNV-1a avalanche implementation
+    assert utils.daily_score("2026-10-17", 1) == 1826527412
+    # Determinism
+    assert utils.daily_score("2026-10-17", 1) == utils.daily_score("2026-10-17", 1)
+    # Distinctness
+    assert utils.daily_score("2026-10-17", 1) != utils.daily_score("2026-10-17", 2)
+    assert utils.daily_score("2026-10-17", 1) != utils.daily_score("2026-10-18", 1)
+

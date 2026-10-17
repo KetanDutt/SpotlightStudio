@@ -41,6 +41,7 @@ import threading
 from collections import Counter
 from collections.abc import Iterator
 from contextlib import closing, contextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -50,6 +51,7 @@ from src.utils import (
     atomic_write_bytes,
     canonical_quality,
     choose_title,
+    daily_score,
     escape_like,
     merge_tags,
     normalize_date,
@@ -574,6 +576,32 @@ def get_random_wallpaper(
             f"SELECT * FROM wallpapers {where_clause} ORDER BY RANDOM() LIMIT 1", params
         ).fetchone()
     return dict(row) if row else None
+
+
+def get_daily_wallpaper(day: str | None = None) -> dict | None:
+    """
+    Deterministic daily spotlight wallpaper matching web and native clients.
+
+    Computes the highest FNV-1a score for the given UTC day string (YYYY-MM-DD).
+    Returns the full wallpaper dictionary, or None if the library is empty.
+    """
+    if not day:
+        day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    with get_db() as conn:
+        rows = conn.execute("SELECT id FROM wallpapers").fetchall()
+        if not rows:
+            return None
+        winner_id = -1
+        best_score = -1
+        for row in rows:
+            wid = row["id"]
+            score = daily_score(day, wid)
+            if score > best_score or (score == best_score and (winner_id == -1 or wid < winner_id)):
+                best_score = score
+                winner_id = wid
+        if winner_id == -1:
+            return None
+    return get_wallpaper(winner_id)
 
 
 def count_wallpapers(source: str = "") -> int:

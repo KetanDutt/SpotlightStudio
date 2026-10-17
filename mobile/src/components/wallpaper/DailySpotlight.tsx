@@ -2,7 +2,7 @@
 import { Image } from 'expo-image';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import React, { useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import type { Wallpaper } from '../../core/types';
 import { QUALITY_LABELS, SOURCE_LABELS } from '../../core/utils';
 import { thumbnailUrl } from '../../services/media';
@@ -16,11 +16,20 @@ export function DailySpotlight({ item, favorite, onOpen, onToggleFavorite }: {
 }) {
   const { colors, reduceMotion } = useTheme();
   const [failed, setFailed] = useState(false);
+  const [loading, setLoading] = useState(true);
   return <View style={[styles.card, { backgroundColor: colors.glassSecondary, borderColor: colors.stroke }]} testID="daily-spotlight">
     <Touchable onPress={() => onOpen(item)} accessibilityRole="button" accessibilityLabel={`Daily spotlight: ${item.title}`}
       accessibilityHint="Opens today's wallpaper" style={styles.photo}>
       <Image source={{ uri: thumbnailUrl(item) }} contentFit="cover" cachePolicy="disk" recyclingKey={item.key}
-        transition={reduceMotion ? 0 : 150} style={StyleSheet.absoluteFill} onError={() => setFailed(true)} onLoad={() => setFailed(false)} />
+        transition={reduceMotion ? 0 : 150} style={StyleSheet.absoluteFill}
+        onLoadStart={() => { setLoading(true); setFailed(false); }}
+        onError={() => { setLoading(false); setFailed(true); }}
+        onLoad={() => { setLoading(false); setFailed(false); }} />
+      {loading && !failed ? (
+        <View style={[StyleSheet.absoluteFill, styles.placeholder]} pointerEvents="none">
+          <ActivityIndicator size="small" color={colors.accent} />
+        </View>
+      ) : null}
       {failed ? <View style={[StyleSheet.absoluteFill, styles.placeholder, { backgroundColor: colors.fill }]}>
         <Ionicons name="image-outline" size={28} color={colors.textFaint} />
         <AppText variant="caption" tone="muted">Preview unavailable · tap to open</AppText>

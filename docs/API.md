@@ -142,6 +142,33 @@ curl "http://127.0.0.1:8765/api/wallpapers?search=lavaredo&per_page=1"
 ### `GET /api/wallpapers/random`
 One random wallpaper; accepts `search`, `source`, `tag`, `quality`. `404` when nothing matches.
 
+### `GET /api/wallpapers/daily`
+Deterministic daily spotlight wallpaper matching web and native clients (derived from the UTC date using 32-bit FNV-1a avalanche hashing). Optional `?date=YYYY-MM-DD` query parameter to preview any date. `404` when library is empty.
+```json
+{
+  "id": 5930,
+  "phash": "0831145391c6408720c39042e049e101f000fe61ee21fc2cf82cfb33fb59fb01",
+  "filename": "win10spotlight/aa271989eef135085471e963e0db05e6.jpg",
+  "title": "Palm trees on Poolenalena beach at sunset, Maui, Hawaii, USA",
+  "source": "win10spotlight",
+  "source_url": "https://windows10spotlight.com/wp-content/uploads/2018/02/1385f31850303f67ba03299e000a8b35.jpg",
+  "page_url": "https://windows10spotlight.com/images/6484",
+  "width": 1920,
+  "height": 1080,
+  "file_size": 464321,
+  "tags": "beach,clouds,dusk,hawaii,landscape,nature,ocean,outdoors,palm,rock,sand,sky,sunset,trees,usa",
+  "date_spotted": "2018-02-19",
+  "downloaded_at": "2026-10-01T14:32:56.071938+00:00",
+  "quality": "FHD (1080p)"
+}
+```
+
+### `GET /api/wallpapers/daily/image`
+`302` redirect to `/images/<filename>` for today's daily spotlight wallpaper (or `?date=YYYY-MM-DD`). Perfect for automation scripts, curl, and automated desktop background rotators.
+```bash
+curl -L http://127.0.0.1:8765/api/wallpapers/daily/image -o daily.jpg
+```
+
 ### `GET /api/wallpapers/{id}`
 One wallpaper (same shape as above). `404` if unknown.
 

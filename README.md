@@ -27,41 +27,25 @@
 | 🔎 **Great browsing** | UTC daily spotlight, instant multi-term search, tag & resolution filters, portable favorites, shareable deep links (`#w=1234`), random wallpaper, keyboard shortcuts, light/dark theme |
 | 📱 **Installable PWA** | works on phones, offline-capable, accessible (keyboard, screen-reader, reduced-motion) |
 | 🤖 **Android / iOS app** | Expo client: offline search, favourites, history, **set the wallpaper on Android** (home/lock/both) with automatic rotation; on iOS it saves to Photos and guides you through the Shortcuts step ([details](docs/MOBILE.md#setting-a-wallpaper)) |
+| 📺 **Roku TV channel** | 60 fps pure 2D canvas (`roScreen`), home screen theme studio, ambient screensavers with Ken Burns drift, 3-day trial and IAP auto-switching ([details](docs/ROKU.md)) |
 | 🔒 **Locked down** | strict CSP, Host/Origin checks on the local API, no XSS from scraped titles, CSV-injection-safe exports, DB and logs are never served |
 
-## What’s new in 2.5 — reliability and daily discovery
+## What’s new in 2.6 — Roku TV, daily automation and polish
 
-- **Daily spotlight:** web and mobile share one deterministic pick per UTC day when
-  using the same catalog. Explore it or favorite it; this does not change your wallpaper.
-- **Portable favorites:** export/import the same JSON backup on web and mobile,
-  merge without deleting existing favorites, and keep keys missing from today's catalog.
-- **Safer operations:** an OS-backed library lock rejects competing server/CLI instances
-  before startup changes; schema-3 hash indexes speed near-duplicate candidate selection.
-  Maintenance, cancellation and shutdown preserve originals and shared file references.
-- **Better feedback:** persistent image errors with retry, viewer favorites that refresh
-  correctly, live metadata updates, scoped first-visit/offline PWA caching and clearer refresh/reset outcomes.
-- **Mobile correctness:** Save means save to Photos, not set Android wallpaper; staged,
-  cancellable downloads, source-aware catalog caching, validated/serialized preferences,
-  and rotation that respects filters, intervals and the latest scheduling intent.
-- **Build/hygiene:** current Expo module plugin, bounded Android bitmap decoding, fewer
-  bundled fonts/unused dependencies, exact public-site file list and expanded regressions.
+- **Roku TV channel:** A dedicated 10-foot living room experience built on a 60 fps double-buffered 2D canvas with home-screen theme switcher, ambient screensavers, trial mode, and in-app purchase store architecture.
+- **Daily automation & CLI:** `python main.py --daily` prints today's deterministic pick and `--set-daily` immediately applies it to your desktop background across Windows, macOS, and Linux.
+- **Enhanced API:** `/api/wallpapers/daily` and `/api/wallpapers/daily/image` endpoints for scheduled background rotations and script integration.
+- **Expanded keyboard controls:** `T` to cycle theme (dark, light, system) and `W` to apply the current wallpaper in desktop mode.
+- **Obsidian Liquid Glass branding:** Unified master asset generator producing 4x supersampled adaptive icons and splash screens across web, mobile, and television.
 
-The [Liquid Glass design system](docs/DESIGN.md) is retained. Backend/web version is
-**2.6.0**; mobile **1.2.0** and bridge **0.3.0** have independent versions.
-
-**Release status:** automated checks pass locally, but production sign-off still needs
-real-device/native compilation, real-library verification and triage of **55 affected
-mobile dependency packages (49 high, 5 moderate)**. See the [review and outstanding risks](docs/REVIEW.md) and
-[release checklist](docs/RELEASE_CHECKLIST.md). Writable remote servers still need an
-authenticated proxy/VPN; Host checks are not authentication.
-
-## Three ways to use it
+## Four ways to use it
 
 | Mode | What you get | How |
 |---|---|---|
 | **Static showcase** | browse, search, favorite, download | publish the allow-listed static build to GitHub Pages ([guide](docs/DEPLOYMENT.md)) |
 | **Desktop / server** | everything above **plus** crawler controls, live progress, repair tools, *Set as wallpaper*, full exports | run the app locally |
 | **Mobile app** | the same catalog on Android/iOS with favourites, history and offline search — and real *set wallpaper* plus background rotation on Android | `cd mobile && npm ci && npm start` ([guide](docs/MOBILE.md)) |
+| **Roku TV channel** | 7,500+ wallpapers on your TV with ambient screensavers, theme studio, and remote control navigation | sideload to Roku or run in simulator ([guide](docs/ROKU.md)) |
 
 The same `index.html` serves the two browser modes: it detects a Spotlight Studio backend on its own origin and unlocks the crawler console when one answers. The mobile app is a separate client in `mobile/` and reads the same catalog.
 
@@ -111,6 +95,9 @@ Pause, resume and stop at any time — unfinished work stays in the queue. Progr
 ```bash
 python main.py                         # desktop window
 python main.py --server [--host 0.0.0.0 --port 8765]
+python main.py --daily                 # print today's daily spotlight wallpaper JSON
+python main.py --set-daily             # set today's daily spotlight as desktop wallpaper
+python main.py --set-wallpaper 42      # set specific wallpaper ID as desktop wallpaper
 python main.py --crawl --mode quick    # one-shot update without UI (cron / Task Scheduler)
 python main.py --crawl --mode full --source peapix
 python main.py --crawl --mode repair   # back-fill titles and tags
@@ -120,7 +107,7 @@ python main.py --sync-catalog          # regenerate data/wallpapers.json
 
 ### Keyboard shortcuts
 
-`/` search · `R` random wallpaper · `F` favorite / favorites view · `←` `→` previous / next · `C` copy link · `D` download · `Enter` fullscreen · `Esc` close · `?` help
+`/` search · `R` random wallpaper · `F` favorite / favorites view · `T` cycle theme · `W` set as wallpaper · `←` `→` previous / next · `C` copy link · `D` download · `Enter` fullscreen · `Esc` close · `?` help
 
 ### Favorites backup
 
@@ -207,6 +194,7 @@ Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) and [docs/D
 | [Deployment](docs/DEPLOYMENT.md) | GitHub Pages, local/headless use, scheduled updates, upgrading |
 | [Front-end](docs/FRONTEND.md) | modules, URL parameters, CSP, service worker |
 | [Mobile app](docs/MOBILE.md) | Android & iOS client: set-wallpaper capabilities, rotation, EAS builds |
+| [Roku TV channel](docs/ROKU.md) | Roku 2D canvas architecture, theme studio, screensavers and sideloading |
 | [Data formats](docs/DATA.md) | catalog JSON, database schema, normalisation rules |
 | [Security](docs/SECURITY.md) | threat model and hardening |
 | [Troubleshooting](docs/TROUBLESHOOTING.md) | common problems and fixes |

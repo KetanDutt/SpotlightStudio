@@ -242,6 +242,37 @@ def csv_safe(value: object) -> str:
 
 
 # ──────────────────────────────────────────────────────────────────────────
+# Deterministic Daily Pick
+# ──────────────────────────────────────────────────────────────────────────
+
+
+def daily_score(day: str, wallpaper_id: int) -> int:
+    """
+    Compute a deterministic 32-bit score for a wallpaper ID on a given date.
+
+    Uses FNV-1a with avalanche permutations, exactly matching the algorithm
+    used by the web frontend and native clients. The highest score on a given
+    date (YYYY-MM-DD) becomes that day's Spotlight wallpaper.
+    """
+    key = f"{day}|{wallpaper_id}"
+    h = 2166136261 - 0x100000000
+    for ch in key:
+        h = ((h ^ ord(ch)) * 16777619) & 0xFFFFFFFF
+        if h >= 0x80000000:
+            h -= 0x100000000
+    u = h & 0xFFFFFFFF
+    h = ((h ^ (u >> 16)) * 0x7FEB352D) & 0xFFFFFFFF
+    if h >= 0x80000000:
+        h -= 0x100000000
+    u = h & 0xFFFFFFFF
+    h = ((h ^ (u >> 15)) * 0x846CA68B) & 0xFFFFFFFF
+    if h >= 0x80000000:
+        h -= 0x100000000
+    u = h & 0xFFFFFFFF
+    return (u ^ (u >> 16)) & 0xFFFFFFFF
+
+
+# ──────────────────────────────────────────────────────────────────────────
 # Files
 # ──────────────────────────────────────────────────────────────────────────
 

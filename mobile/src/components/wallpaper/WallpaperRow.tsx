@@ -1,8 +1,8 @@
 /** List-mode row: thumbnail + title + metadata. */
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Image } from 'expo-image';
-import React, { memo } from 'react';
-import { StyleSheet, View } from 'react-native';
+import React, { memo, useState } from 'react';
+import { ActivityIndicator, StyleSheet, View } from 'react-native';
 
 import { radius, spacing } from '../../theme/tokens';
 import { useTheme } from '../../theme/ThemeProvider';
@@ -21,6 +21,7 @@ export interface WallpaperRowProps {
 
 export const WallpaperRow = memo(function WallpaperRow({ item, thumb, favorite, onPress, onToggleFavorite }: WallpaperRowProps) {
   const { colors, reduceMotion } = useTheme();
+  const [loading, setLoading] = useState(true);
   const meta = [QUALITY_LABELS[item.q] ?? item.q, fmtWallpaperSize(item.raw.width, item.raw.height).split(' · ')[0], fmtBytes(item.raw.file_size)]
     .filter(Boolean)
     .join(' · ');
@@ -33,15 +34,25 @@ export const WallpaperRow = memo(function WallpaperRow({ item, thumb, favorite, 
       plain
       style={[styles.row, { backgroundColor: 'transparent', borderColor: colors.stroke }]}
     >
-      <Image
-        source={{ uri: thumb }}
-        contentFit="cover"
-        transition={reduceMotion ? 0 : 180}
-        cachePolicy="disk"
-        recyclingKey={item.key}
-        style={[styles.thumb, { backgroundColor: colors.fill }]}
-        accessibilityIgnoresInvertColors
-      />
+      <View style={[styles.thumbWrap, { backgroundColor: colors.fill }]}>
+        <Image
+          source={{ uri: thumb }}
+          contentFit="cover"
+          transition={reduceMotion ? 0 : 180}
+          cachePolicy="disk"
+          recyclingKey={item.key}
+          style={StyleSheet.absoluteFill}
+          accessibilityIgnoresInvertColors
+          onLoadStart={() => setLoading(true)}
+          onLoad={() => setLoading(false)}
+          onError={() => setLoading(false)}
+        />
+        {loading ? (
+          <View style={[StyleSheet.absoluteFill, styles.spinnerCenter]} pointerEvents="none">
+            <ActivityIndicator size="small" color={colors.accent} />
+          </View>
+        ) : null}
+      </View>
       <View style={styles.text}>
         <AppText variant="subheading" numberOfLines={2}>
           {item.title}
@@ -79,6 +90,16 @@ const styles = StyleSheet.create({
     padding: spacing.sm,
     borderRadius: radius.lg,
     borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  thumbWrap: {
+    width: 92,
+    height: 62,
+    borderRadius: radius.md,
+    overflow: 'hidden',
+  },
+  spinnerCenter: {
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   thumb: {
     width: 92,

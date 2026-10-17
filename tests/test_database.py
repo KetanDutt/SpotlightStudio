@@ -292,6 +292,17 @@ def test_random_tags_and_iteration(env):
     assert set(next(db.iter_wallpapers(fields=("id", "title")))) == {"id", "title"}
 
 
+def test_daily_wallpaper_selection(env):
+    assert db.get_daily_wallpaper() is None
+    wps = [add_wallpaper(title=f"WP {i}") for i in range(5)]
+    daily = db.get_daily_wallpaper("2026-10-17")
+    assert daily is not None
+    assert daily["id"] in [w["id"] for w in wps]
+    # Deterministic for the same day
+    assert db.get_daily_wallpaper("2026-10-17")["id"] == daily["id"]
+
+
+
 # ── Duplicates & metadata ──────────────────────────────────────────────────
 
 

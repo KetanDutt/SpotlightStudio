@@ -56,3 +56,14 @@ build/
 coverage/
 playwright-report/
 test-results/
+
+# ── Mobile build artifacts ────────────────────────────────────────────────
+.gradle/
+android/.gradle/
+mobile/**/.gradle/
+*.apk
+*.aab
+
+# ── Roku channel (per project policy, never commit to git) ────────────────
+roku/
+

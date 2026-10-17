@@ -540,9 +540,12 @@
       $("daily-meta").textContent = [SOURCE_LABELS[item.source] || item.source,
         C.QUALITY_LABELS[item.q], `${item.raw.width} × ${item.raw.height}`].join(" · ");
       const img = h("img", { alt: "", width: 480, height: 270, decoding: "async", fetchpriority: "high" });
+      img.addEventListener("load", () => img.classList.add("is-loaded"), { once: true });
       img.addEventListener("error", () => onThumbError(img, item), { once: true });
       img.src = imgUrl(item, true); // never load the original until asked
-      $("daily-photo").replaceChildren(img);
+      const spinner = h("span", { class: "card-spinner", "aria-hidden": "true" });
+      $("daily-photo").replaceChildren(img, spinner);
+      if (img.complete && img.naturalWidth) img.classList.add("is-loaded");
     }
     syncDailyFavorite();
   }
@@ -597,12 +600,14 @@
     img.addEventListener("error", () => onThumbError(img, item), { once: true });
     img.src = imgUrl(item, true);
 
+    const spinner = h("span", { class: "card-spinner", "aria-hidden": "true" });
+
     const badges = h("span", { class: "card-badges" });
     if (item.q === "4k" || item.q === "2k") badges.append(h("span", { class: `badge q-${item.q}`, text: C.QUALITY_LABELS[item.q] }));
 
     const card = h("article", { class: "card", role: "listitem", dataset: { id: item.id, key: item.key } },
       h("button", { class: "card-main", type: "button", dataset: { act: "open" }, "aria-label": `Open ${item.title}`, title: item.title },
-        h("span", { class: "card-media" }, img),
+        h("span", { class: "card-media" }, img, spinner),
         h("span", { class: "card-caption" },
           h("span", { class: `card-title${item.generated ? " is-generated" : ""}`, text: item.title }),
           h("span", { class: "card-sub", text: cardSubtitle(item) }))),
@@ -1511,6 +1516,12 @@
       case "f": case "F":
         if (inViewer) toggleFavorite(app.lb.item);
         else toggleFavoritesView();
+        break;
+      case "t": case "T":
+        cycleTheme();
+        break;
+      case "w": case "W":
+        if (inViewer && app.mode === "desktop") $("lb-setwp").click();
         break;
       case "ArrowLeft":
         if (inViewer) stepLightbox(-1);

@@ -127,6 +127,17 @@ def test_random_get_and_image_redirect(client):
     assert client.get("/api/wallpapers/99999/image", follow_redirects=False).status_code == 404
 
 
+def test_daily_endpoint_and_image_redirect(client):
+    row = add_wallpaper(filename="peapix/daily_test.jpg", source="peapix")
+    resp = client.get("/api/wallpapers/daily")
+    assert resp.status_code == 200
+    assert resp.json()["id"] == row["id"]
+
+    redirect = client.get("/api/wallpapers/daily/image", follow_redirects=False)
+    assert redirect.status_code == 302 and redirect.headers["location"] == "/images/peapix/daily_test.jpg"
+
+
+
 def test_tags_endpoint(client):
     add_wallpaper(tags="a,b")
     add_wallpaper(tags="a")

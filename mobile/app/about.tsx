@@ -118,9 +118,11 @@ export default function AboutScreen() {
 
         <SectionCard
           title="Licence & credits"
-          footer="Wallpapers remain the property of their original photographers. Spotlight Studio only collects publicly shared Windows Spotlight images."
+          footer="Spotlight Studio is an independent, unofficial project. Not affiliated with, sponsored by, or endorsed by Microsoft, Peapix or Windows10Spotlight. Wallpapers remain the property of their original photographers."
         >
-          <Row icon="document-text-outline" title="All rights reserved" subtitle="See LICENSE in the repository" divider={false} />
+          <Row icon="person-outline" title="Creator & Developer" subtitle="Ketan Dutt" divider />
+          <Row icon="document-text-outline" title="All rights reserved" subtitle="© 2026 Ketan Dutt · See LICENSE in repository" divider />
+          <Row icon="images-outline" title="Wallpaper Sources" subtitle="Windows Spotlight via Peapix and Windows10Spotlight" divider={false} />
         </SectionCard>
 
         <Button title="Close" variant="secondary" icon="chevron-down" onPress={() => (router.canGoBack() ? router.back() : router.push('/'))} />

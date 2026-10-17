@@ -1,8 +1,8 @@
 /** Photo-first gallery tile. Captions sit on a quiet surface, never over the photograph. */
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Image } from 'expo-image';
-import React, { memo } from 'react';
-import { StyleSheet, View } from 'react-native';
+import React, { memo, useState } from 'react';
+import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { durations, radius, spacing, TOUCH_TARGET } from '../../theme/tokens';
 import { useTheme } from '../../theme/ThemeProvider';
 import type { Wallpaper } from '../../core/types';
@@ -24,6 +24,7 @@ export interface WallpaperCardProps {
 export const WallpaperCard = memo(function WallpaperCard({ item, thumb, width, favorite, onPress,
   onLongPress, onToggleFavorite, showBadge = true }: WallpaperCardProps) {
   const { colors, reduceMotion } = useTheme();
+  const [loading, setLoading] = useState(true);
   const ratio = (item.raw.height || 1080) / (item.raw.width || 1920);
   const height = Math.round(width * Math.min(1.4, Math.max(0.72, ratio)));
   return (
@@ -38,7 +39,13 @@ export const WallpaperCard = memo(function WallpaperCard({ item, thumb, width, f
       >
         <View style={[styles.photo, { height, backgroundColor: colors.fill }]}>
           <Image source={{ uri: thumb }} contentFit="cover" transition={reduceMotion ? 0 : durations.normal}
-            cachePolicy="disk" recyclingKey={item.key} style={StyleSheet.absoluteFill} accessibilityIgnoresInvertColors />
+            cachePolicy="disk" recyclingKey={item.key} style={StyleSheet.absoluteFill} accessibilityIgnoresInvertColors
+            onLoadStart={() => setLoading(true)} onLoad={() => setLoading(false)} onError={() => setLoading(false)} />
+          {loading ? (
+            <View style={[StyleSheet.absoluteFill, styles.spinnerCenter]} pointerEvents="none">
+              <ActivityIndicator size="small" color={colors.accent} />
+            </View>
+          ) : null}
           {showBadge ? <View style={[styles.badge, { backgroundColor: colors.imageControl }]}>
             <AppText variant="caption" style={{ color: colors.imageText }}>{QUALITY_LABELS[item.q]?.split(' ')[0] ?? item.q.toUpperCase()}</AppText>
           </View> : null}
@@ -63,6 +70,7 @@ export const WallpaperCard = memo(function WallpaperCard({ item, thumb, width, f
 const styles = StyleSheet.create({
   card: { borderRadius: radius.md },
   photo: { borderRadius: radius.md, overflow: 'hidden' },
+  spinnerCenter: { alignItems: 'center', justifyContent: 'center' },
   badge: { position: 'absolute', bottom: spacing.sm, start: spacing.sm,
     paddingHorizontal: spacing.sm, paddingVertical: 2, borderRadius: radius.sm },
   heart: { position: 'absolute', top: spacing.xs, end: spacing.xs,

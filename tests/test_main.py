@@ -141,3 +141,14 @@ def test_ipv6_urls_and_invalid_ports(monkeypatch):
         with pytest.raises(SystemExit) as error:
             cli.main(["--server", "--port", port])
         assert error.value.code == 2
+
+
+def test_daily_cli_command(env, capsys, restore_logging):
+    assert cli.main(["--daily"]) == 1
+    capsys.readouterr()  # drain error log from first run
+    wp = add_wallpaper(title="Daily Test WP")
+    assert cli.main(["--daily"]) == 0
+    data = json.loads(capsys.readouterr().out)
+    assert data["id"] == wp["id"]
+    assert data["title"] == "Daily Test WP"
+

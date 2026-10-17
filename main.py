@@ -317,6 +317,58 @@ def run_sync_catalog() -> int:
     return 0
 
 
+def run_daily(set_as_wallpaper: bool = False) -> int:
+    from src.config import settings
+    from src.database import get_daily_wallpaper, init_db
+    from src.wallpaper import WallpaperError, set_desktop_wallpaper
+
+    init_db()
+    wp = get_daily_wallpaper()
+    if not wp:
+        log.error("No wallpapers found in library.")
+        return 1
+
+    if set_as_wallpaper:
+        image_path = settings.IMAGES_DIR / wp["filename"]
+        if not image_path.is_file():
+            log.error("Daily wallpaper image file missing: %s", image_path)
+            return 1
+        try:
+            set_desktop_wallpaper(image_path)
+            print(f"Set desktop wallpaper to Daily Spotlight: {wp['title']} ({wp['filename']})")
+            return 0
+        except WallpaperError as exc:
+            log.error("Failed to set desktop wallpaper: %s", exc)
+            return 1
+    else:
+        print(json.dumps(wp, indent=2, ensure_ascii=False))
+        return 0
+
+
+def run_set_wallpaper(wallpaper_id: int) -> int:
+    from src.config import settings
+    from src.database import get_wallpaper, init_db
+    from src.wallpaper import WallpaperError, set_desktop_wallpaper
+
+    init_db()
+    wp = get_wallpaper(wallpaper_id)
+    if not wp:
+        log.error("Wallpaper ID %d not found.", wallpaper_id)
+        return 1
+
+    image_path = settings.IMAGES_DIR / wp["filename"]
+    if not image_path.is_file():
+        log.error("Wallpaper image file missing: %s", image_path)
+        return 1
+    try:
+        set_desktop_wallpaper(image_path)
+        print(f"Set desktop wallpaper: {wp['title']} ({wp['filename']})")
+        return 0
+    except WallpaperError as exc:
+        log.error("Failed to set desktop wallpaper: %s", exc)
+        return 1
+
+
 # ══════════════════════════════════════════════════════════════════════════
 # CLI
 # ══════════════════════════════════════════════════════════════════════════
@@ -338,6 +390,12 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Print a library health report and exit (code 2 when issues).")
     action.add_argument("--sync-catalog", action="store_true",
                         help="Regenerate data/wallpapers.json and exit.")
+    action.add_argument("--daily", action="store_true",
+                        help="Print today's daily spotlight wallpaper metadata as JSON and exit.")
+    action.add_argument("--set-daily", action="store_true",
+                        help="Set the desktop background to today's daily spotlight wallpaper and exit.")
+    action.add_argument("--set-wallpaper", type=int, metavar="ID",
+                        help="Set the desktop background to wallpaper ID and exit.")
     action.add_argument("--version", action="store_true", help="Print the version and exit.")
     parser.add_argument("--host", default=settings.HOST, help=f"Interface (default: {settings.HOST})")
     parser.add_argument("--port", type=int, default=settings.PORT,
@@ -365,6 +423,10 @@ def main(argv: list[str] | None = None) -> int:
         build_parser().error("--port must be between 1 and 65535")
     settings.HOST, settings.PORT = args.host, args.port
     configure_logging()
+    if args.daily or args.set_daily:
+        return run_daily(set_as_wallpaper=args.set_daily)
+    if args.set_wallpaper is not None:
+        return run_set_wallpaper(args.set_wallpaper)
     if args.check or args.sync_catalog or args.crawl:
         from src.database import close_connection
         from src.downloader import shutdown_cpu_pool

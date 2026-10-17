@@ -151,7 +151,7 @@ against another server or CLI process. Automatic Pillow concurrency is capped at
 Catalog serialization uses a process-local mutex and a consistent SQLite read snapshot; ETags
 hash the actual bytes. Public HTTP read-only mode is enforced in middleware, not only the UI.
 
-## Client reliability in 2.5
+## Client reliability in 2.5 & 2.6
 
 Web/mobile daily discovery shares a UTC-day/ID hash selector, not random state or OS scheduling.
 Mobile catalog provenance lives in a versioned cache envelope; preference writes serialize
@@ -162,3 +162,12 @@ coalesces runs, restores scheduling at root, serializes OS writes, honors newer 
 rechecks plan/favorites/revisions before applying. Reset excludes active cache work and remounts
 providers; an outer provider-independent boundary and startup watchdog protect recovery.
 See [DATA.md](DATA.md), [MOBILE.md](MOBILE.md) and [REVIEW.md](REVIEW.md) for exact limits.
+
+## Roku TV Client Architecture (2.6)
+
+The Roku channel (`roku/`) is built entirely in pure **BrightScript** targeting the low-level `roScreen` 2D double-buffered canvas:
+* **Zero SceneGraph XML Overhead**: Eliminates XML layout parsing and scenegraph tree traversal. The entire UI renders on a 60 fps double-buffered display loop.
+* **Obsidian Liquid Glass Design System**: Custom mathematical rasterization functions (`DrawRoundRect`, `DrawRoundedOutline`, `DrawGlassPanelR`, `DrawFocusRingAnimated`, `DrawBadge`) render anti-aliased geometry and breathing focus indicators natively.
+* **Deterministic Daily Sync**: Shares the exact same 32-bit FNV-1a avalanche selection algorithm as the Web, Mobile, and Python API (`/api/wallpapers/daily`).
+* **Living Room Experience**: Dedicated screensaver gallery with Ken Burns cinematic drift, theme studio with 6 OLED-optimized color palettes, 3-day trial state machine, and in-app purchase store architecture. See [ROKU.md](ROKU.md) for detailed implementation notes.
+

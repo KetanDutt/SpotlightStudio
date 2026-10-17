@@ -402,6 +402,32 @@ svg.icon { flex: none; stroke: currentColor; }
 .card-img.is-loaded { opacity: 1; }
 .card:hover .card-img { transform: scale(1.04); }
 .card-img.is-broken { opacity: .25; object-fit: none; }
+.card-spinner {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 26px;
+  height: 26px;
+  margin-top: -13px;
+  margin-left: -13px;
+  border: 2.5px solid var(--stroke-2);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: card-spin .75s linear infinite;
+  pointer-events: none;
+  opacity: .85;
+  transition: opacity var(--duration-fast) var(--ease);
+  z-index: 1;
+}
+.card-img.is-loaded ~ .card-spinner,
+.card-img.is-broken ~ .card-spinner,
+.daily-photo img.is-loaded ~ .card-spinner {
+  opacity: 0;
+  display: none;
+}
+@keyframes card-spin {
+  to { transform: rotate(360deg); }
+}
 .card-caption { position: static; display: block; padding: var(--space-3) 2px 0; color: var(--text); }
 .card-title { display: -webkit-box; font-size: var(--type-body); font-weight: 500; letter-spacing: var(--track-tight); line-height: 1.5; overflow: hidden; -webkit-line-clamp: 1; -webkit-box-orient: vertical; }
 .card-title.is-generated { font-style: normal; }
