@@ -64,6 +64,3 @@ mobile/**/.gradle/
 *.apk
 *.aab
 
-# ── Roku channel (per project policy, never commit to git) ────────────────
-roku/
-
