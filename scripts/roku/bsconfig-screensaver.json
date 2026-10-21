@@ -1,0 +1,15 @@
+{
+  "rootDir": "../..",
+  "files": [
+    "roku-screensaver/manifest",
+    "roku-screensaver/source/**/*.brs",
+    "roku/source/utils.brs",
+    "roku/source/constants.brs",
+    "roku/source/gfx_cache.brs",
+    "roku/source/theme.brs",
+    "roku/source/catalog.brs",
+    "roku/source/image_loader.brs"
+  ],
+  "createPackage": false,
+  "deploy": false
+}

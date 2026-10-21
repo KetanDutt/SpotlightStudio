@@ -1,118 +1,141 @@
 ' Spotlight Studio for Roku
-' view_viewer.brs - Fullscreen Lightbox wallpaper viewer with floating glass HUD and slideshow
+' view_viewer.brs - Immersive fullscreen wallpaper viewer with zoom, a hiding
+'                   HUD and a slideshow.
+'
+' Index note: the viewer always operates on `state.browseList` /
+' `state.browseIdx`.  It can be opened from the gallery, the screensaver grid,
+' the Daily Spotlight and the Theme Studio previews, and each of those has its
+' own list - the previous implementation reused `state.filtered` indices for all
+' of them, so pressing Left/Right after opening a 4K card jumped to an
+' unrelated wallpaper.
 
 sub RenderViewer(screen as object, state as object)
     t = GetTheme()
     fonts = state.fonts
-    
-    item = state.currentWallpaper
-    if item = invalid
-        screen.Clear(t.bgMain)
-        screen.DrawText("No Wallpaper Selected", 800, 500, t.textPrimary, fonts.heading)
-        return
+
+    ' 0 = fit inside the frame (letterboxed), 1 = fill the frame (cropped).
+    aspectFill = (state.aspectMode = 1)
+
+    if state.browseIdx < 0 then state.browseIdx = 0
+    if state.browseList.Count() > 0
+        state.browseIdx = WrapIndex(state.browseIdx, state.browseList.Count())
+        curItem = state.browseList[state.browseIdx]
+    else
+        curItem = invalid
     end if
-    
-    ' 1. Clear background
+
     screen.Clear(t.bgMain)
-    
-    ' 2. Draw Full Image or High-res Thumbnail
-    imgBmp = state.GetCachedFullImage(item.filename)
-    isFullLoaded = (imgBmp <> invalid and imgBmp.GetWidth() > 1)
-    if not isFullLoaded
-        ' Fallback to thumbnail while full resolution is decoding
-        imgBmp = state.GetCachedThumbnail(item.filename)
-    end if
-    
-    zoomMode = "fit"
-    if state.settingsMgr <> invalid then zoomMode = state.settingsMgr.viewerZoom
-    
-    if imgBmp <> invalid and imgBmp.GetWidth() > 1
+
+    filename = WallpaperFilename(curItem)
+    imgBmp = invalid
+    if filename <> "" then imgBmp = state.imgLoader.GetFullImage(filename)
+
+    if imgBmp <> invalid
         srcW = imgBmp.GetWidth()
         srcH = imgBmp.GetHeight()
-        
-        if zoomMode = "fill"
-            ' Fill entire 1920x1080 canvas
-            screen.DrawResizedObject(0, 0, 1920, 1080, imgBmp)
+
+        if srcW > 1 and srcH > 1
+            ' All arithmetic in floats: the previous MinI(1920/srcW, 1080/srcH)
+            ' truncated the ratio to 0 for any source larger than the screen and
+            ' then fell back to scale 1, drawing a 4K frame at native size.
+            scaleFit = MinF(1920.0 / srcW, 1080.0 / srcH)
+            scaleFill = MaxF(1920.0 / srcW, 1080.0 / srcH)
+            scale = scaleFit
+            if aspectFill then scale = scaleFill
+            if state.zoomScale > 1.0 then scale = scale * state.zoomScale
+
+            drawW = CInt(srcW * scale)
+            drawH = CInt(srcH * scale)
+            if drawW < 1 then drawW = 1
+            if drawH < 1 then drawH = 1
+
+            drawX = CInt((1920 - drawW) / 2)
+            drawY = CInt((1080 - drawH) / 2)
+
+            screen.DrawResizedObject(drawX, drawY, drawW, drawH, imgBmp)
         else
-            ' Fit preserving aspect ratio
-            scale = MinI(1920 / srcW, 1080 / srcH)
-            if scale <= 0 then scale = 1
-            destW = srcW * scale
-            destH = srcH * scale
-            destX = (1920 - destW) / 2
-            destY = (1080 - destH) / 2
-            screen.DrawResizedObject(destX, destY, destW, destH, imgBmp)
+            screen.DrawObject(0, 0, imgBmp)
         end if
-        
-        ' If full image is still downloading in background, show subtle loading badge with spinner
-        if not isFullLoaded and not state.isSlideshowActive
-            spinnerAngle = 0
-            if state.spinnerAngle <> invalid then spinnerAngle = state.spinnerAngle
-            badgeW = 230
-            badgeH = 38
-            badgeX = 1640
-            badgeY = 30
-            DrawGlassPanelR(screen, badgeX, badgeY, badgeW, badgeH, t.borderSubtle, &h0B0E18DD, 8)
-            DrawLoadingSpinner(screen, badgeX + 20, badgeY + 19, 10, spinnerAngle, t.textAccent, t.borderSubtle)
-            screen.DrawText("Loading 4K UHD...", badgeX + 38, badgeY + 8, t.textSecondary, fonts.small)
-        end if
-    else
-        ' Elegant Loading state with animated spinner
-        DrawGlassPanelR(screen, 680, 440, 560, 180, t.borderSubtle, t.bgPanel, 16)
-        spinnerAngle = 0
-        if state.spinnerAngle <> invalid then spinnerAngle = state.spinnerAngle
-        DrawLoadingSpinner(screen, 960, 495, 24, spinnerAngle, t.textAccent, t.borderSubtle)
-        screen.DrawText("Loading Full Resolution Image...", 780, 545, t.textPrimary, fonts.body)
-        titleSmall = TruncateText(item.title, 48)
-        screen.DrawText(titleSmall, 780, 580, t.textMuted, fonts.small)
-    end if
-    
-    ' 3. Slideshow Indicator Pill (Top Right)
-    if state.isSlideshowActive
-        DrawBadge(screen, "▶ SLIDESHOW PLAYING", 1620, 30, t.badge4k, t.textPrimary, fonts.small)
-    end if
-    
-    ' 4. Floating Glass HUD (Rendered when HUD is active)
-    if state.isHudVisible
-        ' Top Floating HUD Banner (80px height, inset 60px from edges)
-        DrawGlassPanelR(screen, 60, 40, 1800, 100, t.borderSubtle, t.bgPanel, 14)
-        
-        ' Title & Badges
-        titleStr = TruncateText(item.title, 55)
-        screen.DrawText(titleStr, 90, 56, t.textPrimary, fonts.heading)
-        
-        metaStr = FormatDate(item.date_spotted) + "  •  " + item.source
-        if item.width <> invalid and item.height <> invalid
-            metaStr = metaStr + "  •  " + StrI(item.width).Trim() + "x" + StrI(item.height).Trim()
-        end if
-        if item.quality <> invalid then metaStr = metaStr + "  (" + item.quality + ")"
-        screen.DrawText(metaStr, 90, 102, t.textSecondary, fonts.small)
-        
-        ' Clock on Right of HUD
-        clockTimeStr = state.clockTime
-        if clockTimeStr <> ""
-            screen.DrawText(clockTimeStr, 1380, 54, t.textPrimary, fonts.heading)
-            if state.clockDate <> invalid then screen.DrawText(state.clockDate, 1380, 98, t.textAccent, fonts.small)
-        end if
-        
-        ' Favorite Status Icon
-        isFav = false
-        if state.favMgr <> invalid then isFav = state.favMgr.IsFavorite(item.id)
-        if isFav
-            DrawBadge(screen, "♥ FAVORITE", 1660, 68, t.heartPink, t.textPrimary, fonts.small)
+    else if curItem <> invalid
+        ' Progressive fallback: show the cached thumbnail while the full frame
+        ' decodes, so the screen is never blank.
+        thumbBmp = state.imgLoader.GetThumbnail(filename)
+        if thumbBmp <> invalid
+            DrawScaledOrResize(screen, 0, 0, 1920, 1080, thumbBmp, "v:" + filename)
         else
-            DrawBadge(screen, "+ [OK] FAVORITE", 1600, 68, t.btnNormal, t.textSecondary, fonts.small)
+            screen.DrawRect(0, 0, 1920, 1080, t.bgMain)
         end if
-        
-        ' Bottom Floating HUD Banner (Controls & Tags)
-        DrawGlassPanel(screen, 60, 930, 1800, 100, t.borderSubtle, t.bgPanel)
-        
-        ' Tags
-        tagsStr = "Tags: #" + item.tags
-        screen.DrawText(TruncateText(tagsStr, 90), 90, 948, t.textAccent, fonts.small)
-        
-        ' Action Hints
-        actions = "[◄ / ►] Nav     [OK] Favorite     [Play] Slideshow     [*] Set Screensaver     [Replay] Set Home Wall     [▲] Aspect     [▼] HUD"
-        screen.DrawText(actions, 90, 988, t.textPrimary, fonts.small)
     end if
+
+    if not state.showHud then return
+    if curItem = invalid
+        RenderEmptyNotice(screen, state, "Nothing to display", "Press Back to return to the gallery")
+        return
+    end if
+
+    ' ── glass HUD ──────────────────────────────────────────────────────
+    DrawGlassPanelR(screen, 0, 0, 1920, 110, t.borderSubtle, t.bgPanel, 0)
+    DrawGlassPanelR(screen, 0, 940, 1920, 140, t.borderSubtle, t.bgPanel, 0)
+
+    ' Top: title, favourite, quality, index.
+    DrawRoundRect(screen, 0, 108, 8, 44, 3, t.heartPink)
+    screen.DrawText(TruncateText(WallpaperTitle(curItem), 74), 20, 18, t.textPrimary, fonts.heading)
+
+    badgeY = 22
+    badgeX = 1360
+    if state.favMgr.IsFavorite(curItem.id)
+        DrawBadge(screen, "FAVORITE", badgeX, badgeY, t.heartPink, t.textPrimary, fonts.caption)
+        badgeX = badgeX - BadgeWidth("FAVORITE", fonts.caption) - 12
+    end if
+    DrawBadge(screen, QualityBadge(curItem), badgeX, badgeY, t.badge4k, t.textPrimary, fonts.caption)
+    badgeX = badgeX - BadgeWidth(QualityBadge(curItem), fonts.caption) - 12
+    DrawBadge(screen, StrI(state.browseIdx + 1).Trim() + " / " + StrI(state.browseList.Count()).Trim(), badgeX, badgeY, t.btnFocused, t.textPrimary, fonts.caption)
+
+    screen.DrawText("Spotted " + FormatDate(SafeStr(curItem.date_spotted)) + "  •  " + SourceLabel(curItem), 20, 66, t.textSecondary, fonts.caption)
+
+    ' Bottom: metadata and the aspect/zoom readout.
+    tagStr = SafeStr(curItem.tags)
+    if Len(tagStr) > 110 then tagStr = Left(tagStr, 110) + "..."
+    screen.DrawText("Tags: " + tagStr, 40, 956, t.textSecondary, fonts.small)
+
+    aspectLabel = "FIT"
+    if aspectFill then aspectLabel = "FILL"
+    zoomPct = StrI(CInt(state.zoomScale * 100)).Trim() + "%"
+    screen.DrawText("Aspect: " + aspectLabel + "   Zoom: " + zoomPct + "   Res: " + WallpaperDimensions(curItem), 40, 990, t.textSecondary, fonts.small)
+    screen.DrawText("OK Info   Up/Down Zoom & HUD   Left/Right Navigate   Play Slideshow   Back Exit", 40, 1024, t.textMuted, fonts.caption)
+
+    if state.slideshowActive
+        DrawBadge(screen, "SLIDESHOW ACTIVE", 1560, 954, t.successGreen, t.textOnAccent, fonts.caption)
+    else if state.transitioning
+        DrawBadge(screen, "TRANSITIONING", 1580, 954, t.badge4k, t.textPrimary, fonts.caption)
+    end if
+
+    if imgBmp = invalid and filename <> ""
+        DrawSpinnerBlock(screen, state, 760, 460, 400, 160, 22, "Loading full resolution image...")
+    end if
+end sub
+
+' Blit a bitmap at a target size through the gfx cache when it is worth caching,
+' otherwise resample directly.  Shared by the viewer, the daily hero and the
+' screensaver showcase so all three get the same fast path.
+sub DrawScaledOrResize(screen as object, x as integer, y as integer, w as integer, h as integer, source as object, cacheKey as string)
+    if source = invalid then return
+    if not DrawScaledCached(screen, x, y, w, h, source, cacheKey)
+        screen.DrawResizedObject(x, y, w, h, source)
+    end if
+end sub
+
+' Shared empty / offline notice.
+sub RenderEmptyNotice(screen as object, state as object, headline as string, detail as string)
+    t = GetTheme()
+    fonts = state.fonts
+    screen.DrawRect(0, 0, 1920, 1080, t.bgMain)
+    DrawGlassPanelR(screen, 560, 400, 800, 240, t.borderSubtle, t.bgPanel, 20)
+
+    headW = fonts.heading.GetOneLineWidth(headline)
+    screen.DrawText(headline, CInt((1920 - headW) / 2), 460, t.textPrimary, fonts.heading)
+
+    detailW = fonts.body.GetOneLineWidth(detail)
+    screen.DrawText(detail, CInt((1920 - detailW) / 2), 520, t.textSecondary, fonts.body)
+    screen.DrawText("Press Back to return", CInt((1920 - fonts.caption.GetOneLineWidth("Press Back to return")) / 2), 570, t.textMuted, fonts.caption)
 end sub

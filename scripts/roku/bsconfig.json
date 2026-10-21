@@ -1,0 +1,13 @@
+{
+  "rootDir": "../../roku",
+  "files": ["manifest", "source/**/*.brs"],
+  "createPackage": false,
+  "deploy": false,
+  "autoRecoverSandbox": true,
+  "diagnosticFilters": [
+    {
+      "filename": "**/*.brs",
+      "codes": ["unused-variable", "unused-function"]
+    }
+  ]
+}

@@ -10,7 +10,7 @@
 | Still Glass design system and consistency audit | [DESIGN.md](DESIGN.md) |
 | Browser/PWA behavior and accessibility | [FRONTEND.md](FRONTEND.md) |
 | Expo app and platform limits | [MOBILE.md](MOBILE.md) |
-| Roku TV channel, themes, and screensavers | [ROKU.md](ROKU.md) |
+| Roku TV channel: architecture, controls, certification, performance, Roku Pay | [roku/](roku/README.md) |
 | Development and tests | [DEVELOPMENT.md](DEVELOPMENT.md) |
 | Deployment, updates and backups | [DEPLOYMENT.md](DEPLOYMENT.md) |
 | Threat model | [SECURITY.md](SECURITY.md) |

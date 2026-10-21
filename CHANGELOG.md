@@ -5,6 +5,79 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [2.7.0] — 2026-10-21
+
+### Roku channel: certification and correctness
+- **Fixed a first-frame crash**: the render loop dereferenced an animation
+  clock that was never created.
+- **Fixed dropped input**: the message loop discarded the value returned by
+  `port.WaitMessage()` and then polled `GetMessage()`, silently swallowing the
+  first key press after every idle period.
+- **Fixed the Back button** (certification 4.6): it used to exit the channel
+  from every screen; it now walks grid → tab bar → Roku home.
+- **Fixed 4K playback**: `roBitmap` cannot decode above 2048×2048, so the 898
+  Ultra-HD wallpapers could never display.  Full frames now arrive through
+  `roTextureManager` with `SetSize(1920, 1080)`, with a download+`roBitmap`
+  fallback for devices without a texture manager.
+- **Fixed the viewer's aspect maths**: integer truncation made the fit scale 0
+  for any source larger than the screen, then fell back to 1 and drew 4K frames
+  at native size.  All of it is float now.
+- **Fixed index-space bugs**: viewer and Ambient Mode used to index `filtered`
+  while displaying the screensaver list or the daily pick; both now use an
+  explicit `browseList` + `browseIdx`.
+- **Fixed the Roku Pay flow**: `SetOrder()` now receives a list of
+  `{code, qty}` items, `DoOrder()` takes no arguments, and the catalog is read
+  from Roku instead of hardcoded prices.  Entitlements are re-synced with
+  `GetPurchases()` on every launch and subscriptions honour `expirationDate`.
+- **Fixed the screensaver gallery crash** on catalog fields that do not exist
+  (`resolution`, `category`, `copyright`); resolution, category and attribution
+  are derived instead.
+- **Removed certification blockers**: `screensaver_title`/`screensaver_private`
+  and `RunScreenSaver()` (4.5), `InitClientCertificates()` (deprecated OS 16.0),
+  `build_version=0` (6.1), transparent artwork (6.4), and the 4.18 MB catalog
+  that put the package over the 4 MB limit (3.7).
+- **Removed production debug hooks**: trial reset/expiry shortcuts now require
+  a sideloaded developer build.
+
+### Roku channel: performance
+- Dirty-frame rendering: the canvas repaints only when something changed, with
+  20 fps budgets for breathing/spinner/drift and 60 fps for short transitions.
+- Bounded LRU caches for rounded panels and resampled images (`gfx_cache.brs`),
+  capped at ~12 MB of texture memory; full-frame cache reduced from four
+  native-resolution bitmaps (up to 132 MB) to two screen-sized ones (~16 MB).
+- Memoised theme palette, option lists and layout metrics; the device clock is
+  refreshed at most once every 15 s; a negative disk cache stops per-frame
+  `tmp:/` stats; a 30 s watchdog releases stalled network slots.
+- Catalog trimmed to 2.20 MB with a generator script; the Daily Spotlight scan
+  is cached per day in the registry and hashes the date prefix once per day.
+
+### Roku channel: features
+- On-screen QWERTY search keyboard (plus physical-keyboard input) over titles
+  and tags.
+- Theme Studio: six palettes applied live, ambient/backdrop wallpaper
+  assignment, rotation pools (landscape / 4K / favourites / daily) and
+  intervals.
+- Menu backdrop wallpaper behind the gallery grid.
+- Resume-last-position (tab, page, grid index, last wallpaper) across launches.
+- System navigation sound effects that respect the device's audio setting.
+- Direct-to-Play: ECP `/input` deep links handled while the channel runs.
+- Ambience: dip-to-black cross-slides, Ken Burns drift, prefetch of the
+  neighbouring wallpapers, honest empty/offline states everywhere.
+
+### Roku channel: packaging, tooling and docs
+- New standalone screensaver app `roku-screensaver/` (the only Roku-legal way
+  to ship this feature), built from shared modules by
+  `scripts/package_roku.py --variant screensaver`.
+- New scripts: `build_roku_catalog.py`, `flatten_roku_art.py`,
+  `package_roku.py` (certification pre-flight), and a BrighterScript compile
+  gate in `scripts/roku/`.
+- New Makefile targets: `roku-catalog`, `roku-art`, `roku-lint`, `roku-check`,
+  `roku-zip`, `roku-screensaver`.
+- Eleven new documents in `docs/roku/`: architecture, controls, certification,
+  performance, Roku Pay, deep linking, catalog, screensaver, troubleshooting,
+  release checklist and an index.
+- Artwork flattened to opaque RGB so it passes certification 6.4.
+
 ## Native [1.2.0] — 2026-10-08 (bridge 0.3.0)
 
 ### Native reliability and UX

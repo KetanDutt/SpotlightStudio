@@ -1,154 +1,283 @@
 ' Spotlight Studio for Roku
-' license.brs - License management, 3-day trial tracking, and IAP entitlement verification
+' license.brs - Trial state machine and Pro entitlements.
+'
+' Entitlements come from two places and are merged:
+'   * the local registry, so the channel is usable the moment it launches;
+'   * Roku Pay's GetPurchases(), re-read on every launch, so a purchase made on
+'     another device tied to the same Roku account is honoured and a lapsed
+'     subscription stops granting access (certification RP4.3).
+'
+' Subscriptions are expiry-aware: `proExpiresAtSec` is taken from Roku's
+' `expirationDate` when it is present, and only the "lifetime" product grants
+' access forever.
 
 function CreateLicenseManager() as object
+    oneDayMs = 86400000
+
     mgr = {
         section: CreateObject("roRegistrySection", "SpotlightStudio_License"),
-        
-        ' License state
-        trialStartEpoch: 0,
-        trialDurationSeconds: 259200, ' 3 days = 3 * 24 * 3600 seconds = 72 hours
-        hasFullVersion: false,
-        hasMonthlySub: false,
-        hasYearlySub: false,
-        
-        Init: function()
-            now = CreateObject("roDateTime")
-            currentEpoch = now.AsSeconds()
-            
-            if m.section = invalid then return invalid
-            
-            ' 1. First launch timestamp for 3-day trial
-            if m.section.Exists("trial_start_epoch")
-                m.trialStartEpoch = Val(m.section.Read("trial_start_epoch"))
-            else
-                m.trialStartEpoch = currentEpoch
-                m.section.Write("trial_start_epoch", StrI(currentEpoch).Trim())
+        trialStartedMs: 0,
+        trialDurationMs: oneDayMs * 3,
+        oneDayMs: oneDayMs,
+
+        hasFullVersion: false,   ' lifetime product purchased
+        ' Subscription expiry as Unix epoch SECONDS, not milliseconds: a
+        ' millisecond epoch is ~1.8e12, which does not fit in a 32-bit
+        ' BrightScript Integer.  Epoch seconds stay inside int32 until 2038.
+        proExpiresAtSec: 0,      ' 0 = no subscription
+        proProductCode: "",
+        purchaseCount: 0,
+
+        ' Monotonic clock, used for the short-lived trial window.
+        NowMs: function() as integer
+            if m.__clock = invalid
+                m.__clock = CreateObject("roTimespan")
+                m.__clock.Mark()
+            end if
+            return m.__clock.TotalMilliseconds()
+        end function,
+
+        ' Wall clock in Unix epoch seconds, used for subscription expiry.
+        WallSeconds: function() as integer
+            wall = CreateObject("roDateTime")
+            if wall = invalid then return 0
+            return wall.AsSeconds()
+        end function,
+
+        Load: function() as void
+            m.hasFullVersion = false
+            m.proExpiresAtSec = 0
+            m.proProductCode = ""
+            m.purchaseCount = 0
+            if m.section = invalid then return
+
+            if m.section.Exists("trialStarted")
+                stored = SafeStr(m.section.Read("trialStarted"))
+                if stored <> "" then m.trialStartedMs = Val(stored)
+            end if
+            if m.section.Exists("hasFullVersion") then m.hasFullVersion = (Val(SafeStr(m.section.Read("hasFullVersion"))) = 1)
+            if m.section.Exists("proExpiresAt")
+                stored = SafeStr(m.section.Read("proExpiresAt"))
+                if stored <> "" then m.proExpiresAtSec = CInt(Val(stored))
+            end if
+            if m.section.Exists("proProductCode") then m.proProductCode = SafeStr(m.section.Read("proProductCode"))
+            if m.section.Exists("purchaseCount")
+                stored = SafeStr(m.section.Read("purchaseCount"))
+                if stored <> "" then m.purchaseCount = Val(stored)
+            end if
+        end function,
+
+        Persist: function() as void
+            if m.section = invalid then return
+            m.section.Write("hasFullVersion", m.FlagStr(m.hasFullVersion))
+            m.section.Write("proExpiresAt", StrI(m.proExpiresAtSec).Trim())
+            m.section.Write("proProductCode", m.proProductCode)
+            m.section.Write("purchaseCount", StrI(m.purchaseCount).Trim())
+            m.section.Flush()
+        end function,
+
+        FlagStr: function(value as boolean) as string
+            if value then return "1"
+            return "0"
+        end function,
+
+        ' ── trial ────────────────────────────────────────────────────────
+
+        StartTrial: function() as void
+            m.trialStartedMs = m.NowMs()
+            if m.section <> invalid
+                m.section.Write("trialStarted", StrI(m.trialStartedMs).Trim())
                 m.section.Flush()
             end if
-            
-            ' 2. Full Version IAP ("BuyFullVersion")
-            if m.section.Exists("entitlement_full")
-                m.hasFullVersion = (m.section.Read("entitlement_full") = "true")
-            end if
-            
-            ' 3. Subscriptions ("sub_monthly", "sub_yearly")
-            if m.section.Exists("entitlement_sub_monthly")
-                m.hasMonthlySub = (m.section.Read("entitlement_sub_monthly") = "true")
-            end if
-            if m.section.Exists("entitlement_sub_yearly")
-                m.hasYearlySub = (m.section.Read("entitlement_sub_yearly") = "true")
-            end if
+            LogInfo("3-day Spotlight Pro trial started")
         end function,
-        
-        GetTrialRemainingSeconds: function() as integer
-            now = CreateObject("roDateTime")
-            currentEpoch = now.AsSeconds()
-            elapsed = currentEpoch - m.trialStartEpoch
-            if elapsed < 0 then elapsed = 0
-            remaining = m.trialDurationSeconds - elapsed
-            if remaining < 0 then remaining = 0
-            return remaining
-        end function,
-        
-        GetTrialRemainingHours: function() as integer
-            sec = m.GetTrialRemainingSeconds()
-            return CInt((sec + 3599) / 3600)
-        end function,
-        
+
         IsTrialActive: function() as boolean
-            return (m.GetTrialRemainingSeconds() > 0)
+            if m.trialStartedMs = 0 then return false
+            elapsed = m.NowMs() - m.trialStartedMs
+            return elapsed < m.trialDurationMs
         end function,
-        
+
+        GetTrialDaysRemaining: function() as integer
+            if not m.IsTrialActive() then return 0
+            remaining = m.trialDurationMs - (m.NowMs() - m.trialStartedMs)
+            days = CInt(remaining / m.oneDayMs)
+            if days < 0 then days = 0
+            return days
+        end function,
+
+        ' ── entitlements ─────────────────────────────────────────────────
+
         HasActiveSubscription: function() as boolean
-            return m.hasMonthlySub or m.hasYearlySub
+            if m.proExpiresAtSec = 0 then return false
+            return m.proExpiresAtSec > m.WallSeconds()
         end function,
-        
-        ' Manual wallpaper / screensaver setting:
-        ' Allowed during active 3-day trial, or after purchasing BuyFullVersion, or with active subscription
-        CanChangeWallpaperManually: function() as boolean
-            return m.IsTrialActive() or m.hasFullVersion or m.HasActiveSubscription()
+
+        ' Anything that unlocks Pro content: a lifetime purchase or a
+        ' subscription that has not expired.
+        HasProAccess: function() as boolean
+            return m.hasFullVersion or m.HasActiveSubscription()
         end function,
-        
-        ' Automatic switching of wallpaper and screensaver:
-        ' Allowed during active 3-day trial, or with active monthly/yearly subscription
-        CanAutoSwitch: function() as boolean
-            return m.IsTrialActive() or m.HasActiveSubscription()
-        end function,
-        
-        RecordPurchase: function(sku as string) as boolean
-            skuLower = LCase(sku)
-            if m.section = invalid then return false
-            
-            if skuLower = "buyfullversion" or Instr(1, skuLower, "full") > 0
-                m.hasFullVersion = true
-                m.section.Write("entitlement_full", "true")
-                m.section.Flush()
-                return true
-            else if skuLower = "sub_monthly" or Instr(1, skuLower, "monthly") > 0
-                m.hasMonthlySub = true
-                m.section.Write("entitlement_sub_monthly", "true")
-                m.section.Flush()
-                return true
-            else if skuLower = "sub_yearly" or Instr(1, skuLower, "yearly") > 0
-                m.hasYearlySub = true
-                m.section.Write("entitlement_sub_yearly", "true")
-                m.section.Flush()
-                return true
+
+        GetProBadge: function() as string
+            if m.hasFullVersion then return "PRO LIFETIME"
+            if m.HasActiveSubscription()
+                remainingDays = CInt((m.proExpiresAtSec - m.WallSeconds()) / 86400)
+                if remainingDays < 1 then remainingDays = 1
+                return "PRO " + StrI(remainingDays).Trim() + "D"
             end if
-            return false
+            if m.IsTrialActive() then return "TRIAL " + StrI(m.GetTrialDaysRemaining()).Trim() + "D"
+            return "TRIAL ENDED"
         end function,
-        
+
         GetStatusBadge: function() as string
-            if m.hasYearlySub
-                return "PRO YEARLY"
-            else if m.hasMonthlySub
-                return "PRO MONTHLY"
-            else if m.hasFullVersion
-                return "FULL VERSION"
-            else if m.IsTrialActive()
-                h = m.GetTrialRemainingHours()
-                if h > 24
-                    days = CInt(h / 24)
-                    return "TRIAL: " + StrI(days).Trim() + " DAYS LEFT"
-                else
-                    return "TRIAL: " + StrI(h).Trim() + " HOURS LEFT"
-                end if
+            if m.hasFullVersion then return "PRO"
+            if m.HasActiveSubscription() then return "PRO SUB"
+            if m.IsTrialActive() then return "TRIAL " + StrI(m.GetTrialDaysRemaining()).Trim() + "D"
+            return "FREE"
+        end function,
+
+        GetLicenseSummary: function() as string
+            if m.hasFullVersion then return "Pro Lifetime - thank you for supporting Spotlight Studio"
+            if m.HasActiveSubscription()
+                remainingDays = CInt((m.proExpiresAtSec - m.WallSeconds()) / 86400)
+                return "Pro subscription active - " + StrI(remainingDays).Trim() + " days remaining"
+            end if
+            if m.IsTrialActive()
+                return "Trial active - " + StrI(m.GetTrialDaysRemaining()).Trim() + " days remaining"
+            end if
+            if m.trialStartedMs > 0 then return "Trial expired - Pro features are locked"
+            return "Free mode - start the 3-day Pro trial from Settings"
+        end function,
+
+        ' ── purchases ────────────────────────────────────────────────────
+
+        ' Record a completed purchase.  `expirationDate` is Roku's ISO-8601
+        ' subscription expiry; pass "" for a one-time product.
+        RecordPurchase: function(product as object, expirationDate as string) as void
+            if product = invalid then return
+
+            kind = SafeStr(product.kind)
+            m.purchaseCount = m.purchaseCount + 1
+            m.proProductCode = SafeStr(product.code)
+
+            if kind = "lifetime"
+                m.hasFullVersion = true
+                m.proExpiresAtSec = 0
             else
-                return "TRIAL EXPIRED"
+                expiry = m.ParseIsoSeconds(expirationDate)
+                if expiry <= 0
+                    ' No expiry reported: assume the product's natural term so a
+                    ' purchase is never silently ignored.
+                    if kind = "monthly"
+                        expiry = m.WallSeconds() + (86400 * 30)
+                    else
+                        expiry = m.WallSeconds() + (86400 * 365)
+                    end if
+                end if
+                if expiry > m.proExpiresAtSec then m.proExpiresAtSec = expiry
+                m.hasFullVersion = false
             end if
+
+            m.Persist()
+            LogInfo("Entitlement updated: " + SafeStr(product.code) + " -> " + m.GetProBadge())
         end function,
-        
-        ResetForTesting: function()
-            now = CreateObject("roDateTime")
-            m.trialStartEpoch = now.AsSeconds()
+
+        ' Merge a GetPurchases() response into the local entitlement state.
+        ' Called on every launch so purchases made on another device tied to the
+        ' same Roku account are honoured.
+        ApplyPurchases: function(purchases as object) as void
+            if purchases = invalid then return
+            if type(purchases) <> "roList" and type(purchases) <> "roArray" then return
+
+            lifetime = false
+            bestExpiry = m.proExpiresAtSec
+            bestCode = m.proProductCode
+            applied = 0
+
+            for each entry in purchases
+                if entry <> invalid
+                    code = SafeStr(entry.code)
+                    product = StoreProductByCode(code)
+                    if product <> invalid
+                        applied = applied + 1
+                        if SafeStr(product.kind) = "lifetime"
+                            lifetime = true
+                            bestCode = code
+                        else
+                            expiry = m.ParseIsoSeconds(SafeStr(entry.expirationDate))
+                            if expiry > bestExpiry
+                                bestExpiry = expiry
+                                bestCode = code
+                            end if
+                        end if
+                    end if
+                end if
+            end for
+
+            if applied = 0 then return
+
+            changed = (lifetime <> m.hasFullVersion) or (bestExpiry <> m.proExpiresAtSec) or (bestCode <> m.proProductCode)
+            if not changed then return
+
+            m.hasFullVersion = lifetime or m.hasFullVersion
+            m.proExpiresAtSec = bestExpiry
+            if bestCode <> "" then m.proProductCode = bestCode
+            m.Persist()
+            LogInfo("Roku Pay entitlements synced (" + StrI(applied).Trim() + " products)")
+        end function,
+
+        ' ISO-8601 -> Unix epoch seconds.  Returns 0 when the value is missing
+        ' or unparseable, which callers treat as "use the product's own term".
+        ParseIsoSeconds: function(iso as string) as integer
+            if iso = invalid or Len(iso) < 10 then return 0
+            dt = CreateObject("roDateTime")
+            if dt = invalid then return 0
+            ok = dt.FromISOString(iso)
+            if not ok then return 0
+            return dt.AsSeconds()
+        end function,
+
+        ' ── developer helpers ────────────────────────────────────────────
+        ' Gated on IsDevBuild() so a shipped channel cannot be talked into
+        ' expiring its own trial or wiping a customer's entitlements.
+
+        ResetForTesting: function() as void
+            if not IsDevBuild() then return
+            m.trialStartedMs = 0
             m.hasFullVersion = false
-            m.hasMonthlySub = false
-            m.hasYearlySub = false
+            m.proExpiresAtSec = 0
+            m.proProductCode = ""
+            m.purchaseCount = 0
             if m.section <> invalid
-                m.section.Delete("entitlement_full")
-                m.section.Delete("entitlement_sub_monthly")
-                m.section.Delete("entitlement_sub_yearly")
-                m.section.Write("trial_start_epoch", StrI(m.trialStartEpoch).Trim())
+                m.section.Delete("trialStarted")
+                m.section.Delete("hasFullVersion")
+                m.section.Delete("proExpiresAt")
+                m.section.Delete("proProductCode")
+                m.section.Delete("purchaseCount")
                 m.section.Flush()
             end if
+            LogInfo("Licence state reset (developer build only)")
         end function,
-        
-        ExpireTrialForTesting: function()
-            now = CreateObject("roDateTime")
-            m.trialStartEpoch = now.AsSeconds() - m.trialDurationSeconds - 100
-            m.hasFullVersion = false
-            m.hasMonthlySub = false
-            m.hasYearlySub = false
+
+        ExpireTrialForTesting: function() as void
+            if not IsDevBuild() then return
+            m.trialStartedMs = m.NowMs() - (m.trialDurationMs + 1000)
             if m.section <> invalid
-                m.section.Delete("entitlement_full")
-                m.section.Delete("entitlement_sub_monthly")
-                m.section.Delete("entitlement_sub_yearly")
-                m.section.Write("trial_start_epoch", StrI(m.trialStartEpoch).Trim())
+                m.section.Write("trialStarted", StrI(m.trialStartedMs).Trim())
                 m.section.Flush()
             end if
+            LogInfo("Trial forced to expire (developer build only)")
+        end function,
+
+        ' Grant Pro without a transaction.  Developer builds only.
+        GrantProForTesting: function(kind as string) as void
+            if not IsDevBuild() then return
+            product = { code: "dev_" + kind, name: "Developer " + kind, kind: kind }
+            m.RecordPurchase(product, "")
         end function
     }
-    mgr.Init()
+
+    mgr.Load()
     return mgr
 end function

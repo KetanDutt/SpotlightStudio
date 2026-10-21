@@ -27,8 +27,17 @@
 | 🔎 **Great browsing** | UTC daily spotlight, instant multi-term search, tag & resolution filters, portable favorites, shareable deep links (`#w=1234`), random wallpaper, keyboard shortcuts, light/dark theme |
 | 📱 **Installable PWA** | works on phones, offline-capable, accessible (keyboard, screen-reader, reduced-motion) |
 | 🤖 **Android / iOS app** | Expo client: offline search, favourites, history, **set the wallpaper on Android** (home/lock/both) with automatic rotation; on iOS it saves to Photos and guides you through the Shortcuts step ([details](docs/MOBILE.md#setting-a-wallpaper)) |
-| 📺 **Roku TV channel** | 60 fps pure 2D canvas (`roScreen`), home screen theme studio, ambient screensavers with Ken Burns drift, 3-day trial and IAP auto-switching ([details](docs/ROKU.md)) |
+| 📺 **Roku TV channel** | pure 2D canvas (`roScreen`) gallery with Ambient Mode, a deterministic Daily Spotlight, six Liquid Glass palettes, search and Roku Pay Pro — plus a separate standalone screensaver app ([details](docs/roku/README.md)) |
 | 🔒 **Locked down** | strict CSP, Host/Origin checks on the local API, no XSS from scraped titles, CSV-injection-safe exports, DB and logs are never served |
+
+## What’s new in 2.7 — Roku production readiness
+
+- **Certification-clean Roku channel:** Back now walks grid → tab bar → exit (requirement 4.6), the package is 2.65 MB (requirement 3.7 caps it at 4 MB; the catalog alone used to be 4.18 MB), artwork is fully opaque (6.4), the version is non-zero (6.1), and every deprecated API is gone.
+- **4K wallpapers actually display:** `roBitmap` cannot decode above 2048×2048, so full frames now load through `roTextureManager` at screen size; the viewer's fit maths was rewritten in floats.
+- **Reliable input and rendering:** a dirty-frame renderer that idles at ~0 % CPU, 20/60 fps animation budgets, bounded LRU bitmap caches, and a fix for the loop dropping the first key press after every idle period.
+- **New features:** on-screen search keyboard, live palette switching in Theme Studio, menu backdrop, Ambient rotation pools, resume-last-position, system navigation sounds, Direct-to-Play deep links while running.
+- **Honest licensing:** Roku Pay entitlements are re-synced with `GetPurchases()` on every launch and subscriptions expire; the misleading "change your Roku home wallpaper/screensaver" copy is gone, replaced by a separate standalone screensaver app (`roku-screensaver/`).
+- **Tooling:** `make roku-lint` (BrighterScript compile gate), `make roku-check` (certification pre-flight), `make roku-zip`, `make roku-catalog`, `make roku-art`; eleven new documents in `docs/roku/`.
 
 ## What’s new in 2.6 — Roku TV, daily automation and polish
 
@@ -45,7 +54,7 @@
 | **Static showcase** | browse, search, favorite, download | publish the allow-listed static build to GitHub Pages ([guide](docs/DEPLOYMENT.md)) |
 | **Desktop / server** | everything above **plus** crawler controls, live progress, repair tools, *Set as wallpaper*, full exports | run the app locally |
 | **Mobile app** | the same catalog on Android/iOS with favourites, history and offline search — and real *set wallpaper* plus background rotation on Android | `cd mobile && npm ci && npm start` ([guide](docs/MOBILE.md)) |
-| **Roku TV channel** | 7,500+ wallpapers on your TV with ambient screensavers, theme studio, and remote control navigation | sideload to Roku or run in simulator ([guide](docs/ROKU.md)) |
+| **Roku TV channel** | 7,475 wallpapers on your TV with Ambient Mode, a theme studio, search and remote navigation — plus a standalone screensaver app | sideload to Roku or run in simulator ([guide](docs/roku/README.md)) |
 
 The same `index.html` serves the two browser modes: it detects a Spotlight Studio backend on its own origin and unlocks the crawler console when one answers. The mobile app is a separate client in `mobile/` and reads the same catalog.
 
@@ -194,7 +203,7 @@ Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) and [docs/D
 | [Deployment](docs/DEPLOYMENT.md) | GitHub Pages, local/headless use, scheduled updates, upgrading |
 | [Front-end](docs/FRONTEND.md) | modules, URL parameters, CSP, service worker |
 | [Mobile app](docs/MOBILE.md) | Android & iOS client: set-wallpaper capabilities, rotation, EAS builds |
-| [Roku TV channel](docs/ROKU.md) | Roku 2D canvas architecture, theme studio, screensavers and sideloading |
+| [Roku TV channel](docs/roku/README.md) | Roku channel docs: architecture, controls, certification, performance, Roku Pay, screensaver |
 | [Data formats](docs/DATA.md) | catalog JSON, database schema, normalisation rules |
 | [Security](docs/SECURITY.md) | threat model and hardening |
 | [Troubleshooting](docs/TROUBLESHOOTING.md) | common problems and fixes |

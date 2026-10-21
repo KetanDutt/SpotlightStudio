@@ -1,79 +1,139 @@
 ' Spotlight Studio for Roku
-' view_ambient.brs - Ambient TV Screensaver mode with auto-cycling and clock overlay
+' view_ambient.brs - Distraction-free Ambient Mode: full-bleed wallpaper,
+'                    Ken Burns drift and dip-to-black slideshow transitions.
+'
+' Transitions are a dip to black rather than a cross-fade because ifDraw2D has
+' no per-object alpha control: the only way to fade an image is to fade a solid
+' rectangle over it.  A short black dip reads as cinematic on a TV and costs two
+' DrawRect calls per frame instead of a second full-screen bitmap.
+
+function AmbientFadeDuration() as integer
+    return 500
+end function
+
+function AmbientRevealDuration() as integer
+    return 700
+end function
 
 sub RenderAmbient(screen as object, state as object)
     t = GetTheme()
-    fonts = state.fonts
-    
-    item = state.ambientWallpaper
-    if item = invalid and state.filtered.Count() > 0
-        item = state.filtered[0]
-        state.ambientWallpaper = item
+
+    if state.browseList.Count() = 0
+        screen.Clear(t.bgMain)
+        RenderEmptyNotice(screen, state, "Ambient Mode needs wallpapers", "Press Back, then choose a filter that returns results")
+        return
     end if
-    
-    ' 1. Clear Screen
+
+    state.browseIdx = WrapIndex(state.browseIdx, state.browseList.Count())
+    curItem = state.browseList[state.browseIdx]
+    filename = WallpaperFilename(curItem)
+
+    imgBmp = invalid
+    if filename <> "" then imgBmp = state.imgLoader.GetFullImage(filename)
+
     screen.Clear(t.bgMain)
-    
-    if item <> invalid
-        ' Draw high-resolution wallpaper or fallback thumbnail with subtle cinematic drift
-        imgBmp = state.GetCachedFullImage(item.filename)
-        if imgBmp = invalid or imgBmp.GetWidth() <= 1
-            imgBmp = state.GetCachedThumbnail(item.filename)
+
+    if imgBmp <> invalid and imgBmp.GetWidth() > 1
+        srcW = imgBmp.GetWidth()
+        srcH = imgBmp.GetHeight()
+
+        ' Ken Burns: a 24-second breathing zoom with a slow diagonal drift.
+        animMs = 0
+        if state.animClock <> invalid then animMs = state.animClock.TotalMilliseconds()
+        cycle = (animMs MOD 24000) / 24000.0
+        wave = Sin(cycle * 6.283185)
+        waveCos = Cos(cycle * 6.283185)
+
+        zoom = 1.04 + (0.05 * wave)
+        baseScale = MaxF(1920.0 / srcW, 1080.0 / srcH) * zoom
+
+        drawW = CInt(srcW * baseScale)
+        drawH = CInt(srcH * baseScale)
+        if drawW < 1 then drawW = 1
+        if drawH < 1 then drawH = 1
+
+        ' Drift stays inside the overshoot created by the zoom, so the frame
+        ' never exposes the background at the edges.
+        maxPanX = MaxI(0, CInt((drawW - 1920) / 2))
+        maxPanY = MaxI(0, CInt((drawH - 1080) / 2))
+        panX = CInt(wave * maxPanX * 0.85)
+        panY = CInt(waveCos * maxPanY * 0.85)
+
+        drawX = CInt((1920 - drawW) / 2) + panX
+        drawY = CInt((1080 - drawH) / 2) + panY
+
+        screen.DrawResizedObject(drawX, drawY, drawW, drawH, imgBmp)
+    else
+        ' Thumbnail stand-in while the full frame decodes.
+        thumbBmp = state.imgLoader.GetThumbnail(filename)
+        if thumbBmp <> invalid
+            screen.DrawResizedObject(0, 0, 1920, 1080, thumbBmp)
         end if
-        
-        if imgBmp <> invalid and imgBmp.GetWidth() > 1
-            ' Subtle Ken Burns gentle drift to prevent OLED burn-in and add cinematic motion
-            driftX = 0
-            driftY = 0
-            if state.animClock <> invalid
-                driftPhase = state.animClock.TotalMilliseconds() / 5000.0
-                driftX = CInt(Sin(driftPhase) * 12)
-                driftY = CInt(Cos(driftPhase * 0.7) * 8)
-            end if
-            screen.DrawResizedObject(-20 + driftX, -15 + driftY, 1960, 1110, imgBmp)
-        else
-            spinnerAngle = 0
-            if state.spinnerAngle <> invalid then spinnerAngle = state.spinnerAngle
-            DrawLoadingSpinner(screen, 960, 520, 26, spinnerAngle, t.textAccent, t.borderSubtle)
-            screen.DrawText("Loading Ambient Wallpaper...", 830, 565, t.textMuted, fonts.body)
-        end if
     end if
-    
-    ' 2. Ambient Clock Overlay (Top Right)
-    if state.settingsMgr = invalid or state.settingsMgr.ambientClock
-        clockStr = state.clockTime
-        if clockStr = "" then clockStr = "12:00"
-        dateStr = state.clockDate
-        if dateStr = invalid or dateStr = "" then dateStr = "Today"
-        
-        ' Ambient rounded glass capsule for clock
-        clockBoxW = 290
-        clockBoxH = 100
-        clockBoxX = 1920 - clockBoxW - 80
-        clockBoxY = 60
-        
-        DrawGlassPanelR(screen, clockBoxX, clockBoxY, clockBoxW, clockBoxH, t.borderSubtle, &h0A0C14B8, 16)
-        screen.DrawText(clockStr, clockBoxX + 30, clockBoxY + 18, t.textPrimary, fonts.title)
-        screen.DrawText(dateStr, clockBoxX + 30, clockBoxY + 68, t.textSecondary, fonts.small)
+
+    ' ── dip-to-black transition overlay ────────────────────────────────
+    alpha = AmbientFadeAlpha(state)
+    if alpha > 0 then screen.DrawRect(0, 0, 1920, 1080, WithAlpha(0, alpha))
+
+    if state.ambientShowInfo
+        RenderAmbientHud(screen, state, curItem, imgBmp)
+    else if imgBmp = invalid and alpha = 0
+        ' A quiet spinner only while the very first frame is still loading.
+        DrawLoadingSpinner(screen, 960, 540, 20, state.spinnerAngle, &hFFFFFF44, &hFFFFFF18)
     end if
-    
-    ' 3. Wallpaper Info Banner (Bottom Left)
-    if item <> invalid and (state.settingsMgr = invalid or state.settingsMgr.ambientInfo)
-        infoBoxW = 750
-        infoBoxH = 80
-        infoBoxX = 80
-        infoBoxY = 1080 - infoBoxH - 60
-        
-        DrawGlassPanelR(screen, infoBoxX, infoBoxY, infoBoxW, infoBoxH, t.borderSubtle, &h0A0C14B8, 16)
-        
-        titleStr = TruncateText(item.title, 55)
-        screen.DrawText(titleStr, infoBoxX + 25, infoBoxY + 16, t.textPrimary, fonts.body)
-        
-        detailStr = "Windows Spotlight  •  " + FormatDate(item.date_spotted)
-        if item.quality <> invalid then detailStr = detailStr + "  (" + item.quality + ")"
-        screen.DrawText(detailStr, infoBoxX + 25, infoBoxY + 48, t.textAccent, fonts.small)
+end sub
+
+' Black-overlay alpha for the current transition phase (0 when idle).
+function AmbientFadeAlpha(state as object) as integer
+    if state.ambientTransition = 0 then return 0
+
+    elapsed = 0
+    if state.animClock <> invalid then elapsed = state.animClock.TotalMilliseconds() - state.ambientTransStart
+    if elapsed < 0 then elapsed = 0
+
+    if state.ambientTransition = 1
+        ratio = elapsed / AmbientFadeDuration()
+        if ratio > 1.0 then ratio = 1.0
+        return CInt(255 * ratio)
     end if
-    
-    ' 4. Ambient Exit Hint (Subtle bottom-center, fades away or very discreet)
-    screen.DrawText("Press any button to exit Ambient Mode", 800, 1040, &hFFFFFF44, fonts.small)
+
+    ratio = elapsed / AmbientRevealDuration()
+    if ratio > 1.0 then ratio = 1.0
+    return CInt(255 * (1.0 - ratio))
+end function
+
+sub RenderAmbientHud(screen as object, state as object, curItem as object, imgBmp as object)
+    t = GetTheme()
+    fonts = state.fonts
+
+    DrawGlassPanelR(screen, 0, 880, 1920, 200, t.borderSubtle, t.bgPanel, 0)
+
+    screen.DrawText(TruncateText(WallpaperTitle(curItem), 92), 60, 906, t.textPrimary, fonts.heading)
+
+    metaParts = SourceLabel(curItem) + "  •  " + WallpaperDimensions(curItem) + "  •  Spotted " + FormatDate(SafeStr(curItem.date_spotted))
+    screen.DrawText(metaParts, 60, 956, t.textSecondary, fonts.caption)
+
+    tagStr = SafeStr(curItem.tags)
+    if Len(tagStr) > 118 then tagStr = Left(tagStr, 118) + "..."
+    screen.DrawText(tagStr, 60, 990, t.textMuted, fonts.small)
+
+    idxLabel = StrI(state.browseIdx + 1).Trim() + " / " + StrI(state.browseList.Count()).Trim()
+    screen.DrawText(idxLabel, 1700, 906, t.textPrimary, fonts.heading)
+
+    statusLabel = "READY"
+    statusColor = t.successGreen
+    if imgBmp = invalid
+        statusLabel = "STREAMING 4K"
+        statusColor = t.warningAmber
+    end if
+    DrawBadge(screen, statusLabel, 1660, 956, statusColor, t.textOnAccent, fonts.caption)
+
+    if state.slideshowActive
+        elapsed = 0
+        if state.animClock <> invalid then elapsed = (state.animClock.TotalMilliseconds() - state.switchAtMs) / 1000
+        nextIn = MaxI(0, state.autoSwitchInterval - CInt(elapsed))
+        DrawBadge(screen, "AUTO " + StrI(nextIn).Trim() + "s", 1660, 996, t.badge4k, t.textPrimary, fonts.caption)
+    end if
+
+    screen.DrawText("Play/Pause Slideshow     Info Toggle     Replay Shuffle     Left/Right Browse     Any Other Key Exit", 60, 1036, t.textMuted, fonts.caption)
 end sub

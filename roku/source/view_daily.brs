@@ -1,124 +1,115 @@
 ' Spotlight Studio for Roku
-' view_daily.brs - Daily Spotlight hero showcase view
+' view_daily.brs - The Daily Spotlight hero screen.
+'
+' The winner is chosen by a deterministic FNV-1a hash of "<UTC day>|<id>" that is
+' bit-identical to src/utils.py::daily_score, so the web, desktop, mobile and TV
+' clients all surface the same wallpaper on the same day.  See catalog.brs for
+' the implementation and RunDailyHashSelfTest() for the parity vectors.
 
-sub RenderDailyView(screen as object, state as object)
+sub RenderDailySpotlight(screen as object, state as object)
     t = GetTheme()
     fonts = state.fonts
-    
+
+    screen.Clear(t.bgMain)
+    DrawGalleryBackdrop(screen, state)
+    DrawViewHeader(screen, state, "Daily Spotlight", "Deterministic hero picked for today (UTC), identical on every Spotlight Studio client")
+
     dailyItem = state.dailyWallpaper
     if dailyItem = invalid
-        screen.Clear(t.bgMain)
-        screen.DrawText("No Daily Wallpaper Available", 800, 500, t.textPrimary, fonts.heading)
+        RenderEmptyNotice(screen, state, "No Daily Spotlight available", "The packaged archive is empty, so no hero could be selected")
         return
     end if
-    
-    ' 1. Clear background
-    screen.Clear(t.bgMain)
-    
-    ' 2. Header
-    screen.DrawRect(0, 0, 1920, 110, t.bgHeader)
-    screen.DrawRect(0, 109, 1920, 1, t.borderSubtle)
-    screen.DrawText("DAILY SPOTLIGHT", 85, 25, t.textPrimary, fonts.title)
-    
-    clockStr = state.clockTime
-    if clockStr = "" then clockStr = "12:00"
-    dateStr = state.clockDate
-    if dateStr = invalid or dateStr = "" then dateStr = "Today"
-    
-    subText = dateStr + "  •  Local Time: " + clockStr + "  •  Spotted: " + FormatDate(dailyItem.date_spotted)
-    screen.DrawText(subText, 85, 75, t.textAccent, fonts.caption)
-    
-    screen.DrawText(clockStr, 1710, 24, t.textPrimary, fonts.heading)
-    screen.DrawText(dateStr, 1710, 68, t.textSecondary, fonts.small)
-    
-    ' 3. Hero Preview (Left Side: 85, 150, 1080 x 650) with rounded corners
+
+    ' ── hero ───────────────────────────────────────────────────────────
     heroX = 85
-    heroY = 150
-    heroW = 1080
-    heroH = 650
-    
-    DrawGlassPanelR(screen, heroX, heroY, heroW, heroH, t.borderMedium, t.bgPanel, 16)
-    
-    ' Thumbnail image with rounded borders
-    DrawRoundRect(screen, heroX + 15, heroY + 15, heroW - 30, heroH - 30, 12, &h161A28EE)
-    thumbBmp = state.GetCachedFullImage(dailyItem.filename)
-    if thumbBmp = invalid or thumbBmp.GetWidth() <= 1
-        thumbBmp = state.GetCachedThumbnail(dailyItem.filename)
-    end if
-    
-    if thumbBmp <> invalid and thumbBmp.GetWidth() > 1
-        screen.DrawResizedObject(heroX + 15, heroY + 15, heroW - 30, heroH - 30, thumbBmp)
+    heroY = 145
+    heroW = 1050
+    heroH = 590
+
+    DrawGlassPanelR(screen, heroX - 4, heroY - 4, heroW + 8, heroH + 8, t.borderFocused, t.bgPanel, 20)
+
+    filename = WallpaperFilename(dailyItem)
+    thumbBmp = state.imgLoader.GetThumbnail(filename)
+    if thumbBmp <> invalid
+        DrawScaledOrResize(screen, heroX + 10, heroY + 10, heroW - 20, heroH - 100, thumbBmp, "d:" + filename)
     else
-        spinnerAngle = 0
-        if state.spinnerAngle <> invalid then spinnerAngle = state.spinnerAngle
-        DrawLoadingSpinner(screen, heroX + (heroW / 2), heroY + (heroH / 2) - 15, 28, spinnerAngle, t.textAccent, t.borderSubtle)
-        screen.DrawText("Loading Daily Spotlight...", heroX + (heroW / 2) - 105, heroY + (heroH / 2) + 32, t.textMuted, fonts.body)
+        DrawRoundRect(screen, heroX + 10, heroY + 10, heroW - 20, heroH - 100, 14, t.bgPanelLight)
+        DrawSpinnerBlock(screen, state, heroX + 10, heroY + 10, heroW - 20, heroH - 100, 22, "Streaming today's hero...")
     end if
-    DrawRoundedOutline(screen, heroX + 15, heroY + 15, heroW - 30, heroH - 30, 12, t.borderSubtle, 1)
-    
-    ' Hero resolution badge
-    qText = "FHD 1080p"
-    qColor = t.badgeFhd
-    if dailyItem.quality <> invalid and Instr(1, dailyItem.quality, "4K") > 0
-        qText = "4K / UHD"
-        qColor = t.badge4k
-    end if
-    DrawBadge(screen, qText, heroX + 35, heroY + 35, qColor, t.textPrimary, fonts.small)
-    
-    ' 4. Metadata & Action Panel (Right Side: 1210, 150, 625 x 650)
-    infoX = 1210
-    infoY = 150
-    infoW = 625
-    infoH = 650
-    
-    DrawGlassPanelR(screen, infoX, infoY, infoW, infoH, t.borderSubtle, t.bgPanel, 16)
-    
-    screen.DrawText("TODAY'S FEATURED WALLPAPER", infoX + 35, infoY + 35, t.textAccent, fonts.caption)
-    
-    ' Title (wrapped / multi-line approximation)
-    titleStr = TruncateText(dailyItem.title, 70)
-    screen.DrawText(titleStr, infoX + 35, infoY + 75, t.textPrimary, fonts.heading)
-    
-    ' Details
-    sourceStr = "Windows Spotlight"
-    if dailyItem.source = "peapix" then sourceStr = "Peapix Archive"
-    screen.DrawText("Provider: " + sourceStr, infoX + 35, infoY + 170, t.textSecondary, fonts.body)
-    
-    resStr = "1920 x 1080 (16:9)"
-    if dailyItem.width <> invalid and dailyItem.height <> invalid
-        resStr = StrI(dailyItem.width).Trim() + " x " + StrI(dailyItem.height).Trim()
-    end if
-    screen.DrawText("Resolution: " + resStr, infoX + 35, infoY + 215, t.textSecondary, fonts.body)
-    
-    tagsStr = TruncateText("Tags: #" + dailyItem.tags, 55)
-    screen.DrawText(tagsStr, infoX + 35, infoY + 260, t.textMuted, fonts.small)
-    
-    ' Action Buttons (Focusable list)
-    btnLabels = [
-        "View Fullscreen",
-        "Toggle Favorite",
-        "Start Ambient Screensaver",
-        "Browse Gallery"
+
+    DrawBadge(screen, QualityBadge(dailyItem), heroX + 20, heroY + 20, t.badge4k, t.textPrimary, fonts.caption)
+    DrawBadge(screen, SourceLabel(dailyItem), heroX + 20 + BadgeWidth(QualityBadge(dailyItem), fonts.caption) + 12, heroY + 20, t.btnFocused, t.textOnAccent, fonts.caption)
+    DrawBadge(screen, "TODAY", heroX + heroW - 20 - BadgeWidth("TODAY", fonts.caption), heroY + 20, t.textGold, t.textOnAccent, fonts.caption)
+
+    titleY = heroY + heroH - 74
+    screen.DrawRect(heroX + 10, titleY - 10, heroW - 20, 1, t.borderSubtle)
+    screen.DrawText(TruncateText(WallpaperTitle(dailyItem), 62), heroX + 20, titleY, t.textPrimary, fonts.heading)
+    screen.DrawText("Spotted " + FormatDate(SafeStr(dailyItem.date_spotted)) + "   •   " + WallpaperDimensions(dailyItem), heroX + 20, titleY + 34, t.textSecondary, fonts.caption)
+
+    ' ── metadata panel ─────────────────────────────────────────────────
+    infoX = heroX + heroW + 40
+    infoW = 1920 - infoX - 85
+    infoY = heroY
+    infoH = 260
+
+    DrawGlassPanelR(screen, infoX, infoY, infoW, infoH, t.borderSubtle, t.bgPanel, 18)
+    screen.DrawRect(infoX + 20, infoY + 20, infoW - 40, 4, t.textAccent)
+    screen.DrawText("Spotlight Metadata", infoX + 20, infoY + 34, t.textPrimary, fonts.heading)
+
+    metaRows = [
+        "ID: #" + SafeStr(dailyItem.id),
+        "Resolution: " + WallpaperDimensions(dailyItem),
+        "Archive: " + SourceLabel(dailyItem),
+        "Spotted: " + FormatDate(SafeStr(dailyItem.date_spotted)),
+        "Favorited: " + FavoriteYesNo(state, dailyItem)
     ]
-    
-    if state.favMgr <> invalid and state.favMgr.IsFavorite(dailyItem.id)
-        btnLabels[1] = "♥ In Favorites (Remove)"
-    end if
-    
-    btnY = infoY + 330
-    for b = 0 to btnLabels.Count() - 1
-        isFocused = (state.dailyBtnIdx = b)
-        DrawButton(screen, btnLabels[b], infoX + 35, btnY, infoW - 70, 52, isFocused, fonts.body)
-        if isFocused
-            glow = 255
-            if state.glowAlpha <> invalid then glow = state.glowAlpha
-            DrawFocusRingAnimated(screen, infoX + 35, btnY, infoW - 70, 52, t.borderFocused, 10, glow)
-        end if
-        btnY = btnY + 70
+    for i = 0 to metaRows.Count() - 1
+        screen.DrawText(metaRows[i], infoX + 20, infoY + 74 + (i * 32), t.textSecondary, fonts.caption)
     end for
-    
-    ' 5. Footer Bar
-    screen.DrawRect(0, 970, 1920, 110, t.bgFooter)
-    screen.DrawRect(0, 970, 1920, 2, t.borderSubtle)
-    screen.DrawText("[▲ / ▼] Select Action     [OK] Execute     [Back] Return to Gallery", 85, 1010, t.textSecondary, fonts.body)
+
+    ' ── tag pills ──────────────────────────────────────────────────────
+    actionY = 770
+    tagStr = SafeStr(dailyItem.tags)
+    screen.DrawText("Tags", infoX, infoY + infoH + 24, t.textPrimary, fonts.heading)
+
+    tagY = infoY + infoH + 58
+    tagX = infoX
+    tagLimitY = actionY - 60
+    parts = SplitString(tagStr, ",")
+    shown = 0
+    for each rawTag in parts
+        if shown >= 12 then exit for
+        tag = SafeStr(rawTag)
+        if tag <> ""
+            tagW = fonts.caption.GetOneLineWidth(tag) + 22
+            if tagX + tagW > 1920 - 85
+                tagX = infoX
+                tagY = tagY + 40
+            end if
+            if tagY > tagLimitY then exit for
+
+            DrawRoundRect(screen, tagX, tagY, tagW, 32, 9, t.bgPanelLight)
+            DrawRoundedOutline(screen, tagX, tagY, tagW, 32, 9, t.borderSubtle, 1)
+            screen.DrawText(tag, tagX + 11, tagY + 6, t.textAccent, fonts.caption)
+            tagX = tagX + tagW + 10
+            shown = shown + 1
+        end if
+    end for
+
+    ' ── actions ────────────────────────────────────────────────────────
+    actions = ["VIEW FULLSCREEN", "START AMBIENT MODE", "ADD TO FAVORITES"]
+    actionW = infoW
+    for i = 0 to actions.Count() - 1
+        isFocused = (state.dailyAction = i)
+        DrawButton(screen, actions[i], infoX, actionY + (i * 58), actionW, 48, isFocused, fonts.caption)
+    end for
+
+    DrawViewFooter(screen, state, "Up/Down select action   OK run action   Play start Ambient Mode   Back return to the gallery")
 end sub
+
+' Kept as a helper so the metadata block stays a flat list of strings.
+function FavoriteYesNo(state as object, item as object) as string
+    if state = invalid or state.favMgr = invalid then return "No"
+    if state.favMgr.IsFavorite(item.id) then return "Yes"
+    return "No"
+end function
