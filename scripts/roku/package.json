@@ -1,0 +1,14 @@
+{
+  "name": "spotlight-studio-roku-devtools",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Development-only tooling for the Roku channel (BrightScript compile/lint gate). Not part of the channel package.",
+  "scripts": {
+    "lint": "bsc --project bsconfig.json --diagnostic-level info",
+    "lint:screensaver": "bsc --project bsconfig-screensaver.json --diagnostic-level info",
+    "lint:all": "npm run lint && npm run lint:screensaver"
+  },
+  "devDependencies": {
+    "brighterscript": "^0.73.7"
+  }
+}

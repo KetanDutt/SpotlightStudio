@@ -1,122 +1,123 @@
 ' Spotlight Studio for Roku
-' view_filter.brs - Advanced Wallpaper Filtering, Sorting and Search Modal Dialog
+' view_filter.brs - Modal filter & sort dialog.
+'
+' Every option list and label comes from constants.brs, which is also what the
+' input handler in main.brs reads.  The two used to carry their own copies, and
+' the copies disagreed: the settings screen persisted a "title" sort order that
+' the dialog never offered and the filter never implemented.
 
-sub RenderFilterModal(screen as object, state as object)
+function FilterDialogMetrics() as object
+    gaa = GetGlobalAA()
+    if gaa.__ssFilterMetrics = invalid
+        gaa.__ssFilterMetrics = { w: 1240, h: 720, x: 340, y: 180, rowH: 62, rowsY: 150 }
+    end if
+    return gaa.__ssFilterMetrics
+end function
+
+sub RenderFilterOverlay(screen as object, state as object)
     t = GetTheme()
     fonts = state.fonts
-    
-    ' 1. Dark translucent glass backdrop
-    screen.DrawRect(0, 0, 1920, 1080, &h000000D0)
-    
-    ' 2. Modal Dimensions (1240 x 860)
-    diaX = 340
-    diaY = 110
-    diaW = 1240
-    diaH = 860
-    diaR = 20
-    
-    DrawGlassPanelR(screen, diaX, diaY, diaW, diaH, t.borderFocused, &h0A0E1AFA, diaR)
-    
-    ' Header
-    screen.DrawText("WALLPAPER FILTERS & SORTING", diaX + 50, diaY + 30, t.textPrimary, fonts.title)
-    DrawBadge(screen, "[*] / [Back] Close", diaX + diaW - 240, diaY + 34, t.btnNormal, t.textAccent, fonts.caption)
-    screen.DrawText("Filter thousands of wallpapers by category, 4K UHD quality, source, and custom order", diaX + 50, diaY + 76, t.textSecondary, fonts.caption)
-    screen.DrawRect(diaX + 50, diaY + 112, diaW - 100, 1, t.borderSubtle)
-    
-    ' Filter categories lists
-    categories = ["All", "Landscape", "Nature", "Water", "Animals", "City", "Mountains", "Sky", "Space", "Architecture", "Desert", "Forest"]
-    resolutions = ["All", "4K", "FHD"]
-    resLabels = { "All": "All Resolutions", "4K": "4K Ultra-HD (3840×2160)", "FHD": "Full HD 1080p (1920×1080)" }
-    sources = ["All", "peapix", "win10spotlight"]
-    srcLabels = { "All": "All Archives", "peapix": "Peapix (Bing Archive)", "win10spotlight": "Windows 10 Spotlight" }
-    sorts = ["newest", "oldest", "quality", "random"]
-    sortLabels = { "newest": "Newest Spotted First", "oldest": "Oldest Spotted First", "quality": "4K UHD Quality First", "random": "Random Shuffle" }
-    tags = ["", "sunset", "beach", "forest", "night", "lake", "winter", "stars", "aurora", "desert", "waterfall"]
-    
-    ' Values
-    curCat = state.activeCategory
-    curRes = state.activeResolution
-    curSrc = state.activeSource
-    curSort = state.activeSortOrder
-    if curSort = invalid then curSort = "newest"
-    curFav = state.onlyFavorites
-    curTag = state.searchQuery
-    
-    tagLabel = "None (All Tags)"
-    if curTag <> "" then tagLabel = "#" + curTag
-    
-    favLabel = "No (All Photos)"
-    if curFav then favLabel = "Yes (Favorites Only ♥)"
-    
-    resDisplay = resLabels[curRes]
-    if resDisplay = invalid then resDisplay = curRes
-    srcDisplay = srcLabels[curSrc]
-    if srcDisplay = invalid then srcDisplay = curSrc
-    sortDisplay = sortLabels[curSort]
-    if sortDisplay = invalid then sortDisplay = curSort
-    
-    filterRows = [
-        { label: "Category / Theme", value: curCat, desc: "Browse curated collections by visual theme" },
-        { label: "Resolution Quality", value: resDisplay, desc: "Filter for true 4K UHD or 1080p FHD wallpapers" },
-        { label: "Source Archive", value: srcDisplay, desc: "Filter by originating archive (Bing Peapix or Win10)" },
-        { label: "Display Sort Order", value: sortDisplay, desc: "Order wallpapers by date, 4K priority, or shuffle" },
-        { label: "Only Favorites", value: favLabel, desc: "Only show wallpapers you have marked with a heart" },
-        { label: "Popular Tag Preset", value: tagLabel, desc: "Quickly filter by popular aesthetic photography tags" },
-        { label: "Action", value: "APPLY FILTERS", desc: "Apply current filters (" + StrI(state.filtered.Count()).Trim() + " matching wallpapers)" },
-        { label: "Action", value: "RESET TO ALL", desc: "Clear all filters and restore entire catalog (7,474+ photos)" }
-    ]
-    
-    rowStartY = diaY + 130
-    rowH = 72
-    rowGap = 12
-    
-    for r = 0 to filterRows.Count() - 1
-        item = filterRows[r]
-        isFocused = (state.filterRowIdx = r)
-        rowY = rowStartY + (r * (rowH + rowGap))
-        
-        rowRadius = 12
+    M = FilterDialogMetrics()
+
+    rows = BuildFilterRows(state)
+    rowCount = rows.Count()
+
+    DrawScrim(screen, 216)
+    DrawGlassPanelR(screen, M.x, M.y, M.w, M.h, t.borderFocused, t.bgPanel, 18)
+    DrawRoundedOutline(screen, M.x - 3, M.y - 3, M.w + 6, M.h + 6, 20, t.focusSoft, 2)
+
+    screen.DrawText("Filter & Sort", M.x + 50, M.y + 28, t.textPrimary, fonts.title)
+    screen.DrawText("Narrow " + StrI(state.totalCount).Trim() + " wallpapers by category, resolution, archive and order", M.x + 50, M.y + 84, t.textSecondary, fonts.caption)
+
+    rowIdx = 0
+    while rowIdx < rowCount
+        row = rows[rowIdx]
+        rowY = M.y + M.rowsY + (rowIdx * M.rowH)
+        isFocused = (state.filterRow = rowIdx)
+
         if isFocused
-            rowBg = &h00D2FF24
-            DrawRoundRect(screen, diaX + 50, rowY, diaW - 100, rowH, rowRadius, rowBg)
-            glow = 255
-            if state.glowAlpha <> invalid then glow = state.glowAlpha
-            DrawFocusRingAnimated(screen, diaX + 50, rowY, diaW - 100, rowH, t.borderFocused, rowRadius, glow)
-        else
-            DrawRoundRect(screen, diaX + 50, rowY, diaW - 100, rowH, rowRadius, &h0A0E1866)
-            DrawRoundedOutline(screen, diaX + 50, rowY, diaW - 100, rowH, rowRadius, t.borderSubtle, 1)
+            DrawRoundRect(screen, M.x + 30, rowY, M.w - 60, 54, 10, t.accentSoft)
+            DrawRoundedOutline(screen, M.x + 30, rowY, M.w - 60, 54, 10, t.borderFocused, 2)
         end if
-        
-        if r < 6
-            ' Filter option row
-            titleColor = t.textPrimary
-            if isFocused then titleColor = t.textAccent
-            screen.DrawText(item.label, diaX + 75, rowY + 12, titleColor, fonts.body)
-            screen.DrawText(item.desc, diaX + 75, rowY + 42, t.textMuted, fonts.small)
-            
-            valX = diaX + diaW - 460
-            DrawBadge(screen, item.value, valX, rowY + 16, t.btnNormal, t.textPrimary, fonts.body)
-            
-            if isFocused
-                screen.DrawText("◄    ►", valX - 85, rowY + 22, t.textAccent, fonts.body)
-            end if
-        else if r = 6
-            ' Apply button
-            btnBg = t.btnNormal
-            if isFocused then btnBg = t.btnFocused
-            DrawRoundRect(screen, diaX + 70, rowY + 8, diaW - 140, 56, 10, btnBg)
-            btnText = "✓ Apply Filters (" + StrI(state.filtered.Count()).Trim() + " Wallpapers)"
-            btnColor = t.textAccent
-            if isFocused then btnColor = t.bgMain
-            screen.DrawText(btnText, diaX + 420, rowY + 20, btnColor, fonts.heading)
-        else if r = 7
-            ' Reset button
-            btnBg = &hFF224422
-            if isFocused then btnBg = &hFF446666
-            DrawRoundRect(screen, diaX + 70, rowY + 8, diaW - 140, 56, 10, btnBg)
-            btnColor = t.textSecondary
-            if isFocused then btnColor = t.textPrimary
-            screen.DrawText("↺ Reset All Filters to All Wallpapers", diaX + 400, rowY + 20, btnColor, fonts.body)
+
+        labelColor = t.textSecondary
+        valueColor = t.textPrimary
+        if isFocused
+            labelColor = t.textAccent
+            valueColor = t.textOnAccent
         end if
-    end for
+
+        screen.DrawText(SafeStr(row.label), M.x + 50, rowY + 14, labelColor, fonts.body)
+
+        valueText = SafeStr(row.value)
+        valueW = fonts.body.GetOneLineWidth(valueText)
+        screen.DrawText(valueText, M.x + M.w - 50 - valueW, rowY + 14, valueColor, fonts.body)
+
+        ' Directional affordance for rows that cycle.
+        if SafeStr(row.kind) = "cycle"
+            screen.DrawText("<", M.x + M.w - 78 - valueW, rowY + 14, labelColor, fonts.body)
+            screen.DrawText(">", M.x + M.w - 42, rowY + 14, labelColor, fonts.body)
+        end if
+
+        rowIdx = rowIdx + 1
+    end while
+
+    actionY = M.y + M.rowsY + (rowCount * M.rowH) + 6
+    screen.DrawRect(M.x + 50, actionY, M.w - 100, 1, t.borderSubtle)
+    screen.DrawText("Left/Right change value    OK apply & close    * reset every filter    Back cancel", M.x + 50, actionY + 16, t.textMuted, fonts.caption)
 end sub
+
+' Row model: { label, value, kind }.  `kind` is "cycle" for rows the left/right
+' keys change and "action" for rows that open something else.
+function BuildFilterRows(state as object) as object
+    rows = []
+    rows.Push({ label: "Category", value: LabelFor(CategoryLabels(), state.activeCategory), kind: "cycle" })
+    rows.Push({ label: "Resolution", value: LabelFor(ResolutionLabels(), state.activeResolution), kind: "cycle" })
+    rows.Push({ label: "Archive", value: LabelFor(SourceLabels(), state.activeSource), kind: "cycle" })
+    rows.Push({ label: "Sort Order", value: LabelFor(SortLabels(), state.sortOrder), kind: "cycle" })
+    rows.Push({ label: "Quick Tag", value: QuickTagLabel(state.activeTag), kind: "cycle" })
+
+    searchValue = "Open keyboard..."
+    if state.activeSearch <> "" then searchValue = """" + TruncateText(state.activeSearch, 24) + """"
+    rows.Push({ label: "Search", value: searchValue, kind: "action" })
+
+    favValue = "No"
+    if state.favoritesOnly then favValue = "Yes"
+    rows.Push({ label: "Favorites Only", value: favValue, kind: "cycle" })
+
+    return rows
+end function
+
+' Number of rows in the dialog, so main.brs can clamp navigation without
+' rebuilding the row model.
+function FilterRowCount() as integer
+    return 7
+end function
+
+' Categories carry a friendly label; "All" and preset names read better than the
+' raw tag string that is actually matched against.
+function CategoryLabels() as object
+    gaa = GetGlobalAA()
+    if gaa.__ssCategoryLabels = invalid
+        gaa.__ssCategoryLabels = {
+            "All": "All Categories",
+            "Landscape": "Landscape & Scenery",
+            "Nature": "Nature & Wildlife",
+            "Water": "Water & Coast",
+            "Animals": "Animals",
+            "City": "City & Urban",
+            "Mountains": "Mountains",
+            "Sky": "Sky & Clouds",
+            "Space": "Space & Astronomy",
+            "Architecture": "Architecture",
+            "Desert": "Desert",
+            "Forest": "Forest"
+        }
+    end if
+    return gaa.__ssCategoryLabels
+end function
+
+function QuickTagLabel(tag as string) as string
+    if tag = invalid or tag = "" then return "No quick tag"
+    return "#" + tag
+end function

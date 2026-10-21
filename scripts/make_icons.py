@@ -310,6 +310,19 @@ def monochrome(size: int) -> Image.Image:
     return layer.resize((size, size), Image.LANCZOS)
 
 
+def flatten_for_roku(image: Image.Image) -> Image.Image:
+    """
+    Roku certification test 6.4 forbids transparent artwork, and the Roku
+    splash/icon must be fully opaque.  Composite the RGBA master onto the solid
+    channel backdrop (#08090E, the manifest ``splash_color``) and drop the alpha
+    channel.  ``scripts/flatten_roku_art.py`` does the same thing without Pillow.
+    """
+    if image.mode != "RGBA":
+        return image.convert("RGB")
+    backing = Image.new("RGBA", image.size, BG_SOLID)
+    return Image.alpha_composite(backing, image).convert("RGB")
+
+
 def make_roku_icon(w: int = 540, h: int = 405) -> Image.Image:
     """Roku channel store / home screen grid tile."""
     bw, bh = w * 2, h * 2
@@ -516,10 +529,10 @@ def main() -> None:
 
     print("[3/3] Generating Roku TV Assets (roku/images)...")
     OUT_ROKU.mkdir(parents=True, exist_ok=True)
-    make_roku_icon(540, 405).save(OUT_ROKU / "icon_fhd.png", optimize=True)
-    make_roku_icon(290, 218).save(OUT_ROKU / "icon_hd.png", optimize=True)
-    make_roku_splash(1920, 1080).save(OUT_ROKU / "splash_fhd.png", optimize=True)
-    make_roku_splash(1280, 720).save(OUT_ROKU / "splash_hd.png", optimize=True)
+    flatten_for_roku(make_roku_icon(540, 405)).save(OUT_ROKU / "icon_fhd.png", optimize=True)
+    flatten_for_roku(make_roku_icon(290, 218)).save(OUT_ROKU / "icon_hd.png", optimize=True)
+    flatten_for_roku(make_roku_splash(1920, 1080)).save(OUT_ROKU / "splash_fhd.png", optimize=True)
+    flatten_for_roku(make_roku_splash(1280, 720)).save(OUT_ROKU / "splash_hd.png", optimize=True)
 
     print("\n[OK] Successfully updated all icons and splash images throughout the project:")
     for folder in (OUT_STATIC, OUT_MOBILE, OUT_ROKU):

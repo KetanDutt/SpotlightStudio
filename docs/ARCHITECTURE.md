@@ -163,11 +163,12 @@ rechecks plan/favorites/revisions before applying. Reset excludes active cache w
 providers; an outer provider-independent boundary and startup watchdog protect recovery.
 See [DATA.md](DATA.md), [MOBILE.md](MOBILE.md) and [REVIEW.md](REVIEW.md) for exact limits.
 
-## Roku TV Client Architecture (2.6)
+## Roku TV Client Architecture (2.7)
 
 The Roku channel (`roku/`) is built entirely in pure **BrightScript** targeting the low-level `roScreen` 2D double-buffered canvas:
-* **Zero SceneGraph XML Overhead**: Eliminates XML layout parsing and scenegraph tree traversal. The entire UI renders on a 60 fps double-buffered display loop.
-* **Obsidian Liquid Glass Design System**: Custom mathematical rasterization functions (`DrawRoundRect`, `DrawRoundedOutline`, `DrawGlassPanelR`, `DrawFocusRingAnimated`, `DrawBadge`) render anti-aliased geometry and breathing focus indicators natively.
-* **Deterministic Daily Sync**: Shares the exact same 32-bit FNV-1a avalanche selection algorithm as the Web, Mobile, and Python API (`/api/wallpapers/daily`).
-* **Living Room Experience**: Dedicated screensaver gallery with Ken Burns cinematic drift, theme studio with 6 OLED-optimized color palettes, 3-day trial state machine, and in-app purchase store architecture. See [ROKU.md](ROKU.md) for detailed implementation notes.
+* **Zero SceneGraph XML overhead**: no XML layout parsing, no scene tree. A single message loop owns focus, navigation and the frame schedule.
+* **Dirty-frame rendering**: the canvas repaints only when state changed or an animation is running (20 fps for breathing/spinner/drift, 60 fps for short transitions), so an idle channel uses effectively no CPU. See [roku/PERFORMANCE.md](roku/PERFORMANCE.md).
+* **Obsidian Liquid Glass design system**: custom rasterization primitives (`DrawRoundRect`, `DrawRoundedOutline`, `DrawGlassPanelR`, `DrawFocusRingAnimated`, `DrawBadge`) plus bounded LRU bitmap caches (`gfx_cache.brs`) that turn repeated geometry into single blits.
+* **Deterministic Daily Sync**: bit-identical 32-bit FNV-1a avalanche selection with the Web, Mobile and Python API (`/api/wallpapers/daily`), guarded by parity test vectors.
+* **Living-room experience**: Ambient Mode with Ken Burns drift and dip-to-black cross-slides, an Ultra-HD-first Ambient Collection, a theme studio with six live palettes, on-screen search, and a Roku Pay store. A separate standalone screensaver app (`roku-screensaver/`) exists because Roku permits screensavers only in dedicated packages. See [roku/](roku/README.md) for the full documentation set.
 

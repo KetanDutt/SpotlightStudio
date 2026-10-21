@@ -1,107 +1,109 @@
 ' Spotlight Studio for Roku
-' settings.brs - Registry persistence for application settings and display configurations
+' settings.brs - Persistent user preferences backed by roRegistrySection.
+'
+' The registry survives channel updates and reboots but is wiped by an
+' uninstall, which is exactly what certification requirement 4.1 asks for
+' (updates must persist saved data without re-linking).
 
 function CreateSettingsManager() as object
-    mgr = {
+    settings = {
         section: CreateObject("roRegistrySection", "SpotlightStudio_Settings"),
-        
-        ' Current settings with default values
-        ambientInterval: 10,       ' 5, 10, 15, 30, 60, 300 seconds
-        ambientClock: true,        ' show clock in ambient screensaver
-        ambientInfo: true,         ' show wallpaper details in ambient screensaver
-        viewerZoom: "fit",         ' "fit" (letterbox) or "fill" (crop 16:9)
-        safeArea: "off",           ' "off", "action_90", "title_80"
-        soundEnabled: true,        ' sound effects
-        imageBase: "",             ' custom image base URL (empty = default GitHub CDN)
-        clockFormat: "auto",       ' "auto" (use Roku device setting), "12h" (12-hour AM/PM), "24h" (24-hour military)
-        sortOrder: "newest",       ' "newest", "oldest", "quality", "title", "random"
-        
-        Init: function()
-            if m.section = invalid then return invalid
-            
-            ' 1. ambientInterval
-            if m.section.Exists("ambient_interval")
-                val = Val(m.section.Read("ambient_interval"))
-                if val >= 5 and val <= 600 then m.ambientInterval = val
+        cache: {},
+
+        Defaults: function() as object
+            return {
+                ' Profile
+                title: "Guest",
+
+                ' Appearance
+                activeThemeName: "Obsidian Slate",
+                clockFormat: "auto",
+                safeAreaGuides: "off",
+                soundEffects: "1",
+
+                ' Content
+                sortOrder: "newest",
+                activeCategory: "All",
+                activeResolution: "All",
+                activeSource: "All",
+                activeTag: "",
+                favoritesOnly: "0",
+                searchQuery: "",
+                ambientInterval: "30",
+
+                ' Network
+                imageBase: "https://media.githubusercontent.com/media/KetanDutt/SpotlightStudio/main",
+
+                ' Resume: where the user left off.
+                lastActiveTab: "0",
+                lastPage: "0",
+                lastGridIdx: "0",
+                lastWallpaperId: "0",
+
+                ' Home-screen theme automation (see theme_manager.brs).
+                homeWallpaperId: "0",
+                ssWallpaperId: "0",
+                autoSwitchEnabled: "0",
+                autoSwitchInterval: "3600",
+                autoSwitchTarget: "both",
+                autoSwitchPool: "all"
+            }
+        end function,
+
+        Load: function() as object
+            defaults = m.Defaults()
+            result = {}
+            if m.section = invalid
+                ' No registry access (extremely rare): run on defaults so the
+                ' channel still starts instead of dying on a null section.
+                for each key in defaults
+                    result[key] = defaults[key]
+                end for
+                m.cache = result
+                return result
             end if
-            
-            ' 2. ambientClock
-            if m.section.Exists("ambient_clock")
-                m.ambientClock = (m.section.Read("ambient_clock") = "true")
-            end if
-            
-            ' 3. ambientInfo
-            if m.section.Exists("ambient_info")
-                m.ambientInfo = (m.section.Read("ambient_info") = "true")
-            end if
-            
-            ' 4. viewerZoom
-            if m.section.Exists("viewer_zoom")
-                z = m.section.Read("viewer_zoom")
-                if z = "fill" or z = "fit" then m.viewerZoom = z
-            end if
-            
-            ' 5. safeArea
-            if m.section.Exists("safe_area")
-                sa = m.section.Read("safe_area")
-                if sa = "action_90" or sa = "title_80" or sa = "off" then m.safeArea = sa
-            end if
-            
-            ' 6. soundEnabled
-            if m.section.Exists("sound_enabled")
-                m.soundEnabled = (m.section.Read("sound_enabled") = "true")
-            end if
-            
-            ' 7. imageBase
-            if m.section.Exists("image_base")
-                m.imageBase = m.section.Read("image_base")
-            end if
-            
-            ' 8. clockFormat
-            if m.section.Exists("clock_format")
-                cf = m.section.Read("clock_format")
-                if cf = "12h" or cf = "24h" or cf = "auto" then m.clockFormat = cf
-            end if
-            
-            ' 9. sortOrder
-            if m.section.Exists("sort_order")
-                so = m.section.Read("sort_order")
-                if so = "newest" or so = "oldest" or so = "quality" or so = "title" or so = "random" then m.sortOrder = so
+
+            for each key in defaults
+                fallback = defaults[key]
+                if m.section.Exists(key)
+                    stored = m.section.Read(key)
+                    if stored <> invalid and stored <> ""
+                        result[key] = stored
+                    else
+                        result[key] = fallback
+                    end if
+                else
+                    result[key] = fallback
+                end if
+            end for
+
+            m.cache = result
+            return result
+        end function,
+
+        Save: function(key as string, value as string) as void
+            m.cache[key] = value
+            if m.section <> invalid
+                m.section.Write(key, value)
+                m.section.Flush()
             end if
         end function,
-        
-        Save: function()
-            if m.section = invalid then return invalid
-            m.section.Write("ambient_interval", StrI(m.ambientInterval).Trim())
-            m.section.Write("ambient_clock", m.BoolToStr(m.ambientClock))
-            m.section.Write("ambient_info", m.BoolToStr(m.ambientInfo))
-            m.section.Write("viewer_zoom", m.viewerZoom)
-            m.section.Write("safe_area", m.safeArea)
-            m.section.Write("sound_enabled", m.BoolToStr(m.soundEnabled))
-            m.section.Write("image_base", m.imageBase)
-            m.section.Write("clock_format", m.clockFormat)
-            m.section.Write("sort_order", m.sortOrder)
-            m.section.Flush()
+
+        GetStr: function(key as string, fallback as string) as string
+            if m.cache.DoesExist(key) then return SafeStr(m.cache[key])
+            return fallback
         end function,
-        
-        BoolToStr: function(b as boolean) as string
-            if b then return "true"
-            return "false"
+
+        GetInt: function(key as string, fallback as integer) as integer
+            if m.cache.DoesExist(key) then return Val(SafeStr(m.cache[key]))
+            return fallback
         end function,
-        
-        ResetDefaults: function()
-            m.ambientInterval = 10
-            m.ambientClock = true
-            m.ambientInfo = true
-            m.viewerZoom = "fit"
-            m.safeArea = "off"
-            m.soundEnabled = true
-            m.imageBase = ""
-            m.clockFormat = "auto"
-            m.sortOrder = "newest"
-            m.Save()
+
+        GetBool: function(key as string, fallback as boolean) as boolean
+            if m.cache.DoesExist(key) then return Val(SafeStr(m.cache[key])) = 1
+            return fallback
         end function
     }
-    mgr.Init()
-    return mgr
+    settings.Load()
+    return settings
 end function

@@ -1,221 +1,157 @@
 ' Spotlight Studio for Roku
-' view_screensaver_gallery.brs - Curated Roku Screensaver Gallery view
+' view_screensaver_gallery.brs - Curated 4K UHD landscape collection.
+'
+' Field note: the packaged catalog carries id, filename, title, tags,
+' date_spotted, source and quality only.  The previous version of this screen
+' read `resolution`, `category` and `copyright`, which do not exist on any row,
+' so `Instr(1, item.resolution, "3840")` was handed `invalid` and raised a type
+' mismatch that killed the channel.  Resolution, category and attribution are
+' now derived (see utils.brs).
 
-sub RenderScreensaverGalleryView(screen as object, state as object)
+function ScreensaverLayout() as object
+    gaa = GetGlobalAA()
+    if gaa.__ssSaverLayout = invalid
+        cardW = 567
+        cardH = 368
+        gapX = 24
+        gapY = 22
+        cols = ScreensaverColumns()
+        gridW = (cols * cardW) + ((cols - 1) * gapX)
+        gaa.__ssSaverLayout = {
+            cardW: cardW,
+            cardH: cardH,
+            gapX: gapX,
+            gapY: gapY,
+            cols: cols,
+            startX: CInt((1920 - gridW) / 2),
+            startY: 210,
+            imgPad: 10,
+            imgW: cardW - 20,
+            imgH: 306,
+            pageSize: ScreensaverPageSize()
+        }
+    end if
+    return gaa.__ssSaverLayout
+end function
+
+sub RenderScreensaverGallery(screen as object, state as object)
     t = GetTheme()
     fonts = state.fonts
-    lm = state.licenseMgr
-    tm = state.themeMgr
-    
-    ' 1. Clear background
+    L = ScreensaverLayout()
+
     screen.Clear(t.bgMain)
-    
-    ' 2. Header
-    screen.DrawRect(0, 0, 1920, 115, t.bgHeader)
-    screen.DrawRect(0, 114, 1920, 1, t.borderSubtle)
-    screen.DrawText("SCREENSAVER GALLERY", 85, 24, t.textPrimary, fonts.title)
-    
-    statusBadge = lm.GetStatusBadge()
-    badgeColor = t.btnNormal
-    if lm.IsTrialActive() then badgeColor = t.textAccent
-    if lm.hasFullVersion then badgeColor = t.badgeFhd
-    if lm.HasActiveSubscription() then badgeColor = t.badge4k
-    DrawBadge(screen, statusBadge, 1580, 32, badgeColor, t.textPrimary, fonts.small)
-    
-    screen.DrawText("Browse curated ultra-HD ambient landscape wallpapers and configure your Roku TV Screensaver", 85, 74, t.textSecondary, fonts.caption)
-    
-    ' Filter screensaver wallpapers (landscape / nature / scenic)
-    screensavers = state.screensaverList
-    if screensavers = invalid or screensavers.Count() = 0
-        screensavers = state.allWallpapers
+    DrawViewHeader(screen, state, "Ambient Collection", "Curated landscape wallpapers for Ambient Mode - Ultra-HD first, then the best of Full HD")
+
+    savList = state.screensaverList
+    totalItems = 0
+    if savList <> invalid then totalItems = savList.Count()
+    totalPages = MaxI(1, CeilDivI(totalItems, L.pageSize))
+
+    ' ── focused-item info bar ──────────────────────────────────────────
+    curItem = invalid
+    if totalItems > 0
+        state.ssGridIdx = ClampI(state.ssGridIdx, 0, L.pageSize - 1)
+        curIdx = (state.currentPageSS * L.pageSize) + state.ssGridIdx
+        if curIdx < totalItems then curItem = savList[curIdx]
     end if
-    
-    totalItems = screensavers.Count()
-    pageSize = 6 ' 3 columns x 2 rows
-    totalPages = MaxI(1, CInt((totalItems + pageSize - 1) / pageSize))
-    currentPage = ClampI(state.ssCurrentPage, 0, totalPages - 1)
-    
-    ' Current focused wallpaper
-    focusedIdx = currentPage * pageSize + state.ssGridIdx
-    if focusedIdx >= totalItems then focusedIdx = 0
-    curItem = screensavers[focusedIdx]
-    
-    ' 3. Left Panel: Large Showcase & Quick Action Hub (85, 135, 780 x 810)
-    leftX = 85
-    leftY = 135
-    leftW = 780
-    leftH = 810
-    DrawGlassPanel(screen, leftX, leftY, leftW, leftH, t.borderSubtle, t.bgPanel)
-    
-    ' Active Screensaver Label
-    isCurrentActive = false
-    if tm.screensaverWallpaper <> invalid and curItem <> invalid
-        if tm.screensaverWallpaper.id = curItem.id then isCurrentActive = true
-    end if
-    
-    showcaseTitle = "SCREENSAVER PREVIEW"
-    if isCurrentActive
-        DrawBadge(screen, "CURRENT ACTIVE SCREENSAVER", leftX + 35, leftY + 25, t.badge4k, t.textPrimary, fonts.small)
+
+    DrawGlassPanelR(screen, 0, 120, 1920, 82, t.borderSubtle, t.bgPanel, 0)
+    if curItem <> invalid
+        screen.DrawText(TruncateText(WallpaperTitle(curItem), 84), 85, 134, t.textPrimary, fonts.heading)
+        detail = ResolutionLabel(curItem) + "   •   " + PrimaryCategory(curItem) + "   •   Spotted " + FormatDate(SafeStr(curItem.date_spotted))
+        screen.DrawText(detail, 85, 170, t.textSecondary, fonts.caption)
+
+        rightLabel = "Item " + StrI(state.ssGridIdx + 1).Trim() + "/" + StrI(L.pageSize).Trim()
+        rightW = fonts.caption.GetOneLineWidth(rightLabel)
+        screen.DrawText(rightLabel, 1835 - rightW, 152, t.textAccent, fonts.caption)
     else
-        screen.DrawText(showcaseTitle, leftX + 35, leftY + 25, t.textAccent, fonts.caption)
+        screen.DrawText("No wallpapers in this collection", 85, 134, t.textPrimary, fonts.heading)
+        screen.DrawText("Try clearing the 4K-only preference from Filter & Sort", 85, 170, t.textSecondary, fonts.caption)
     end if
-    
-    ' Big Preview Image (710 x 400) with rounded corners
-    thumb = state.GetCachedThumbnail(curItem.filename)
-    DrawRoundRect(screen, leftX + 35, leftY + 60, 710, 400, 14, &h161A28EE)
-    if thumb <> invalid and thumb.GetWidth() > 1
-        screen.DrawResizedObject(leftX + 35, leftY + 60, 710, 400, thumb)
-    else
-        spinnerAngle = 0
-        if state.spinnerAngle <> invalid then spinnerAngle = state.spinnerAngle
-        DrawLoadingSpinner(screen, leftX + 35 + 355, leftY + 60 + 185, 24, spinnerAngle, t.textAccent, t.borderSubtle)
-        screen.DrawText("Loading Preview...", leftX + 35 + 300, leftY + 60 + 225, t.textMuted, fonts.body)
+
+    ' ── grid ───────────────────────────────────────────────────────────
+    if totalItems = 0
+        RenderEmptyNotice(screen, state, "The Ambient Collection is empty", "Press Back, then use Filter & Sort to widen the selection")
+        return
     end if
-    DrawRoundedOutline(screen, leftX + 35, leftY + 60, 710, 400, 14, t.borderSubtle, 1)
-    
-    ' Wallpaper metadata
-    screen.DrawText(TruncateText(curItem.title, 42), leftX + 35, leftY + 480, t.textPrimary, fonts.heading)
-    if curItem.copyright <> invalid and curItem.copyright <> ""
-        screen.DrawText(TruncateText(curItem.copyright, 56), leftX + 35, leftY + 522, t.textSecondary, fonts.caption)
-    end if
-    
-    ' Badges: Resolution, Source, Category
-    resText = "1920x1080 FHD"
-    if curItem.resolution <> invalid and curItem.resolution <> "" then resText = curItem.resolution
-    DrawBadge(screen, resText, leftX + 35, leftY + 560, t.badgeFhd, t.textPrimary, fonts.small)
-    
-    if curItem.source <> invalid
-        DrawBadge(screen, UCase(curItem.source), leftX + 185, leftY + 560, t.btnNormal, t.textPrimary, fonts.small)
-    end if
-    
-    if state.favMgr.IsFavorite(curItem)
-        DrawBadge(screen, "♥ FAVORITE", leftX + 330, leftY + 560, &hE11D48EE, t.textPrimary, fonts.small)
-    end if
-    
-    ' Action Buttons inside Showcase with rounded corners
-    actionY = leftY + 620
-    actionH = 50
-    actionW = 345
-    btnRadius = 8
-    
-    ' Button 1: Set as Roku TV Screensaver
-    DrawRoundRect(screen, leftX + 35, actionY, actionW, actionH, btnRadius, t.btnNormal)
-    DrawRoundedOutline(screen, leftX + 35, actionY, actionW, actionH, btnRadius, t.borderSubtle, 2)
-    screen.DrawText("[*] Set as TV Screensaver", leftX + 60, actionY + 14, t.textPrimary, fonts.body)
-    
-    ' Button 2: Run Ambient Now
-    DrawRoundRect(screen, leftX + 400, actionY, actionW, actionH, btnRadius, t.btnNormal)
-    DrawRoundedOutline(screen, leftX + 400, actionY, actionW, actionH, btnRadius, t.borderSubtle, 2)
-    screen.DrawText("[Play] Run Ambient Now", leftX + 440, actionY + 14, t.textAccent, fonts.body)
-    
-    ' Button 3: Set as Home Wallpaper
-    DrawRoundRect(screen, leftX + 35, actionY + 65, actionW, actionH, btnRadius, t.btnNormal)
-    DrawRoundedOutline(screen, leftX + 35, actionY + 65, actionW, actionH, btnRadius, t.borderSubtle, 2)
-    screen.DrawText("[Replay] Set as Home Wall", leftX + 55, actionY + 79, t.textPrimary, fonts.body)
-    
-    ' Button 4: Fullscreen Lightbox
-    DrawRoundRect(screen, leftX + 400, actionY + 65, actionW, actionH, btnRadius, t.btnNormal)
-    DrawRoundedOutline(screen, leftX + 400, actionY + 65, actionW, actionH, btnRadius, t.borderSubtle, 2)
-    screen.DrawText("[OK] Fullscreen Lightbox", leftX + 435, actionY + 79, t.textPrimary, fonts.body)
-    
-    ' 4. Right Panel: Curated Grid (3 columns x 2 rows = 6 items per page)
-    rightX = 895
-    rightY = 135
-    rightW = 940
-    rightH = 810
-    DrawGlassPanelR(screen, rightX, rightY, rightW, rightH, t.borderSubtle, t.bgPanel, 16)
-    
-    screen.DrawText("SCREENSAVER CATALOG", rightX + 35, rightY + 25, t.textAccent, fonts.caption)
-    pageStr = "Page " + StrI(currentPage + 1).Trim() + " of " + StrI(totalPages).Trim() + " (" + StrI(totalItems).Trim() + " items)"
-    screen.DrawText(pageStr, rightX + rightW - 320, rightY + 25, t.textMuted, fonts.small)
-    
-    colW = 275
-    rowH = 330
-    gapX = 25
-    gapY = 25
-    gridX = rightX + 35
-    gridY = rightY + 70
-    
-    startItemIdx = currentPage * pageSize
-    for i = 0 to pageSize - 1
-        itemIdx = startItemIdx + i
+
+    startIdx = state.currentPageSS * L.pageSize
+    for i = 0 to L.pageSize - 1
+        itemIdx = startIdx + i
         if itemIdx >= totalItems then exit for
-        
-        item = screensavers[itemIdx]
-        c = i MOD 3
-        r = Int(i / 3)
-        
-        cx = gridX + (c * (colW + gapX))
-        cy = gridY + (r * (rowH + gapY))
-        
-        isFocused = (state.ssFocusArea = "grid" and state.ssGridIdx = i)
-        
-        ' Smooth card elevation pop when focused
-        drawCX = cx
-        drawCY = cy
-        drawCW = colW
-        drawCH = rowH
-        cardRadius = 12
-        cardBg = &h0D111AEE
-        cardBorder = t.borderSubtle
-        if isFocused
-            drawCX = cx - 3
-            drawCY = cy - 3
-            drawCW = colW + 6
-            drawCH = rowH + 6
-            cardRadius = 14
-            cardBg = &h161D2BEE
-            cardBorder = t.borderFocused
-        end if
-        
-        DrawRoundRect(screen, drawCX, drawCY, drawCW, drawCH, cardRadius, cardBg)
-        DrawRoundedOutline(screen, drawCX, drawCY, drawCW, drawCH, cardRadius, cardBorder, 1)
-        
-        ' Thumbnail (275 x 155, 16:9) with rounded corners
-        thumbPad = 6
-        thumbX = drawCX + thumbPad
-        thumbY = drawCY + thumbPad
-        thumbW = drawCW - (thumbPad * 2)
-        thumbH = 155
-        DrawRoundRect(screen, thumbX, thumbY, thumbW, thumbH, 8, &h1E2338DD)
-        itemThumb = state.GetCachedThumbnail(item.filename)
-        if itemThumb <> invalid and itemThumb.GetWidth() > 1
-            screen.DrawResizedObject(thumbX, thumbY, thumbW, thumbH, itemThumb)
-        else
-            spinnerAngle = 0
-            if state.spinnerAngle <> invalid then spinnerAngle = state.spinnerAngle
-            DrawLoadingSpinner(screen, thumbX + (thumbW / 2), thumbY + (thumbH / 2), 16, spinnerAngle, t.textAccent, t.borderSubtle)
-        end if
-        DrawRoundedOutline(screen, thumbX, thumbY, thumbW, thumbH, 8, t.borderSubtle, 1)
-        
-        ' Title & Category
-        screen.DrawText(TruncateText(item.title, 22), drawCX + 12, drawCY + 175, t.textPrimary, fonts.body)
-        
-        itemCat = "Spotlight"
-        if item.category <> invalid and item.category <> "" then itemCat = item.category
-        screen.DrawText(itemCat, drawCX + 12, drawCY + 215, t.textSecondary, fonts.small)
-        
-        ' Resolution Badge
-        itemRes = "FHD"
-        if Instr(1, item.resolution, "3840") > 0 or Instr(1, item.resolution, "4K") > 0
-            itemRes = "4K UHD"
-        end if
-        DrawBadge(screen, itemRes, drawCX + 12, drawCY + 250, t.badgeFhd, t.textPrimary, fonts.small)
-        
-        ' Is active screensaver marker
-        if tm.screensaverWallpaper <> invalid and tm.screensaverWallpaper.id = item.id
-            DrawBadge(screen, "ACTIVE", drawCX + 120, drawCY + 250, t.badge4k, t.textPrimary, fonts.small)
-        end if
-        
-        if isFocused
-            glow = 255
-            if state.glowAlpha <> invalid then glow = state.glowAlpha
-            DrawFocusRingAnimated(screen, drawCX, drawCY, drawCW, drawCH, t.borderFocused, cardRadius, glow)
-        end if
+
+        col = i MOD L.cols
+        row = CInt(i / L.cols)
+        cardX = L.startX + (col * (L.cardW + L.gapX))
+        cardY = L.startY + (row * (L.cardH + L.gapY))
+        isSelected = (state.ssGridIdx = i)
+
+        DrawScreensaverCard(screen, state, itemIdx, cardX, cardY, L, isSelected)
     end for
-    
-    ' 5. Footer Bar
-    screen.DrawRect(0, 970, 1920, 110, t.bgFooter)
-    screen.DrawRect(0, 970, 1920, 2, t.borderSubtle)
-    screen.DrawText("[▲/▼/◄/►] Browse     [OK] Lightbox     [*] Set as Screensaver     [Play] Ambient Mode     [Back] Gallery", 85, 1010, t.textSecondary, fonts.body)
+
+    pageLabel = "Page " + StrI(state.currentPageSS + 1).Trim() + " of " + StrI(totalPages).Trim() + "   •   " + StrI(totalItems).Trim() + " wallpapers"
+    pageW = fonts.caption.GetOneLineWidth(pageLabel)
+    screen.DrawText(pageLabel, CInt((1920 - pageW) / 2), 936, t.textSecondary, fonts.caption)
+
+    DrawViewFooter(screen, state, "D-Pad Navigate   OK View Fullscreen   Play Ambient Mode   Right/Left Page   * Use as Ambient Wallpaper   Back return")
+end sub
+
+sub DrawScreensaverCard(screen as object, state as object, itemIdx as integer, cardX as integer, cardY as integer, L as object, isSelected as boolean)
+    t = GetTheme()
+    fonts = state.fonts
+
+    curItem = state.screensaverList[itemIdx]
+    if curItem = invalid then return
+
+    imgX = cardX + L.imgPad
+    imgY = cardY + L.imgPad
+    imgW = L.imgW
+    imgH = L.imgH
+
+    DrawGlassPanelCached(screen, cardX, cardY, L.cardW, L.cardH, t.borderMedium, t.bgPanel, 14)
+    DrawRoundRect(screen, imgX, imgY, imgW, imgH, 12, t.bgPanelLight)
+
+    filename = WallpaperFilename(curItem)
+    thumbBmp = state.imgLoader.GetThumbnailSized(filename, imgW, imgH)
+    if thumbBmp <> invalid
+        screen.DrawObject(imgX, imgY, thumbBmp)
+    else
+        fallback = state.imgLoader.GetThumbnail(filename)
+        if fallback <> invalid
+            screen.DrawResizedObject(imgX, imgY, imgW, imgH, fallback)
+        else if state.spinnerVisible
+            DrawLoadingSpinner(screen, imgX + CInt(imgW / 2), imgY + CInt(imgH / 2), 18, state.spinnerAngle, t.textAccent, t.borderSubtle)
+        end if
+    end if
+
+    ' Badges over the artwork.
+    if IsUltraHd(curItem)
+        DrawBadge(screen, "4K UHD", imgX + 12, imgY + 12, t.badge4k, t.textPrimary, fonts.caption)
+    else
+        DrawBadge(screen, "FHD", imgX + 12, imgY + 12, t.badgeFhd, t.textPrimary, fonts.caption)
+    end if
+
+    isFav = state.favMgr.IsFavorite(curItem.id)
+    if isFav
+        favW = BadgeWidth("FAVORITE", fonts.caption)
+        DrawBadge(screen, "FAVORITE", imgX + imgW - favW - 12, imgY + 12, t.heartPink, t.textPrimary, fonts.caption)
+    end if
+
+    isCurrent = false
+    if state.themeMgr <> invalid then isCurrent = (state.themeMgr.ambientWallpaperId = SafeInt(curItem.id, 0))
+    if isCurrent
+        labelW = BadgeWidth("AMBIENT WALLPAPER", fonts.caption)
+        DrawBadge(screen, "AMBIENT WALLPAPER", imgX + imgW - labelW - 12, imgY + imgH - 44, t.successGreen, t.textOnAccent, fonts.caption)
+    end if
+
+    ' Caption.
+    captionY = imgY + imgH + 12
+    screen.DrawText(TruncateText(WallpaperTitle(curItem), 44), imgX + 4, captionY, t.textPrimary, fonts.body)
+    screen.DrawText(TruncateText(PrimaryCategory(curItem) + "  •  " + SourceLabel(curItem), 44), imgX + 4, captionY + 28, t.textSecondary, fonts.caption)
+
+    if isSelected
+        glowAlpha = CalcGlowAlpha(state, 210)
+        DrawFocusRingAnimated(screen, cardX, cardY, L.cardW, L.cardH, t.borderFocused, 14, glowAlpha)
+        DrawRoundRect(screen, cardX + 2, cardY + L.cardH - 6, L.cardW - 4, 4, 2, t.textAccent)
+    end if
 end sub
