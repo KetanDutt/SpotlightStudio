@@ -5,6 +5,112 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [2.8.0] — 2026-10-22
+
+### Roku channel: a static gate for what the compiler cannot see
+- New `scripts/roku_audit.py` (`make roku-audit`, also run first by
+  `make roku-check`, and asserted by `tests/test_roku_audit.py`).  BrightScript
+  compiles every `.brs` into one namespace and is forgiving in exactly the ways
+  that break a canvas channel: a missing associative-array key returns
+  `invalid`, a call to a method a component does not implement is a *runtime*
+  error on the main thread, and a call to an undefined function is only found
+  when execution reaches it.  The auditor checks all three, plus duplicate
+  global definitions, deprecated APIs, manifest invariants and `bsconfig` glob
+  coverage.
+- **Found and fixed `roBitmap.DrawResizedObject()`** — it does not exist on any
+  Roku component.  `ifDraw2D` offers `DrawObject`, `DrawScaledObject(x, y,
+  scaleX, scaleY, src)`, `DrawRotatedObject` and `DrawTransformedObject`, with
+  no pixel-dimension variant.  Every image in both packages was drawn with it,
+  so the channel crashed on the first frame containing a picture.  All call
+  sites now go through `DrawScaledTo()`.
+- **Found and fixed `roFont.Copy()` / `roFont.SetSize()`** — `roFont` exposes
+  only `GetOneLineWidth`, `GetOneLineHeight`, `GetAscent`, `GetDescent` and
+  `GetMaxAdvance`.  Both channels were calling it from `BuildFonts()`, i.e.
+  during `RunUserInterface()`, so neither started.  Sized fonts now come from
+  `roFontRegistry.GetDefaultFont(size, bold, italic)`.
+- **Found and fixed `roDateTime.FromISOString()`** (the real method is
+  `FromISO8601String`) and **`roDeviceInfo.ConnectionType()`** (the documented
+  method is `GetConnectionType()`).
+- `roFont.GetOneLineWidth(text, maxWidth)` takes **two** arguments; 29 call
+  sites were passing one.
+
+### Roku channel: correctness
+- **Theme Studio auto-rotation now rotates.**  The *Auto-switch* row persisted
+  its settings but nothing ever acted on them.  `UpdateAutoRotation()` walks the
+  rotation pool on schedule, assigns the Ambient wallpaper and/or the menu
+  backdrop per `autoSwitchTarget`, drops the baked backdrop so it is rebuilt and
+  pre-fetches the new thumbnail.  It is skipped while the viewer or Ambient Mode
+  is on screen and the interval is floored at 60 s.
+- **Split the two interval settings.**  `state.autoSwitchInterval` was doing
+  double duty: changing Theme Studio's rotation interval silently rescheduled
+  the Ambient slideshow.  The slideshow is now `state.ambientIntervalSec`.
+- `StartAmbientFromGallery()` honours the wallpaper assigned by *Set as Ambient
+  Wallpaper* instead of always starting at the top of the pool, and can no
+  longer return to `viewer`/`ambient` (neither has a Back branch).
+- The filter dialog's row count and search-row index are derived from one
+  `FilterRowSpec()` list.  `FilterRowCount()` returned a literal `7` while the
+  dialog had exactly 7 rows, so an eighth would have been unreachable, and the
+  input handler kept its own literal `5` for the search row.
+- Theme Studio's two assignment rows no longer print the same value in both
+  columns; the rows show what is assigned and the panel hint says what OK would
+  assign.
+- `settings.brs` / `license.brs`: the trial and subscription boundary moved from
+  milliseconds to epoch **seconds** (a millisecond epoch overflows a 32-bit
+  Integer), and a restored subscription no longer clears `hasFullVersion`.
+- `catalog.brs`: the `MergeSortByKey` locals shadowed the outer `source` array.
+  Verified against a stable sort on 300 randomised trials.
+
+### Roku channel: performance
+- "Title A→Z" is a stable bottom-up merge sort instead of an insertion sort:
+  ≈28 M comparisons → ≈97 K on the 7,475-row archive.  The old sort hung the
+  channel for minutes and tripped Roku's response watchdog.
+- Wallpaper-id lookups go through a memoised `CatalogIndex()` map instead of a
+  linear scan per frame (~150 K comparisons/second at 20 fps).
+- Solid rounded rects — card image slots, filter chips, tag pills, spinner dots,
+  focus underlines, the active-tab pill — come from the shape cache.  A gallery
+  page was issuing over 1 000 `DrawRect()` calls per frame before any thumbnail
+  was drawn; it is ~23 blits now.
+- Cache eviction is O(1) (the key list doubles as the LRU order) instead of
+  scanning for the oldest stamp on every eviction.
+- The fullscreen viewer no longer declares itself animating while a static image
+  is on screen, which was re-scaling and re-blitting 1920×1080 twenty times a
+  second, forever.
+
+### Roku channel: docs
+- New `docs/roku/STATE.md` — every one of the 78 `state` fields, the filter-state
+  mirror, the two-interval trap and the persistence layout.
+- New `docs/roku/AUDIT.md` — what the auditor checks, how it infers types, and
+  the Roku API traps it caught (`nonexistent` table included).
+- `PERFORMANCE.md`, `ARCHITECTURE.md`, `CONTROLS.md`, `DEEP_LINKING.md`,
+  `RELEASE.md`, `TROUBLESHOOTING.md`, `CERTIFICATION.md` and the two package
+  READMEs updated for the new timers, caches, budgets, deep-link actions and
+  gates.  `docs/ROKU.md`'s stale links fixed.
+
+### Roku channel: tooling
+- Makefile: new `roku-audit` target; `roku-check` runs the audit first;
+  `clean` also removes `scripts/roku/out/`.
+- `tests/test_roku_audit.py`: 70 tests covering the audit itself, the manifest
+  invariants and the source-level regressions (no withheld API calls, derived
+  row counts, distinct intervals), plus negative tests that prove the
+  entry-point and deprecated-API checks actually fire.
+- Removed the generated BrighterScript staging directory `scripts/roku/out/`.
+- `bsconfig-screensaver.json` now filters BS1013 for the screensaver's own
+  `main.brs` and the six shared modules, so `make roku-lint` is genuinely
+  clean.  Roku compiles every `.brs` in `source/` into one program, so
+  "not referenced by any other file" is not a defect here; the filters are
+  path-scoped, so an orphaned file anywhere else still reports.
+
+### Repository
+- **Fixed a broken release gate.**  `tests/test_consistency.py` asserts the
+  newest CHANGELOG release equals `src/__version__`; 2.7.0 had been released
+  without bumping it, so `make check` failed on a clean tree.  The app version
+  is now 2.8.0 across `src/__init__.py`, `index.html`, `sw.js` and the README
+  badge.
+- `scripts/flatten_roku_art.py`: removed an unused local, so `make lint` is
+  clean again.
+
+---
+
 ## [2.7.0] — 2026-10-21
 
 ### Roku channel: certification and correctness

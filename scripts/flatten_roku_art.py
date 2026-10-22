@@ -121,7 +121,6 @@ def read_png(path: Path) -> tuple[int, int, int, int, bytes]:
 
 def to_rgb(pixels: bytes, width: int, height: int, colour: int, plte: bytes, trns: bytes) -> tuple[bytes, bytes | None]:
     """Return (rgb bytes, alpha bytes or None) for any of the five colour types."""
-    channels = CHANNELS[colour]
     if colour == 2:
         return pixels, None
     if colour == 6:

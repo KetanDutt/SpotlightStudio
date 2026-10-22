@@ -37,10 +37,47 @@ function LoadCatalog() as object
     return items
 end function
 
-' Linear scan used by deep links.  Returns the index, or -1 when the key does
-' not match any wallpaper.  Accepts a numeric id, an id string, or a filename.
+' id -> index map for one catalog array, memoised in the global AA.
+'
+' DrawGalleryBackdrop() and Theme Studio's assignment slots both resolve a
+' wallpaper id every frame.  At 20 fps that was 7,475 string comparisons x 20 =
+' ~150,000 iterations a second, for a value that changes only when the user
+' picks a new backdrop.  The map is rebuilt only when the array identity or its
+' length changes.
+function CatalogIndex(items as object) as object
+    gaa = GetGlobalAA()
+    if gaa.__ssCatalogIndex = invalid
+        gaa.__ssCatalogIndex = { items: invalid, count: -1, map: {} }
+    end if
+    entry = gaa.__ssCatalogIndex
+    total = 0
+    if items <> invalid then total = items.Count()
+    if entry.items = items and entry.count = total then return entry.map
+
+    entry.items = items
+    entry.count = total
+    entry.map = {}
+    if items = invalid then return entry.map
+    for i = 0 to total - 1
+        item = items[i]
+        if item <> invalid
+            idKey = SafeStr(item.id)
+            if idKey <> "" and not entry.map.DoesExist(idKey) then entry.map[idKey] = i
+        end if
+    end for
+    return entry.map
+end function
+
+' Find a wallpaper by numeric id, id string, or filename.  Returns the index,
+' or -1 when nothing matches.
 function FindWallpaperIndex(items as object, key as string) as integer
     if items = invalid or key = invalid or key = "" then return -1
+
+    ' Fast path: the memoised id map, when this is the array it was built for.
+    indexMap = CatalogIndex(items)
+    if indexMap.DoesExist(key) then return SafeInt(indexMap[key], -1)
+
+    ' Slow path: a filename lookup, or an array the map does not cover.
     targetId = Val(key)
     total = items.Count()
     for i = 0 to total - 1
@@ -159,7 +196,7 @@ function SortWallpapers(items as object, sortOrder as string) as object
     end if
 
     if sortOrder = "title"
-        return SortByTitle(items)
+        return SortByTitleFast(items)
     end if
 
     if sortOrder = "random"
@@ -169,9 +206,18 @@ function SortWallpapers(items as object, sortOrder as string) as object
     return items
 end function
 
-' Case-insensitive A-Z title sort (insertion sort on a pre-computed key list -
-' BrightScript has no built-in comparator sort).
-function SortByTitle(items as object) as object
+' Case-insensitive A-Z title sort.
+'
+' Bottom-up merge sort over a pre-computed lowercase key array: O(n log n)
+' instead of the O(n^2) insertion sort this used to be.  That matters because
+' the "Title A to Z" filter runs on the WHOLE archive - 7,475 items - and an
+' insertion sort over that is ~28 million comparisons, i.e. a channel that
+' hangs for minutes and then trips Roku's launch/response watchdog.
+'
+' The sort is stable, so wallpapers with identical titles keep their
+' newest-first order, and it is iterative, so it cannot blow the BrightScript
+' call stack the way a recursive merge sort would.
+function SortByTitleFast(items as object) as object
     count = items.Count()
     if count < 2 then return items
 
@@ -180,23 +226,75 @@ function SortByTitle(items as object) as object
         keys.Push(LCase(SafeStr(itm.title)))
     end for
 
-    ' Insertion sort: the input is already ordered by id, which correlates
-    ' poorly with title, so this is O(n^2).  It only runs on the filtered
-    ' subset the user is actually looking at, and is triggered by an explicit
-    ' choice rather than every frame.
-    for i = 1 to count - 1
-        keyItem = items[i]
-        keyText = keys[i]
-        j = i - 1
-        while j >= 0 and keys[j] > keyText
-            items[j + 1] = items[j]
-            keys[j + 1] = keys[j]
-            j = j - 1
-        end while
-        items[j + 1] = keyItem
-        keys[j + 1] = keyText
+    return MergeSortByKey(items, keys, count)
+end function
+
+' Sort `items` by the parallel `keys` array, ascending, stable.
+function MergeSortByKey(items as object, keys as object, count as integer) as object
+    runA = []
+    keyA = []
+    runA.Append(items)
+    keyA.Append(keys)
+
+    runB = []
+    keyB = []
+    for i = 0 to count - 1
+        runB.Push(invalid)
+        keyB.Push("")
     end for
-    return items
+
+    width = 1
+    while width < count
+        stepSize = width * 2
+        lo = 0
+        while lo < count
+            mid = MinI(lo + width, count)
+            hi = MinI(lo + stepSize, count)
+
+            i = lo
+            j = mid
+            k = lo
+            while i < mid and j < hi
+                ' Strict `<` keeps the sort stable: equal keys take from the
+                ' left run first.
+                if keyA[j] < keyA[i]
+                    runB[k] = runA[j]
+                    keyB[k] = keyA[j]
+                    j = j + 1
+                else
+                    runB[k] = runA[i]
+                    keyB[k] = keyA[i]
+                    i = i + 1
+                end if
+                k = k + 1
+            end while
+            while i < mid
+                runB[k] = runA[i]
+                keyB[k] = keyA[i]
+                i = i + 1
+                k = k + 1
+            end while
+            while j < hi
+                runB[k] = runA[j]
+                keyB[k] = keyA[j]
+                j = j + 1
+                k = k + 1
+            end while
+
+            lo = lo + stepSize
+        end while
+
+        swapped = runA
+        runA = runB
+        runB = swapped
+        swapKeys = keyA
+        keyA = keyB
+        keyB = swapKeys
+
+        width = stepSize
+    end while
+
+    return runA
 end function
 
 ' Fisher-Yates shuffle on a copy, so the source list is never disturbed.
@@ -371,10 +469,27 @@ function GetDailySpotlightWallpaper(allItems as object) as object
 
     if winner <> invalid and section <> invalid
         section.Write(cacheKey, StrI(total).Trim() + "|" + SafeStr(winner.id))
+        ' One cache key per calendar day, forever, would grow the registry
+        ' section without bound.  The previous day's pick is worthless, so drop
+        ' every other daily_* key while writing today's.
+        PruneDailyCache(section, cacheKey)
         section.Flush()
     end if
     return winner
 end function
+
+' Remove every `daily_*` registry key except `keepKey`.  Registry sections are
+' size-limited and every Write()/Flush() is a synchronous flash write, so a
+' section that keeps growing is both a correctness and a latency problem.
+sub PruneDailyCache(section as object, keepKey as string)
+    if section = invalid then return
+    keys = section.GetKeyList()
+    if keys = invalid then return
+    for each entry in keys
+        name = SafeStr(entry)
+        if Left(name, 6) = "daily_" and name <> keepKey then section.Delete(name)
+    end for
+end sub
 
 ' ─── PARITY SELF-TEST ─────────────────────────────────────────────────
 ' Vectors generated by src/utils.py::daily_score.  Run this after touching any

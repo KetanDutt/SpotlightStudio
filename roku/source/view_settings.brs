@@ -46,7 +46,7 @@ sub RenderSettings(screen as object, state as object)
         isFocused = (state.settingsIdx = i)
 
         if isFocused
-            DrawRoundRect(screen, L.panelX + 20, rowY, L.panelW - 40, L.rowH - 8, 10, t.accentSoft)
+            DrawRoundedRectCached(screen, L.panelX + 20, rowY, L.panelW - 40, L.rowH - 8, 10, t.accentSoft)
             DrawRoundedOutline(screen, L.panelX + 20, rowY, L.panelW - 40, L.rowH - 8, 10, t.borderFocused, 2)
         end if
 
@@ -62,7 +62,7 @@ sub RenderSettings(screen as object, state as object)
 
         valueText = SafeStr(item.value)
         if valueText <> "" and valueText <> "[ABOUT]"
-            valueW = fonts.body.GetOneLineWidth(valueText)
+            valueW = fonts.body.GetOneLineWidth(valueText, 1920)
             screen.DrawText(valueText, L.panelX + L.panelW - 40 - valueW, rowY + 14, valueColor, fonts.body)
             if SafeStr(item.kind) = "cycle"
                 screen.DrawText("<", L.panelX + L.panelW - 66 - valueW, rowY + 14, labelColor, fonts.body)
@@ -81,10 +81,15 @@ sub RenderSettings(screen as object, state as object)
     diagRows = BuildDiagnostics(state)
     for i = 0 to diagRows.Count() - 1
         row = diagRows[i]
-        screen.DrawText(SafeStr(row.label) + ":", L.infoX + 20, L.panelY + 58 + (i * 30), t.textSecondary, fonts.caption)
+        rowColor = t.textSecondary
+        valueColor = t.textPrimary
+        ' Colour the two rows a user can act on when something is wrong.
+        if SafeStr(row.tone) = "warn" then valueColor = t.warningAmber
+        if SafeStr(row.tone) = "bad" then valueColor = t.dangerRed
+        screen.DrawText(SafeStr(row.label) + ":", L.infoX + 20, L.panelY + 58 + (i * 30), rowColor, fonts.caption)
         valueText = TruncateText(SafeStr(row.value), 50)
-        valueW = fonts.caption.GetOneLineWidth(valueText)
-        screen.DrawText(valueText, L.infoX + L.infoW - 20 - valueW, L.panelY + 58 + (i * 30), t.textPrimary, fonts.caption)
+        valueW = fonts.caption.GetOneLineWidth(valueText, 1920)
+        screen.DrawText(valueText, L.infoX + L.infoW - 20 - valueW, L.panelY + 58 + (i * 30), valueColor, fonts.caption)
     end for
 
     ' ── legal / about ──────────────────────────────────────────────────
@@ -120,7 +125,7 @@ function BuildSettingsItems(state as object) as object
     items.Push({
         title: "Clock Format",
         desc: "12-hour, 24-hour, or follow the Roku system setting",
-        value: LabelFor(ClockFormatLabels(), sm.clockFormat),
+        value: LabelFor(ClockFormatLabels(), sm.GetStr("clockFormat", "auto")),
         kind: "cycle"
     })
 
@@ -143,7 +148,7 @@ function BuildSettingsItems(state as object) as object
     items.Push({
         title: "Safe Area Guides",
         desc: "Broadcast action-safe (90%) and title-safe (80%) overlays",
-        value: LabelFor(SafeAreaLabels(), sm.safeAreaGuides),
+        value: LabelFor(SafeAreaLabels(), sm.GetStr("safeAreaGuides", "off")),
         kind: "cycle"
     })
 
@@ -175,9 +180,25 @@ function BuildSettingsItems(state as object) as object
         kind: "action"
     })
 
+    favCount = state.favMgr.Count()
+    items.Push({
+        title: "Clear All Favorites",
+        desc: "Remove every wallpaper you have hearted on this device",
+        value: StrI(favCount).Trim() + " saved",
+        kind: "action"
+    })
+
+    failureCount = state.imgLoader.FailureCount()
+    items.Push({
+        title: "Retry Failed Images",
+        desc: "Clear the give-up list so thumbnails that errored can load again",
+        value: StrI(failureCount).Trim() + " failed",
+        kind: "action"
+    })
+
     if not state.licenseMgr.HasProAccess()
         trialValue = "Start Trial"
-        if state.licenseMgr.trialStartedMs > 0 then trialValue = "Used"
+        if state.licenseMgr.trialStartedSec > 0 then trialValue = "Used"
         items.Push({
             title: "Spotlight Pro Trial",
             desc: "3 days of every Pro feature, no payment details needed",
@@ -216,12 +237,19 @@ function BuildDiagnostics(state as object) as object
     rows.Push({ label: "Device", value: SafeStr(deviceInfo.GetVersion()) })
     rows.Push({ label: "Model", value: SafeStr(deviceInfo.GetModelDisplayName()) })
     rows.Push({ label: "Display", value: SafeStr(deviceInfo.GetDisplayType()) + " " + SafeStr(deviceInfo.GetGraphicsPlatform()) })
-    rows.Push({ label: "UI Resolution", value: SafeStr(state.uiResolution) })
-    rows.Push({ label: "Network", value: NetworkLabel(deviceInfo) })
+    rows.Push({ label: "UI Resolution", value: SafeStr(state.uiResolution) + " (" + StrI(state.canvasW).Trim() + "x" + StrI(state.canvasH).Trim() + " canvas)" })
+    netLabel = NetworkLabel(deviceInfo)
+    netTone = ""
+    if netLabel = "Offline" then netTone = "bad"
+    rows.Push({ label: "Network", value: netLabel, tone: netTone })
     rows.Push({ label: "Archive", value: StrI(state.totalCount).Trim() + " wallpapers" })
     rows.Push({ label: "Filtered", value: StrI(state.filtered.Count()).Trim() + " wallpapers" })
     rows.Push({ label: "Image Cache", value: state.imgLoader.Stats() })
+    rows.Push({ label: "Disk Cache", value: StrI(state.imgLoader.DiskUsage() / 1024).Trim() + " KB in tmp:/" })
+    failCount = state.imgLoader.FailureCount()
+    rows.Push({ label: "Failed Images", value: StrI(failCount).Trim(), tone: "warn" })
     rows.Push({ label: "Draw Cache", value: GetGfxCache().Stats() })
+    rows.Push({ label: "Favorites", value: StrI(state.favMgr.Count()).Trim() + " saved" })
     rows.Push({ label: "Palette", value: state.themeMgr.activeThemeName })
     rows.Push({ label: "Build", value: state.appVersion })
     return rows
@@ -232,8 +260,16 @@ function NetworkLabel(deviceInfo as object) as string
     linked = false
     if deviceInfo.GetLinkStatus() then linked = true
     if not linked then return "Offline"
-    kind = SafeStr(deviceInfo.ConnectionType())
+    if not deviceInfo.GetInternetStatus() then return "No internet"
+    kind = SafeStr(deviceInfo.GetConnectionType())
     if kind = "WiFiConnection" then return "WiFi"
     if kind = "WiredConnection" then return "Wired"
     return "Connected"
+end function
+
+' True when the device has no usable link, used by the gallery header banner.
+function IsOffline(deviceInfo as object) as boolean
+    if deviceInfo = invalid then return false
+    if not deviceInfo.GetLinkStatus() then return true
+    return false
 end function

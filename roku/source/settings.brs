@@ -95,7 +95,11 @@ function CreateSettingsManager() as object
         end function,
 
         GetInt: function(key as string, fallback as integer) as integer
-            if m.cache.DoesExist(key) then return Val(SafeStr(m.cache[key]))
+            if m.cache.DoesExist(key)
+                ' Val() yields a Float; CInt keeps the value an Integer so
+                ' StrI() and array indexing never see "30.0".
+                return CInt(Val(SafeStr(m.cache[key])))
+            end if
             return fallback
         end function,
 

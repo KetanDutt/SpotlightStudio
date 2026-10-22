@@ -81,14 +81,14 @@ sub RenderDailySpotlight(screen as object, state as object)
         if shown >= 12 then exit for
         tag = SafeStr(rawTag)
         if tag <> ""
-            tagW = fonts.caption.GetOneLineWidth(tag) + 22
+            tagW = fonts.caption.GetOneLineWidth(tag, 1920) + 22
             if tagX + tagW > 1920 - 85
                 tagX = infoX
                 tagY = tagY + 40
             end if
             if tagY > tagLimitY then exit for
 
-            DrawRoundRect(screen, tagX, tagY, tagW, 32, 9, t.bgPanelLight)
+            DrawRoundedRectCached(screen, tagX, tagY, tagW, 32, 9, t.bgPanelLight)
             DrawRoundedOutline(screen, tagX, tagY, tagW, 32, 9, t.borderSubtle, 1)
             screen.DrawText(tag, tagX + 11, tagY + 6, t.textAccent, fonts.caption)
             tagX = tagX + tagW + 10

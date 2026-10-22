@@ -48,6 +48,9 @@ sub RunScreenSaver()
     lastFrame = 0
     lastClockMs = -60000
     clockInfo = GetDeviceLocalTime(deviceInfo, "auto")
+    ' Warm the NEXT frame while the current one is still on screen, so the dip
+    ' to black reveals a decoded image instead of an empty canvas.
+    loader.PrefetchFull(WallpaperFilename(pool[WrapIndex(idx + 1, pool.Count())]))
 
     while not exitNow
         nowMs = animClock.TotalMilliseconds()
@@ -80,6 +83,9 @@ sub RunScreenSaver()
             idx = WrapIndex(idx + 1, pool.Count())
             transition = 2
             phaseStart = nowMs
+            ' Keep the frame after next warm so the slideshow never waits on
+            ' the network mid-transition.
+            loader.PrefetchFull(WallpaperFilename(pool[WrapIndex(idx + 1, pool.Count())]))
             dirty = true
         else if transition = 2 and (nowMs - phaseStart) >= 800
             transition = 0
@@ -91,8 +97,15 @@ sub RunScreenSaver()
         end if
 
         ' Never leave the viewer staring at a black panel: if nothing has
-        ' decoded after 45 seconds, hand control back to the OS screensaver.
-        if curBmp = invalid and stallClock.TotalMilliseconds() > 45000 and transition = 0
+        ' decoded for 45 seconds, hand control back to the OS screensaver.
+        ' The clock is re-marked whenever a frame arrives, so a slow network
+        ' that is still making progress is not treated as a stall (the previous
+        ' version measured from process start and exited permanently after 45s
+        ' of runtime the first time any single image was slow).
+        if curBmp <> invalid
+            ' Progress: restart the stall window.
+            stallClock.Mark()
+        else if transition = 0 and stallClock.TotalMilliseconds() > 45000
             exitNow = true
         end if
 
@@ -115,24 +128,29 @@ sub RunScreenSaver()
     loader.ClearCache()
 end sub
 
+' roFont has no Copy() and no SetSize().  The only documented way to obtain a
+' font at a given pixel size is roFontRegistry.GetDefaultFont(size, bold,
+' italic) - see the same note in roku/source/main.brs::BuildFonts().
+function SaverFont(registry as object, size as integer) as object
+    if registry = invalid then return invalid
+    font = registry.GetDefaultFont(size, false, false)
+    if font <> invalid then return font
+    return registry.GetDefaultFont()
+end function
+
 function BuildSaverFonts() as object
     registry = CreateObject("roFontRegistry")
-    baseFont = invalid
-    if registry <> invalid then baseFont = registry.GetDefaultFont()
-    if baseFont = invalid then return { clock: invalid, date: invalid, title: invalid, body: invalid, small: invalid }
+    if registry = invalid
+        return { clock: invalid, date: invalid, title: invalid, body: invalid, small: invalid }
+    end if
 
-    clockFont = baseFont.Copy()
-    clockFont.SetSize(56, 0)
-    dateFont = baseFont.Copy()
-    dateFont.SetSize(22, 0)
-    titleFont = baseFont.Copy()
-    titleFont.SetSize(34, 0)
-    bodyFont = baseFont.Copy()
-    bodyFont.SetSize(24, 0)
-    smallFont = baseFont.Copy()
-    smallFont.SetSize(18, 0)
-
-    return { clock: clockFont, date: dateFont, title: titleFont, body: bodyFont, small: smallFont }
+    return {
+        clock: SaverFont(registry, 56),
+        date: SaverFont(registry, 22),
+        title: SaverFont(registry, 34),
+        body: SaverFont(registry, 24),
+        small: SaverFont(registry, 18)
+    }
 end function
 
 sub RenderSaverFrame(screen as object, fonts as object, bmp as object, animMs as integer, transition as integer, phaseStart as integer, settings as object, clockInfo as object)
@@ -154,7 +172,7 @@ sub RenderSaverFrame(screen as object, fonts as object, bmp as object, animMs as
         drawH = MaxI(1, CInt(srcH * scale))
         panX = CInt(wave * MaxI(0, CInt((drawW - 1920) / 2)) * 0.8)
         panY = CInt(waveCos * MaxI(0, CInt((drawH - 1080) / 2)) * 0.8)
-        screen.DrawResizedObject(CInt((1920 - drawW) / 2) + panX, CInt((1080 - drawH) / 2) + panY, drawW, drawH, bmp)
+        DrawScaledTo(screen, CInt((1920 - drawW) / 2) + panX, CInt((1080 - drawH) / 2) + panY, drawW, drawH, bmp)
     end if
 
     alpha = 0
@@ -170,8 +188,8 @@ sub RenderSaverFrame(screen as object, fonts as object, bmp as object, animMs as
         textAlpha = ClampI(255 - alpha, 0, 255)
         timeStr = SafeStr(clockInfo.time)
         dateStr = SafeStr(clockInfo.date)
-        timeW = fonts.clock.GetOneLineWidth(timeStr)
-        dateW = fonts.date.GetOneLineWidth(dateStr)
+        timeW = fonts.clock.GetOneLineWidth(timeStr, 1920)
+        dateW = fonts.date.GetOneLineWidth(dateStr, 1920)
         screen.DrawText(timeStr, CInt((1920 - timeW) / 2), 880, WithAlpha(&hF4F5F8, textAlpha), fonts.clock)
         screen.DrawText(dateStr, CInt((1920 - dateW) / 2), 956, WithAlpha(&h9CA3B8, textAlpha), fonts.date)
     end if
@@ -189,9 +207,15 @@ function CreateSaverSettings() as object
         paletteName: "Obsidian Slate",
         showClock: true,
 
-        ' CreateImageLoader() only reads `imageBase`, so a minimal stand-in keeps
-        ' the shared loader module usable without the channel's settings manager.
-        loaderSettings: { imageBase: "https://media.githubusercontent.com/media/KetanDutt/SpotlightStudio/main" },
+        ' CreateImageLoader() only needs GetStr("imageBase"), so this stand-in
+        ' keeps the shared module usable without the channel's settings manager.
+        loaderSettings: {
+            imageBase: "https://media.githubusercontent.com/media/KetanDutt/SpotlightStudio/main",
+            GetStr: function(key as string, fallback as string) as string
+                if key = "imageBase" and m.imageBase <> "" then return m.imageBase
+                return fallback
+            end function
+        },
 
         Load: function() as void
             if m.section = invalid then return
@@ -348,7 +372,7 @@ sub RenderSaverSettings(screen as object, fonts as object, settings as object, r
         end if
         screen.DrawText(SafeStr(rows[i].label), 280, rowY + 22, t.textPrimary, fonts.body)
         valueText = SafeStr(rows[i].value)
-        valueW = fonts.body.GetOneLineWidth(valueText)
+        valueW = fonts.body.GetOneLineWidth(valueText, 1920)
         screen.DrawText(valueText, 1640 - valueW, rowY + 22, t.textAccent, fonts.body)
     end for
 

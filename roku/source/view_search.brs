@@ -56,12 +56,12 @@ sub RenderSearchOverlay(screen as object, state as object)
 
     ' Blinking caret while the field has focus.
     if query <> ""
-        caretX = fieldX + 18 + fonts.heading.GetOneLineWidth(TruncateText(query, 44)) + 3
+        caretX = fieldX + 18 + fonts.heading.GetOneLineWidth(TruncateText(query, 44), 1920) + 3
         if state.caretVisible then screen.DrawRect(caretX, fieldY + 14, 2, 34, t.textAccent)
     end if
 
     matchLabel = StrI(state.filtered.Count()).Trim() + " matches"
-    matchW = fonts.caption.GetOneLineWidth(matchLabel)
+    matchW = fonts.caption.GetOneLineWidth(matchLabel, 1920)
     screen.DrawText(matchLabel, fieldX + fieldW - matchW - 18, fieldY + 22, t.textAccent, fonts.caption)
 
     ' ── keyboard ───────────────────────────────────────────────────────
@@ -100,7 +100,7 @@ sub RenderSearchOverlay(screen as object, state as object)
             end if
 
             label = SafeStr(line[c])
-            labelW = fonts.body.GetOneLineWidth(label)
+            labelW = fonts.body.GetOneLineWidth(label, 1920)
             screen.DrawText(label, cursorX + CInt((keyW - labelW) / 2), rowY + 17, textColor, fonts.body)
 
             cursorX = cursorX + keyW + M.gap
@@ -123,12 +123,16 @@ function SearchRowWidths(line as object, fonts as object) as object
         if Len(label) <= 1
             widths.Push(M.keyW)
         else
-            labelW = Len(label) * 11
-            if fonts <> invalid
-                measured = fonts.body.GetOneLineWidth(label)
+            ' Fallback only: state.fonts is always built, but if it were not the
+            ' old estimate (11 px/char) undershot the wide glyphs in the 22 px
+            ' default font and clipped the label.  14 px/char is the average
+            ' advance of that font, so the estimate errs wide rather than short.
+            labelW = Len(label) * 14
+            if fonts <> invalid and fonts.body <> invalid
+                measured = fonts.body.GetOneLineWidth(label, 1920)
                 if measured > 0 then labelW = measured
             end if
-            widths.Push(labelW + 44)
+            widths.Push(MaxI(labelW + 44, M.keyW))
         end if
     end for
     return widths

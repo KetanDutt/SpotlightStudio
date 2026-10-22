@@ -9,9 +9,9 @@ splash_color=#08090E
 splash_min_time=500
 
 major_version=2
-minor_version=7
+minor_version=8
 build_version=1
-build_date=2026-10-21
+build_date=2026-10-22
 
 # The channel renders into a fixed 1920x1080 canvas and lets the OS scale it
 # down on 720p panels (see "Specifying display resolution" in the Roku docs).

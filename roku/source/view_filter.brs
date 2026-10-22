@@ -36,7 +36,7 @@ sub RenderFilterOverlay(screen as object, state as object)
         isFocused = (state.filterRow = rowIdx)
 
         if isFocused
-            DrawRoundRect(screen, M.x + 30, rowY, M.w - 60, 54, 10, t.accentSoft)
+            DrawRoundedRectCached(screen, M.x + 30, rowY, M.w - 60, 54, 10, t.accentSoft)
             DrawRoundedOutline(screen, M.x + 30, rowY, M.w - 60, 54, 10, t.borderFocused, 2)
         end if
 
@@ -50,7 +50,7 @@ sub RenderFilterOverlay(screen as object, state as object)
         screen.DrawText(SafeStr(row.label), M.x + 50, rowY + 14, labelColor, fonts.body)
 
         valueText = SafeStr(row.value)
-        valueW = fonts.body.GetOneLineWidth(valueText)
+        valueW = fonts.body.GetOneLineWidth(valueText, 1920)
         screen.DrawText(valueText, M.x + M.w - 50 - valueW, rowY + 14, valueColor, fonts.body)
 
         ' Directional affordance for rows that cycle.
@@ -67,31 +67,88 @@ sub RenderFilterOverlay(screen as object, state as object)
     screen.DrawText("Left/Right change value    OK apply & close    * reset every filter    Back cancel", M.x + 50, actionY + 16, t.textMuted, fonts.caption)
 end sub
 
-' Row model: { label, value, kind }.  `kind` is "cycle" for rows the left/right
-' keys change and "action" for rows that open something else.
+' The dialog's row model: one entry per row, in draw order.
+'
+' `kind` is "cycle" for rows the left/right keys change and "action" for rows
+' that open something else.  `key` names the state field the row edits, which
+' is what CycleFilterRow() dispatches on in main.brs.
+'
+' This list is the single source of truth: FilterRowCount() and the search-row
+' index are both derived from it.  FilterRowCount() used to return a literal 7,
+' so adding a row silently made the last one unreachable, and the input handler
+' kept a second literal 5 for the search row that pointed at whatever happened
+' to be fifth.
+function FilterRowSpec() as object
+    gaa = GetGlobalAA()
+    if gaa.__ssFilterRowSpec = invalid
+        gaa.__ssFilterRowSpec = [
+            { label: "Category", key: "activeCategory", kind: "cycle" },
+            { label: "Resolution", key: "activeResolution", kind: "cycle" },
+            { label: "Archive", key: "activeSource", kind: "cycle" },
+            { label: "Sort Order", key: "sortOrder", kind: "cycle" },
+            { label: "Quick Tag", key: "activeTag", kind: "cycle" },
+            { label: "Search", key: "activeSearch", kind: "action" },
+            { label: "Favorites Only", key: "favoritesOnly", kind: "cycle" }
+        ]
+    end if
+    return gaa.__ssFilterRowSpec
+end function
+
+' Row model: { label, value, kind }.
 function BuildFilterRows(state as object) as object
+    spec = FilterRowSpec()
     rows = []
-    rows.Push({ label: "Category", value: LabelFor(CategoryLabels(), state.activeCategory), kind: "cycle" })
-    rows.Push({ label: "Resolution", value: LabelFor(ResolutionLabels(), state.activeResolution), kind: "cycle" })
-    rows.Push({ label: "Archive", value: LabelFor(SourceLabels(), state.activeSource), kind: "cycle" })
-    rows.Push({ label: "Sort Order", value: LabelFor(SortLabels(), state.sortOrder), kind: "cycle" })
-    rows.Push({ label: "Quick Tag", value: QuickTagLabel(state.activeTag), kind: "cycle" })
 
-    searchValue = "Open keyboard..."
-    if state.activeSearch <> "" then searchValue = """" + TruncateText(state.activeSearch, 24) + """"
-    rows.Push({ label: "Search", value: searchValue, kind: "action" })
-
-    favValue = "No"
-    if state.favoritesOnly then favValue = "Yes"
-    rows.Push({ label: "Favorites Only", value: favValue, kind: "cycle" })
+    rowIdx = 0
+    while rowIdx < spec.Count()
+        specRow = spec[rowIdx]
+        rows.Push({ label: specRow.label, value: FilterRowValue(state, specRow), kind: specRow.kind })
+        rowIdx = rowIdx + 1
+    end while
 
     return rows
+end function
+
+function FilterRowValue(state as object, specRow as object) as string
+    if specRow = invalid then return ""
+    key = SafeStr(specRow.key)
+
+    if key = "activeCategory" then return LabelFor(CategoryLabels(), state.activeCategory)
+    if key = "activeResolution" then return LabelFor(ResolutionLabels(), state.activeResolution)
+    if key = "activeSource" then return LabelFor(SourceLabels(), state.activeSource)
+    if key = "sortOrder" then return LabelFor(SortLabels(), state.sortOrder)
+    if key = "activeTag" then return QuickTagLabel(state.activeTag)
+
+    if key = "activeSearch"
+        if state.activeSearch = "" then return "Open keyboard..."
+        return """" + TruncateText(state.activeSearch, 24) + """"
+    end if
+
+    if key = "favoritesOnly"
+        if state.favoritesOnly then return "Yes"
+        return "No"
+    end if
+
+    return ""
 end function
 
 ' Number of rows in the dialog, so main.brs can clamp navigation without
 ' rebuilding the row model.
 function FilterRowCount() as integer
-    return 7
+    return FilterRowSpec().Count()
+end function
+
+' Index of the row that opens the on-screen keyboard instead of cycling a
+' value.  Derived from the spec so the input handler cannot drift from the
+' renderer; -1 when no action row exists.
+function FilterSearchRowIdx() as integer
+    spec = FilterRowSpec()
+    rowIdx = 0
+    while rowIdx < spec.Count()
+        if SafeStr(spec[rowIdx].kind) = "action" then return rowIdx
+        rowIdx = rowIdx + 1
+    end while
+    return -1
 end function
 
 ' Categories carry a friendly label; "All" and preset names read better than the

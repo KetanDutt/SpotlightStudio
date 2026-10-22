@@ -11,5 +11,20 @@
     "roku/source/image_loader.brs"
   ],
   "createPackage": false,
-  "deploy": false
+  "deploy": false,
+  "autoRecoverSandbox": true,
+  "diagnosticFilters": [
+    {
+      "src": "**/roku/source/*.brs",
+      "codes": [
+        1013
+      ]
+    },
+    {
+      "src": "**/roku-screensaver/source/main.brs",
+      "codes": [
+        1013
+      ]
+    }
+  ]
 }

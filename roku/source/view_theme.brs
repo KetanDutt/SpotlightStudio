@@ -43,6 +43,18 @@ sub RenderThemeStudio(screen as object, state as object)
     screen.DrawText("Appearance & Ambient Controls", L.panelX + 20, L.panelY + 34, t.textPrimary, fonts.heading)
     screen.DrawText("Up/Down move   OK select   Left/Right change a value", L.panelX + 20, L.panelY + 68, t.textMuted, fonts.caption)
 
+    ' What the two assignment rows do, stated once instead of on both of them.
+    ' Right-aligned on the same line as the key hints: the list starts at
+    ' rowsY, so there is no room for a second line here.
+    pickLabel = LastViewedLabel(state)
+    if pickLabel = "None"
+        pickHint = "Open a wallpaper to assign one"
+    else
+        pickHint = "OK assigns: " + pickLabel
+    end if
+    pickW = fonts.caption.GetOneLineWidth(pickHint, 1920)
+    screen.DrawText(pickHint, L.panelX + L.panelW - 20 - pickW, L.panelY + 68, t.textMuted, fonts.caption)
+
     rows = BuildThemeRows(state)
     state.themeRow = ClampI(state.themeRow, 0, rows.Count() - 1)
 
@@ -53,7 +65,7 @@ sub RenderThemeStudio(screen as object, state as object)
         isCurrentPalette = (SafeStr(row.kind) = "palette" and SafeStr(row.name) = state.themeMgr.activeThemeName)
 
         if isFocused
-            DrawRoundRect(screen, L.panelX + 20, rowY, L.panelW - 40, L.rowH - 8, 10, t.accentSoft)
+            DrawRoundedRectCached(screen, L.panelX + 20, rowY, L.panelW - 40, L.rowH - 8, 10, t.accentSoft)
             DrawRoundedOutline(screen, L.panelX + 20, rowY, L.panelW - 40, L.rowH - 8, 10, t.borderFocused, 2)
         end if
 
@@ -76,7 +88,7 @@ sub RenderThemeStudio(screen as object, state as object)
             screen.DrawText(SafeStr(row.label), L.panelX + 34, rowY + 12, labelColor, fonts.body)
             valueText = SafeStr(row.value)
             if valueText <> ""
-                valueW = fonts.body.GetOneLineWidth(valueText)
+                valueW = fonts.body.GetOneLineWidth(valueText, 1920)
                 screen.DrawText(valueText, L.panelX + L.panelW - 40 - valueW, rowY + 12, valueColor, fonts.body)
                 if SafeStr(row.kind) = "cycle"
                     screen.DrawText("<", L.panelX + L.panelW - 66 - valueW, rowY + 12, labelColor, fonts.body)
@@ -174,7 +186,7 @@ sub DrawAssignedSlot(screen as object, state as object, label as string, wallpap
 
     if wallpaperId = 0
         notice = "Not set"
-        noticeW = fonts.caption.GetOneLineWidth(notice)
+        noticeW = fonts.caption.GetOneLineWidth(notice, 1920)
         screen.DrawText(notice, x + CInt((w - noticeW) / 2), imgY + CInt((imgH - 20) / 2), t.textMuted, fonts.caption)
         return
     end if
@@ -192,7 +204,7 @@ sub DrawAssignedSlot(screen as object, state as object, label as string, wallpap
     else
         fallback = state.imgLoader.GetThumbnail(filename)
         if fallback <> invalid
-            screen.DrawResizedObject(x + 4, imgY + 4, w - 8, imgH - 8, fallback)
+            DrawScaledTo(screen, x + 4, imgY + 4, w - 8, imgH - 8, fallback)
         else
             screen.DrawText(TruncateText(WallpaperTitle(item), 34), x + 14, imgY + 20, t.textSecondary, fonts.caption)
             screen.DrawText("Loading preview...", x + 14, imgY + 50, t.textMuted, fonts.caption)
@@ -216,9 +228,20 @@ function BuildThemeRows(state as object) as object
     rows.Push({ kind: "cycle", name: "pool", label: "Rotation Pool", value: tm.AutoSwitchPoolLabel() })
     rows.Push({ kind: "cycle", name: "target", label: "Rotation Applies To", value: tm.AutoSwitchTargetLabel() })
 
-    pickLabel = LastViewedLabel(state)
-    rows.Push({ kind: "action", name: "ambient", label: "Set as Ambient Wallpaper", value: pickLabel })
-    rows.Push({ kind: "action", name: "backdrop", label: "Set as Menu Backdrop", value: pickLabel })
+    ' The value column shows what is assigned *now*; the wallpaper OK would
+    ' assign is spelled out once, in the panel hint above the list.  Both rows
+    ' used to print the last-viewed wallpaper, which read as "these two rows
+    ' are duplicates" and hid which one was already set.
+    rows.Push({ kind: "action", name: "ambient", label: "Ambient Wallpaper", value: AssignedTitle(state, tm.ambientWallpaperId) })
+    rows.Push({ kind: "action", name: "backdrop", label: "Menu Backdrop", value: AssignedTitle(state, tm.backdropWallpaperId) })
 
     return rows
+end function
+
+' Title for an assigned-wallpaper id, or a placeholder when nothing is set.
+function AssignedTitle(state as object, wallpaperId as integer) as string
+    if wallpaperId = 0 then return "Not set"
+    item = FindWallpaper(state.allWallpapers, StrI(wallpaperId).Trim())
+    if item = invalid then return "Unavailable"
+    return TruncateText(WallpaperTitle(item), 26)
 end function

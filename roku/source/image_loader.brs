@@ -178,7 +178,7 @@ function CreateImageLoader(port as object, settingsMgr as object) as object
         end function,
 
         ' Thumbnail resampled to the exact card size, served from gfx_cache.
-        ' Falls back to invalid so the caller can DrawResizedObject directly.
+        ' Falls back to invalid so the caller can scale the bitmap directly.
         GetThumbnailSized: function(filename as string, w as integer, h as integer) as object
             source = m.GetThumbnail(filename)
             if source = invalid then return invalid
@@ -203,6 +203,17 @@ function CreateImageLoader(port as object, settingsMgr as object) as object
 
             m.Enqueue(filename, false, 10)
             return invalid
+        end function,
+
+        ' Ask for a thumbnail without waiting for a getter to be called - used
+        ' by Theme Studio's auto-rotation so a freshly assigned backdrop is not
+        ' a blank panel for a second.
+        PrefetchThumb: function(filename as string) as void
+            if filename = invalid or filename = "" then return
+            if m.thumbCache.DoesExist(filename) then return
+            if m.inFlight.DoesExist("t_" + filename) then return
+            if m.GiveUp(filename) then return
+            m.Enqueue(filename, true, 6)
         end function,
 
         ' Ask for a full-size frame without waiting for a getter to be called -
@@ -302,7 +313,7 @@ function CreateImageLoader(port as object, settingsMgr as object) as object
         ' ── thumbnail transport ──────────────────────────────────────────
 
         StartThumbDownload: function(filename as string) as void
-            url = MakeImageUrl(filename, true, SafeStr(m.settingsMgr.imageBase))
+            url = MakeImageUrl(filename, true, m.ImageBase())
             if url = "" then return
 
             destPath = m.ThumbPath(filename)
@@ -342,7 +353,7 @@ function CreateImageLoader(port as object, settingsMgr as object) as object
         ' ── full-size transport ──────────────────────────────────────────
 
         StartFullRequest: function(filename as string) as void
-            url = MakeImageUrl(filename, false, SafeStr(m.settingsMgr.imageBase))
+            url = MakeImageUrl(filename, false, m.ImageBase())
             if url = "" then return
 
             flightKey = "f_" + filename
@@ -410,6 +421,19 @@ function CreateImageLoader(port as object, settingsMgr as object) as object
                 m.__clock.Mark()
             end if
             return m.__clock.TotalMilliseconds()
+        end function,
+
+        ' The CDN base the user may have overridden (a Pro feature).  Read it
+        ' through GetStr(): the value lives in the settings manager's cache AA,
+        ' so `m.settingsMgr.imageBase` is always invalid.  The screensaver passes
+        ' a minimal stand-in object that only has GetStr().
+        ImageBase: function() as string
+            if m.settingsMgr = invalid then return ""
+            if m.settingsMgr.GetStr <> invalid
+                base = SafeStr(m.settingsMgr.GetStr("imageBase", ""))
+                if base <> "" then return base
+            end if
+            return DefaultImageBase()
         end function,
 
         ' ── event handling ───────────────────────────────────────────────
@@ -544,19 +568,29 @@ function CreateImageLoader(port as object, settingsMgr as object) as object
         end function,
 
         ' Keep the tmp:/ thumbnail cache inside its byte budget.
+        '
+        ' The previous version shifted entries off the list even when it did not
+        ' delete them (the `oldest <> path` guard), so the byte accounting
+        ' drifted away from reality and the file it had just written could be
+        ' the one it deleted.  Eviction now only ever removes entries it really
+        ' deletes, and never the file that was just added.
         TrackDiskFile: function(path as string) as void
             if path = invalid or path = "" then return
+            ' roArray has no DoesExist()/Contains(); RemoveFromList is the
+            ' project's linear-search helper for exactly this.
+            m.RemoveFromList(m.diskFiles, path)
             m.diskFiles.Push(path)
             m.diskBytes = m.diskBytes + 24576 ' average 480x270 JPEG
             guard = 0
-            while m.diskBytes > m.diskBudget and m.diskFiles.Count() > 0 and guard < 200
+            while m.diskBytes > m.diskBudget and m.diskFiles.Count() > 1 and guard < 200
                 guard = guard + 1
-                oldest = m.diskFiles.Shift()
-                if oldest <> invalid and oldest <> path
-                    if m.fs <> invalid then m.fs.Delete(oldest)
-                    m.diskBytes = m.diskBytes - 24576
-                end if
+                oldest = m.diskFiles[0]
+                if oldest = invalid or oldest = path then exit while
+                m.diskFiles.Delete(0)
+                if m.fs <> invalid then m.fs.Delete(oldest)
+                m.diskBytes = m.diskBytes - 24576
             end while
+            if m.diskBytes < 0 then m.diskBytes = 0
         end function,
 
         ' ── maintenance ──────────────────────────────────────────────────
@@ -568,13 +602,31 @@ function CreateImageLoader(port as object, settingsMgr as object) as object
             m.fullKeys = []
             m.missingKeys = {}
             m.failedKeys = {}
+            ' The tmp:/ files are freed too, so the byte accounting has to go
+            ' back to zero - otherwise the next TrackDiskFile() would evict
+            ' thumbnails that are not on disk.
+            for each path in m.diskFiles
+                if path <> invalid and m.fs <> invalid then m.fs.Delete(path)
+            end for
+            m.diskFiles = []
+            m.diskBytes = 0
             GetGfxCache().Invalidate()
+        end function,
+
+        ' Bytes currently held in the tmp:/ thumbnail cache.
+        DiskUsage: function() as integer
+            return m.diskBytes
         end function,
 
         ' Forget permanent failures so a recovered network can retry.
         ResetFailures: function() as void
             m.failedKeys = {}
             m.missingKeys = {}
+        end function,
+
+        ' How many keys have exhausted their retry budget (Settings screen).
+        FailureCount: function() as integer
+            return m.failedKeys.Count()
         end function,
 
         IsPending: function() as boolean

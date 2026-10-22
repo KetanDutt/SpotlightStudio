@@ -3,7 +3,7 @@
 **An archive and gallery of Windows Spotlight wallpapers** — crawl them from Peapix and Windows10Spotlight, de-duplicate them by perceptual hash, keep the best resolution of every picture and browse the whole collection in the restrained **Liquid Glass** interface, either as a static GitHub Pages showcase or as a desktop app with crawler controls.
 
 [![CI](https://github.com/KetanDutt/SpotlightStudio/actions/workflows/ci.yml/badge.svg)](https://github.com/KetanDutt/SpotlightStudio/actions/workflows/ci.yml)
-![Version](https://img.shields.io/badge/version-2.6.0-739b8b)
+![Version](https://img.shields.io/badge/version-2.8.0-739b8b)
 ![Python](https://img.shields.io/badge/python-3.10%2B-3776ab)
 ![License](https://img.shields.io/badge/license-all%20rights%20reserved-lightgrey)
 
@@ -37,7 +37,10 @@
 - **Reliable input and rendering:** a dirty-frame renderer that idles at ~0 % CPU, 20/60 fps animation budgets, bounded LRU bitmap caches, and a fix for the loop dropping the first key press after every idle period.
 - **New features:** on-screen search keyboard, live palette switching in Theme Studio, menu backdrop, Ambient rotation pools, resume-last-position, system navigation sounds, Direct-to-Play deep links while running.
 - **Honest licensing:** Roku Pay entitlements are re-synced with `GetPurchases()` on every launch and subscriptions expire; the misleading "change your Roku home wallpaper/screensaver" copy is gone, replaced by a separate standalone screensaver app (`roku-screensaver/`).
-- **Tooling:** `make roku-lint` (BrighterScript compile gate), `make roku-check` (certification pre-flight), `make roku-zip`, `make roku-catalog`, `make roku-art`; eleven new documents in `docs/roku/`.
+- **A static gate for the bugs the compiler cannot see:** BrightScript returns `invalid` for a missing associative-array key and only discovers a call to a non-existent Roku method at *runtime*. `make roku-audit` now fails the build on both — and it immediately found `roBitmap.DrawResizedObject()` (no such method) and `roFont.SetSize()` (no such method), either of which crashed the channel before it drew a single pixel. See [`docs/roku/AUDIT.md`](docs/roku/AUDIT.md).
+- **Theme Studio auto-rotation actually rotates:** the *Auto-switch* row now drives a real timer that walks the rotation pool and assigns the Ambient wallpaper and/or the menu backdrop on schedule, instead of only persisting the setting.
+- **Faster on the whole archive:** the "Title A→Z" sort is a stable merge sort instead of an insertion sort (≈28 M comparisons → ≈97 K on 7,475 rows), wallpaper-id lookups are O(1) instead of a per-frame linear scan, and rounded rectangles, chips, pills, spinners and focus underlines are drawn from a bounded bitmap cache instead of ~1 000 `DrawRect()` calls per frame.
+- **Tooling:** `make roku-audit` (static gate), `make roku-lint` (BrighterScript compile gate), `make roku-check` (audit + certification pre-flight), `make roku-zip`, `make roku-catalog`, `make roku-art`; thirteen documents in `docs/roku/` including a field-by-field [`STATE.md`](docs/roku/STATE.md) and the Roku API traps in [`AUDIT.md`](docs/roku/AUDIT.md).
 
 ## What’s new in 2.6 — Roku TV, daily automation and polish
 

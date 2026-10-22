@@ -55,7 +55,11 @@ function SafeInt(val as dynamic, fallback = 0 as integer) as integer
     if valueType = "LongInteger" or valueType = "roLongInteger" then return CInt(val)
     if valueType = "Float" or valueType = "roFloat" then return CInt(val)
     if valueType = "Double" or valueType = "roDouble" then return CInt(val)
-    if valueType = "String" or valueType = "roString" then return Val(val)
+    if valueType = "String" or valueType = "roString"
+        ' Val() returns a Float, so an unrounded value can leak into StrI(),
+        ' array indices and registry round-trips as "30.0".
+        return CInt(Val(val))
+    end if
     if valueType = "Boolean" or valueType = "roBoolean"
         if val then return 1
         return 0
@@ -209,12 +213,22 @@ function FormatDate(dateStr as string) as string
     return mName + " " + dayPart + ", " + yearPart
 end function
 
-' UTC day string used as the seed for the deterministic Daily Spotlight.
+' UTC day string ("YYYY-MM-DD") used as the seed for the deterministic Daily
+' Spotlight.
+'
+' Built from the numeric fields rather than from ToISOString(): that method
+' takes a format argument and its zero-argument behaviour is not contractual,
+' while GetYear()/GetMonth()/GetDayOfMonth() are.  A wrong day string silently
+' desynchronises the TV client from the web, desktop and mobile clients.
 function GetDayString(dt as object) as string
     if dt = invalid then return "1970-01-01"
-    iso = SafeStr(dt.ToISOString())
-    if Len(iso) >= 10 then return Left(iso, 10)
-    return "1970-01-01"
+    year = SafeStr(dt.GetYear())
+    month = SafeStr(dt.GetMonth())
+    day = SafeStr(dt.GetDayOfMonth())
+    if Len(month) = 1 then month = "0" + month
+    if Len(day) = 1 then day = "0" + day
+    if Len(year) <> 4 then return "1970-01-01"
+    return year + "-" + month + "-" + day
 end function
 
 ' Device local time, honouring the user's override or the Roku system setting.

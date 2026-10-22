@@ -159,7 +159,7 @@ sub DrawProductRow(screen as object, state as object, product as object, x as in
     end for
 
     priceText = SafeStr(product.cost)
-    priceW = fonts.title.GetOneLineWidth(priceText)
+    priceW = fonts.title.GetOneLineWidth(priceText, 1920)
     screen.DrawText(priceText, x + w - priceW - 24, y + 18, t.textPrimary, fonts.title)
 
     ctaLabel = "PURCHASE"
