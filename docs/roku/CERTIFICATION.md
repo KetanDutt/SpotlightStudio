@@ -6,8 +6,9 @@ last updated October 2026) to the code that satisfies it, or records a
 deliberate decision where the requirement does not apply.
 
 `scripts/package_roku.py` enforces the machine-checkable rows on every build
-(`make roku-check`), and the BrighterScript compile gate
-(`make roku-lint`) enforces the code-level ones.
+(`make roku-check`), the static auditor enforces the state/API rows
+(`make roku-audit`, see [AUDIT.md](AUDIT.md)), and the BrighterScript compile
+gate (`make roku-lint`) enforces the code-level ones.
 
 ## 3. Performance
 

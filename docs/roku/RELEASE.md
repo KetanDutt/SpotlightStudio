@@ -20,14 +20,17 @@ sections 1–3 is automated; sections 4–5 need a human and a device.
 ## 3. Automated gates
 
 ```bash
+make roku-audit       # static gate: state keys, Roku API surface, dead calls
 make roku-lint        # BrighterScript compile, both packages
-make roku-check       # cert pre-flight, both packages
+make roku-check       # audit + cert pre-flight, both packages
 make check            # repo unit tests
 ```
 
-All three must be clean.  `roku-check` verifies package size (≤ 4 MB), artwork
-opacity and dimensions, entry points, banned/deprecated APIs and catalog
-freshness.
+All four must be clean.  `roku-check` runs the audit first, then verifies
+package size (≤ 4 MB), artwork opacity and dimensions, entry points,
+banned/deprecated APIs and catalog freshness.  `make check` now also runs
+`tests/test_roku_audit.py`, which asserts zero errors *and* zero warnings from
+the auditor plus the manifest invariants.
 
 ## 4. On-device
 

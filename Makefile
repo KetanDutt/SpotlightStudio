@@ -4,7 +4,7 @@ VENV ?= .venv
 BIN := $(VENV)/bin
 
 .PHONY: help install run server crawl test lint check icons mobile browser site \
-          roku-catalog roku-art roku-lint roku-check roku-zip roku-screensaver clean
+          roku-catalog roku-art roku-lint roku-audit roku-check roku-zip roku-screensaver clean
 
 help:  ## show this help
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  make %-9s %s\n", $$1, $$2}'
@@ -53,7 +53,11 @@ roku-art:  ## flatten Roku splash/icons so they carry no transparency (cert 6.4)
 roku-lint:  ## BrightScript compile gate over both Roku packages
 	cd scripts/roku && npm install --silent --no-audit --no-fund && npm run lint:all
 
-roku-check:  ## certification pre-flight checks for both Roku packages (no artifacts)
+roku-audit:  ## static BrightScript audit (state keys, Roku API surface, dead calls)
+	$(PY) scripts/roku_audit.py
+
+roku-check:  ## certification pre-flight + static audit for both Roku packages
+	$(PY) scripts/roku_audit.py
 	$(PY) scripts/package_roku.py --variant channel --check
 	$(PY) scripts/package_roku.py --variant screensaver --check
 
@@ -63,5 +67,5 @@ roku-zip:  ## build the sideload-ready channel zip into dist/
 roku-screensaver:  ## build the standalone screensaver zip into dist/
 	$(PY) scripts/package_roku.py --variant screensaver
 
-clean:  ## remove caches
-	rm -rf .pytest_cache .ruff_cache && find . -name __pycache__ -type d -prune -exec rm -rf {} +
+clean:  ## remove caches and generated Roku build output
+	rm -rf .pytest_cache .ruff_cache scripts/roku/out && find . -name __pycache__ -type d -prune -exec rm -rf {} +

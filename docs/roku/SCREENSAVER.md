@@ -33,11 +33,18 @@ renderer — no store, no licence, no views.
 
 * Cycles the chosen pool (landscape / 4K / entire archive) with a 30-second
   Ken Burns drift and a dip-to-black cross-slide.
+* Pre-fetches the frame after the one on screen — before the first slide and
+  again at every transition — so the dip-to-black reveals a decoded image
+  instead of a blank panel.
 * Optionally draws a large clock that fades with each transition.
 * **Any remote key press exits immediately** and returns the viewer to
   whatever app was running.
-* Gives up after 45 s without a decoded frame so the device falls back to the
-  system screensaver instead of showing a black panel.
+* Gives up after 45 s **without a single decoded frame** so the device falls
+  back to the system screensaver instead of showing a black panel.  The
+  stall clock is re-marked on every frame that does arrive, so one slow early
+  download no longer ends the screensaver permanently — it used to measure from
+  process start, which exited for good 45 s in whenever the first image was
+  merely slow.
 * `RunScreenSaverSettings()` adds the standard "Change screensaver settings"
   menu entry: interval, pool, palette and clock toggle, saved to the
   `SpotlightScreensaver` registry section.
@@ -45,13 +52,18 @@ renderer — no store, no licence, no views.
 ## Building
 
 ```bash
+make roku-audit              # static gate: state keys, Roku API surface, dead calls
+make roku-lint               # BrighterScript compile gate
 make roku-screensaver        # dist/spotlight-studio-screensaver-<ver>.zip
-make roku-check              # pre-flight: entry points, banned components, size
+make roku-check              # audit + pre-flight: entry points, banned components, size
 ```
 
 The pre-flight enforces the policy mechanically: `screensaver_title` present,
 `title` absent, `RunScreenSaver()` present, `Main()`/`RunUserInterface()`
 absent, and none of the three banned components referenced outside comments.
+The auditor covers it too: it has its own package profile, so a screensaver
+source file may only contain `RunScreenSaver()`/`RunScreenSaverSettings()` and
+may not reach for `roChannelStore`, `roAudioPlayer` or `roVideoPlayer`.
 
 ## Publishing notes
 

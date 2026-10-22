@@ -7,14 +7,16 @@ performance and memory sections in these docs matter.
 
 | Document | What it covers |
 |---|---|
-| [ARCHITECTURE.md](ARCHITECTURE.md) | Module map, application state, the render loop, memory budget |
-| [CONTROLS.md](CONTROLS.md) | The complete remote-control map for every screen |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | Module map, application state, the render loop, image pipeline, persistence |
+| [STATE.md](STATE.md) | Every field of the `state` associative array, and the filter-state mirror |
+| [CONTROLS.md](CONTROLS.md) | The complete remote-control map for every screen, plus the key-code table |
 | [CERTIFICATION.md](CERTIFICATION.md) | Every Roku certification requirement and how this app satisfies it |
-| [PERFORMANCE.md](PERFORMANCE.md) | Dirty-frame rendering, the bitmap caches, and how to profile |
+| [PERFORMANCE.md](PERFORMANCE.md) | Dirty-frame rendering, the bitmap caches, complexity and how to profile |
 | [IAP.md](IAP.md) | Roku Pay product model, purchase flow and entitlement rules |
 | [DEEP_LINKING.md](DEEP_LINKING.md) | ECP launch/input parameters with copy-paste curl examples |
 | [CATALOG.md](CATALOG.md) | The packaged catalog schema, regeneration and the Git-LFS CDN |
 | [SCREENSAVER.md](SCREENSAVER.md) | The standalone screensaver channel and why it is a separate package |
+| [AUDIT.md](AUDIT.md) | `scripts/roku_audit.py`: the static gate, and the Roku API traps it catches |
 | [TROUBLESHOOTING.md](TROUBLESHOOTING.md) | Debug console workflow and the failures people actually hit |
 | [RELEASE.md](RELEASE.md) | The pre-submission checklist |
 
@@ -24,13 +26,16 @@ old links keep working.
 ## 60-second quickstart
 
 ```bash
-# 1. compile gate (BrighterScript) over both packages
+# 1. static audit: state keys, Roku API surface, dead calls, manifest invariants
+make roku-audit          # (also: python3 -m pytest tests/test_roku_audit.py)
+
+# 2. compile gate (BrighterScript) over both packages
 make roku-lint
 
-# 2. certification pre-flight checks (size, artwork, entry points, deprecated APIs)
+# 3. audit + certification pre-flight (size, artwork, entry points, deprecated APIs)
 make roku-check
 
-# 3. sideload-ready zip in dist/
+# 4. sideload-ready zip in dist/
 make roku-zip
 ```
 
@@ -55,6 +60,8 @@ scripts/
 ├── build_roku_catalog.py   regenerates roku/assets/catalog.json from data/wallpapers.json
 ├── flatten_roku_art.py     removes transparency from roku/images (cert 6.4)
 ├── package_roku.py         builds dist/ zips + runs the certification pre-flight
+├── roku_audit.py           static BrightScript auditor (see AUDIT.md)
+├── roku_api_surface.json   the Roku API table roku_audit.py checks against
 └── roku/                   BrighterScript compile gate (bsconfig per package)
 ```
 

@@ -1,15 +1,17 @@
 # Roku TV channel
 
-Pointer page: the channel's full documentation set now lives in
-[`roku/`](roku/README.md):
+Pointer page: the channel's full documentation set lives in
+[`roku/`](roku/README.md).
 
 | Topic | Document |
 |---|---|
 | Overview & quickstart | [`roku/README.md`](roku/README.md) |
-| Architecture, state machine, render loop | [`roku/ARCHITECTURE.md`](roku/ARCHITECTURE.md) |
-| Remote control map | [`roku/CONTROLS.md`](roku/CONTROLS.md) |
+| Module map, state, render loop, image pipeline | [`roku/ARCHITECTURE.md`](roku/ARCHITECTURE.md) |
+| Every `state` field | [`roku/STATE.md`](roku/STATE.md) |
+| Remote control map & key codes | [`roku/CONTROLS.md`](roku/CONTROLS.md) |
 | Certification compliance | [`roku/CERTIFICATION.md`](roku/CERTIFICATION.md) |
 | Performance & memory budget | [`roku/PERFORMANCE.md`](roku/PERFORMANCE.md) |
+| Static audit & the Roku API traps | [`roku/AUDIT.md`](roku/AUDIT.md) |
 | Roku Pay | [`roku/IAP.md`](roku/IAP.md) |
 | Deep linking / Direct to Play | [`roku/DEEP_LINKING.md`](roku/DEEP_LINKING.md) |
 | Packaged catalog & LFS CDN | [`roku/CATALOG.md`](roku/CATALOG.md) |
@@ -33,5 +35,12 @@ Two packages are produced from this repository:
 * `roku-screensaver/` — a standalone screensaver app, because Roku permits
   screensavers only in dedicated packages (certification 4.5).
 
-Build both with `make roku-zip` / `make roku-screensaver`; verify with
-`make roku-lint` and `make roku-check`.
+Verify and build:
+
+```bash
+make roku-audit          # static gate: state keys, Roku API surface, dead calls
+make roku-lint           # BrighterScript compile gate
+make roku-check          # audit + certification pre-flight
+make roku-zip            # dist/spotlight-studio-<version>.zip
+make roku-screensaver    # dist/spotlight-studio-screensaver-<version>.zip
+```

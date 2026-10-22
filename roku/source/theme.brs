@@ -213,16 +213,49 @@ function ApplyThemePalette(name as string) as object
 end function
 
 ' ─── ROUNDED GEOMETRY ENGINE ──────────────────────────────────────────
+' Every rounded shape is drawn as a centre slab, two side bars and four corner
+' caps of one 1px slice per row.  The corner profile depends only on the radius,
+' so it is computed once per radius and reused: the gallery draws sixteen
+' radius-12/14 shapes per frame, and recomputing Sqr() for each row of each of
+' them was ~1,300 Sqr() calls a second at 20 fps.
+
+' ArcRowOffsets(r) -> { dx: [per-row x inset], w: [per-row slice width] }.
+function ArcRowOffsets(r as integer) as object
+    gaa = GetGlobalAA()
+    if gaa.__ssArcs = invalid then gaa.__ssArcs = {}
+    key = StrI(r).Trim()
+    table = gaa.__ssArcs[key]
+    if table <> invalid then return table
+
+    dxs = []
+    widths = []
+    r2 = r * r
+    for dy = 0 to r - 1
+        dist = r - dy
+        inner = r2 - (dist * dist)
+        if inner < 0 then inner = 0
+        dx = CInt(r - Sqr(inner))
+        dxs.Push(dx)
+        widths.Push(r - dx)
+    end for
+
+    table = { radius: r, dx: dxs, w: widths }
+    gaa.__ssArcs[key] = table
+    return table
+end function
+
+' Clamp a radius to what the rectangle can actually render.
+function FitRadius(r as integer, w as integer, h as integer) as integer
+    if r <= 0 then return 0
+    maxR = MinI(CInt(w / 2), CInt(h / 2))
+    if r > maxR then r = maxR
+    if r < 0 then r = 0
+    return r
+end function
 
 sub DrawRoundRect(screen as object, x as integer, y as integer, w as integer, h as integer, r as integer, color as integer)
     if w <= 0 or h <= 0 then return
-    if r <= 0
-        screen.DrawRect(x, y, w, h, color)
-        return
-    end if
-
-    maxR = MinI(CInt(w / 2), CInt(h / 2))
-    if r > maxR then r = maxR
+    r = FitRadius(r, w, h)
     if r <= 0
         screen.DrawRect(x, y, w, h, color)
         return
@@ -234,14 +267,12 @@ sub DrawRoundRect(screen as object, x as integer, y as integer, w as integer, h 
     screen.DrawRect(x + w - r, y + r, r, h - (2 * r), color)
 
     ' Four corner caps, one 1px slice per row of the arc.
-    r2 = r * r
-    for dy = 0 to r - 1
-        dist = r - dy
-        inner = r2 - (dist * dist)
-        if inner < 0 then inner = 0
-        dx = CInt(r - Sqr(inner))
-        arcW = r - dx
+    arc = ArcRowOffsets(r)
+    rows = arc.w.Count()
+    for dy = 0 to rows - 1
+        arcW = arc.w[dy]
         if arcW > 0
+            dx = arc.dx[dy]
             screen.DrawRect(x + dx, y + dy, arcW, 1, color)
             screen.DrawRect(x + w - r, y + dy, arcW, 1, color)
             screen.DrawRect(x + dx, y + h - 1 - dy, arcW, 1, color)
@@ -252,6 +283,7 @@ end sub
 
 sub DrawRoundedOutline(screen as object, x as integer, y as integer, w as integer, h as integer, r as integer, color as integer, thickness as integer)
     if thickness <= 0 or w <= 0 or h <= 0 then return
+    r = FitRadius(r, w, h)
     if r <= 0
         screen.DrawRect(x, y, w, thickness, color)
         screen.DrawRect(x, y + h - thickness, w, thickness, color)
@@ -260,20 +292,15 @@ sub DrawRoundedOutline(screen as object, x as integer, y as integer, w as intege
         return
     end if
 
-    maxR = MinI(CInt(w / 2), CInt(h / 2))
-    if r > maxR then r = maxR
-
     screen.DrawRect(x + r, y, w - (2 * r), thickness, color)
     screen.DrawRect(x + r, y + h - thickness, w - (2 * r), thickness, color)
     screen.DrawRect(x, y + r, thickness, h - (2 * r), color)
     screen.DrawRect(x + w - thickness, y + r, thickness, h - (2 * r), color)
 
-    r2 = r * r
-    for dy = 0 to r - 1
-        dist = r - dy
-        inner = r2 - (dist * dist)
-        if inner < 0 then inner = 0
-        dx = CInt(r - Sqr(inner))
+    arc = ArcRowOffsets(r)
+    rows = arc.dx.Count()
+    for dy = 0 to rows - 1
+        dx = arc.dx[dy]
         screen.DrawRect(x + dx, y + dy, thickness, 1, color)
         screen.DrawRect(x + w - thickness - dx, y + dy, thickness, 1, color)
         screen.DrawRect(x + dx, y + h - 1 - dy, thickness, 1, color)
@@ -287,6 +314,43 @@ sub DrawGlassPanelR(screen as object, x as integer, y as integer, w as integer, 
     ' Small and medium panels are served from the bitmap cache (one blit instead
     ' of ~60); oversized ones are drawn straight to the screen.
     DrawGlassPanelCached(screen, x, y, w, h, borderColor, bgColor, radius)
+end sub
+
+' ─── TEXT HELPERS ─────────────────────────────────────────────────────
+' Screen.DrawText() requires a valid roFont, and measuring text is the only way
+' to centre or right-align anything on a canvas.  These wrap both with the
+' "font may be missing" guard and the len*constant fallback the views used to
+' repeat inline.
+
+function TextWidth(text as string, font as object, charFallback as integer) as integer
+    if text = invalid or text = "" then return 0
+    width = Len(text) * charFallback
+    if font <> invalid
+        measured = font.GetOneLineWidth(text, 1920)
+        if measured > 0 then width = measured
+    end if
+    return width
+end function
+
+function TextHeight(font as object, fallback as integer) as integer
+    height = fallback
+    if font <> invalid
+        measured = font.GetOneLineHeight()
+        if measured > 0 then height = measured
+    end if
+    return height
+end function
+
+' Draw `text` centred inside the horizontal span [x, x + w].
+sub DrawCenteredText(screen as object, text as string, x as integer, y as integer, w as integer, color as integer, font as object)
+    if font = invalid or text = invalid or text = "" then return
+    screen.DrawText(text, x + CInt((w - TextWidth(text, font, 9)) / 2), y, color, font)
+end sub
+
+' Draw `text` right-aligned so it ends at `right`.
+sub DrawRightText(screen as object, text as string, right as integer, y as integer, color as integer, font as object)
+    if font = invalid or text = invalid or text = "" then return
+    screen.DrawText(text, right - TextWidth(text, font, 9), y, color, font)
 end sub
 
 ' Breathing focus ring: a soft outer halo plus a crisp 2px core rim.
@@ -311,7 +375,7 @@ sub DrawBadge(screen as object, text as string, x as integer, y as integer, badg
     if font <> invalid
         measuredH = font.GetOneLineHeight()
         if measuredH > 0 then fontH = measuredH
-        measuredW = font.GetOneLineWidth(text)
+        measuredW = font.GetOneLineWidth(text, 1920)
         if measuredW > 0 then textW = measuredW
     end if
 
@@ -331,7 +395,7 @@ function BadgeWidth(text as string, font as object) as integer
     if text = invalid or text = "" then return 0
     textW = Len(text) * 9
     if font <> invalid
-        measuredW = font.GetOneLineWidth(text)
+        measuredW = font.GetOneLineWidth(text, 1920)
         if measuredW > 0 then textW = measuredW
     end if
     return textW + 24
@@ -362,7 +426,7 @@ sub DrawButton(screen as object, text as string, x as integer, y as integer, w a
     textW = Len(text) * 11
     textH = 22
     if font <> invalid
-        measuredW = font.GetOneLineWidth(text)
+        measuredW = font.GetOneLineWidth(text, 1920)
         if measuredW > 0 then textW = measuredW
         measuredH = font.GetOneLineHeight()
         if measuredH > 0 then textH = measuredH
@@ -481,7 +545,15 @@ sub DrawLoadingSpinner(screen as object, cx as integer, cy as integer, radius as
             c = &hFFFFFF18
         end if
 
-        DrawRoundRect(screen, px, py, dotSize, dotSize, dotRadius, c)
+        ' A radius-3 rounded rect is 15 DrawRect() calls; eight of them per
+        ' frame for the spinner is 120 blits at 20 fps.  The dot is 6x6 or 8x8
+        ' pixels, so it is worth caching for every colour used.
+        dot = GetGfxCache().GetRoundedRect(dotSize, dotSize, dotRadius, c)
+        if dot <> invalid
+            screen.DrawObject(px, py, dot)
+        else
+            DrawRoundRect(screen, px, py, dotSize, dotSize, dotRadius, c)
+        end if
     end for
 end sub
 
@@ -495,7 +567,7 @@ sub DrawSpinnerBlock(screen as object, state as object, boxX as integer, boxY as
         font = state.fonts.small
         labelW = Len(label) * 8
         if font <> invalid
-            measured = font.GetOneLineWidth(label)
+            measured = font.GetOneLineWidth(label, 1920)
             if measured > 0 then labelW = measured
         end if
         screen.DrawText(label, boxX + CInt((boxW - labelW) / 2), boxY + CInt(boxH / 2) + 22, t.textMuted, font)

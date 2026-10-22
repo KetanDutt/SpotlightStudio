@@ -62,12 +62,14 @@ sub RenderAmbient(screen as object, state as object)
         drawX = CInt((1920 - drawW) / 2) + panX
         drawY = CInt((1080 - drawH) / 2) + panY
 
-        screen.DrawResizedObject(drawX, drawY, drawW, drawH, imgBmp)
+        DrawScaledTo(screen, drawX, drawY, drawW, drawH, imgBmp)
     else
         ' Thumbnail stand-in while the full frame decodes.
         thumbBmp = state.imgLoader.GetThumbnail(filename)
         if thumbBmp <> invalid
-            screen.DrawResizedObject(0, 0, 1920, 1080, thumbBmp)
+            DrawScaledTo(screen, 0, 0, 1920, 1080, thumbBmp)
+        else if state.spinnerVisible
+            DrawLoadingSpinner(screen, 960, 540, 20, state.spinnerAngle, &hFFFFFF44, &hFFFFFF18)
         end if
     end if
 
@@ -131,7 +133,7 @@ sub RenderAmbientHud(screen as object, state as object, curItem as object, imgBm
     if state.slideshowActive
         elapsed = 0
         if state.animClock <> invalid then elapsed = (state.animClock.TotalMilliseconds() - state.switchAtMs) / 1000
-        nextIn = MaxI(0, state.autoSwitchInterval - CInt(elapsed))
+        nextIn = MaxI(0, state.ambientIntervalSec - CInt(elapsed))
         DrawBadge(screen, "AUTO " + StrI(nextIn).Trim() + "s", 1660, 996, t.badge4k, t.textPrimary, fonts.caption)
     end if
 

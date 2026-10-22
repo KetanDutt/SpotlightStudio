@@ -62,7 +62,7 @@ sub RenderScreensaverGallery(screen as object, state as object)
         screen.DrawText(detail, 85, 170, t.textSecondary, fonts.caption)
 
         rightLabel = "Item " + StrI(state.ssGridIdx + 1).Trim() + "/" + StrI(L.pageSize).Trim()
-        rightW = fonts.caption.GetOneLineWidth(rightLabel)
+        rightW = fonts.caption.GetOneLineWidth(rightLabel, 1920)
         screen.DrawText(rightLabel, 1835 - rightW, 152, t.textAccent, fonts.caption)
     else
         screen.DrawText("No wallpapers in this collection", 85, 134, t.textPrimary, fonts.heading)
@@ -90,7 +90,7 @@ sub RenderScreensaverGallery(screen as object, state as object)
     end for
 
     pageLabel = "Page " + StrI(state.currentPageSS + 1).Trim() + " of " + StrI(totalPages).Trim() + "   •   " + StrI(totalItems).Trim() + " wallpapers"
-    pageW = fonts.caption.GetOneLineWidth(pageLabel)
+    pageW = fonts.caption.GetOneLineWidth(pageLabel, 1920)
     screen.DrawText(pageLabel, CInt((1920 - pageW) / 2), 936, t.textSecondary, fonts.caption)
 
     DrawViewFooter(screen, state, "D-Pad Navigate   OK View Fullscreen   Play Ambient Mode   Right/Left Page   * Use as Ambient Wallpaper   Back return")
@@ -109,7 +109,7 @@ sub DrawScreensaverCard(screen as object, state as object, itemIdx as integer, c
     imgH = L.imgH
 
     DrawGlassPanelCached(screen, cardX, cardY, L.cardW, L.cardH, t.borderMedium, t.bgPanel, 14)
-    DrawRoundRect(screen, imgX, imgY, imgW, imgH, 12, t.bgPanelLight)
+    DrawRoundedRectCached(screen, imgX, imgY, imgW, imgH, 12, t.bgPanelLight)
 
     filename = WallpaperFilename(curItem)
     thumbBmp = state.imgLoader.GetThumbnailSized(filename, imgW, imgH)
@@ -118,7 +118,7 @@ sub DrawScreensaverCard(screen as object, state as object, itemIdx as integer, c
     else
         fallback = state.imgLoader.GetThumbnail(filename)
         if fallback <> invalid
-            screen.DrawResizedObject(imgX, imgY, imgW, imgH, fallback)
+            DrawScaledTo(screen, imgX, imgY, imgW, imgH, fallback)
         else if state.spinnerVisible
             DrawLoadingSpinner(screen, imgX + CInt(imgW / 2), imgY + CInt(imgH / 2), 18, state.spinnerAngle, t.textAccent, t.borderSubtle)
         end if
@@ -152,6 +152,6 @@ sub DrawScreensaverCard(screen as object, state as object, itemIdx as integer, c
     if isSelected
         glowAlpha = CalcGlowAlpha(state, 210)
         DrawFocusRingAnimated(screen, cardX, cardY, L.cardW, L.cardH, t.borderFocused, 14, glowAlpha)
-        DrawRoundRect(screen, cardX + 2, cardY + L.cardH - 6, L.cardW - 4, 4, 2, t.textAccent)
+        DrawRoundedRectCached(screen, cardX + 2, cardY + L.cardH - 6, L.cardW - 4, 4, 2, t.textAccent)
     end if
 end sub

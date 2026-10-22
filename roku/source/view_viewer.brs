@@ -52,7 +52,7 @@ sub RenderViewer(screen as object, state as object)
             drawX = CInt((1920 - drawW) / 2)
             drawY = CInt((1080 - drawH) / 2)
 
-            screen.DrawResizedObject(drawX, drawY, drawW, drawH, imgBmp)
+            DrawScaledTo(screen, drawX, drawY, drawW, drawH, imgBmp)
         else
             screen.DrawObject(0, 0, imgBmp)
         end if
@@ -115,16 +115,6 @@ sub RenderViewer(screen as object, state as object)
     end if
 end sub
 
-' Blit a bitmap at a target size through the gfx cache when it is worth caching,
-' otherwise resample directly.  Shared by the viewer, the daily hero and the
-' screensaver showcase so all three get the same fast path.
-sub DrawScaledOrResize(screen as object, x as integer, y as integer, w as integer, h as integer, source as object, cacheKey as string)
-    if source = invalid then return
-    if not DrawScaledCached(screen, x, y, w, h, source, cacheKey)
-        screen.DrawResizedObject(x, y, w, h, source)
-    end if
-end sub
-
 ' Shared empty / offline notice.
 sub RenderEmptyNotice(screen as object, state as object, headline as string, detail as string)
     t = GetTheme()
@@ -132,10 +122,10 @@ sub RenderEmptyNotice(screen as object, state as object, headline as string, det
     screen.DrawRect(0, 0, 1920, 1080, t.bgMain)
     DrawGlassPanelR(screen, 560, 400, 800, 240, t.borderSubtle, t.bgPanel, 20)
 
-    headW = fonts.heading.GetOneLineWidth(headline)
+    headW = fonts.heading.GetOneLineWidth(headline, 1920)
     screen.DrawText(headline, CInt((1920 - headW) / 2), 460, t.textPrimary, fonts.heading)
 
-    detailW = fonts.body.GetOneLineWidth(detail)
+    detailW = fonts.body.GetOneLineWidth(detail, 1920)
     screen.DrawText(detail, CInt((1920 - detailW) / 2), 520, t.textSecondary, fonts.body)
-    screen.DrawText("Press Back to return", CInt((1920 - fonts.caption.GetOneLineWidth("Press Back to return")) / 2), 570, t.textMuted, fonts.caption)
+    screen.DrawText("Press Back to return", CInt((1920 - fonts.caption.GetOneLineWidth("Press Back to return", 1920)) / 2), 570, t.textMuted, fonts.caption)
 end sub

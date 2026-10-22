@@ -95,37 +95,45 @@ end sub
 
 ' ─── FONTS ────────────────────────────────────────────────────────────
 
+' Build the five text sizes the channel draws with.
+'
+' roFont has NO Copy() and NO SetSize() methods - the only documented way to get
+' a font at a given pixel size is roFontRegistry.GetDefaultFont(size, bold,
+' italic).  The previous implementation called defaultFont.Copy() and
+' .SetSize(), neither of which exists; both raise a runtime error and terminate
+' the channel on the very first frame.  scripts/roku_audit.py now fails the
+' build on either call.
+'
+' The sizes below are chosen for the 1920x1080 design canvas: they stay legible
+' at a ten-foot viewing distance and survive the OS downscale on a 720p panel.
+function MakeFont(registry as object, size as integer) as object
+    if registry = invalid then return invalid
+    font = registry.GetDefaultFont(size, false, false)
+    if font <> invalid then return font
+    ' Extremely old firmware: fall back to the default size rather than to an
+    ' invalid font, which would crash the first DrawText().
+    return registry.GetDefaultFont()
+end function
+
 function BuildFonts() as object
     fontRegistry = CreateObject("roFontRegistry")
-    defaultFont = invalid
-    if fontRegistry <> invalid then defaultFont = fontRegistry.GetDefaultFont()
 
-    ' The channel renders at a 1920x1080 design resolution, so these sizes are
-    ' chosen for a ten-foot viewing distance and stay legible on a 720p panel
-    ' after the OS downscales the canvas.
-    fonts = {
-        heading: defaultFont,
-        body: defaultFont,
-        small: defaultFont,
-        title: defaultFont,
-        caption: defaultFont
+    return {
+        title: MakeFont(fontRegistry, 30),
+        heading: MakeFont(fontRegistry, 26),
+        body: MakeFont(fontRegistry, 22),
+        small: MakeFont(fontRegistry, 17),
+        caption: MakeFont(fontRegistry, 15)
     }
+end function
 
-    if defaultFont <> invalid
-        fonts.heading = defaultFont.Copy()
-        fonts.body = defaultFont.Copy()
-        fonts.small = defaultFont.Copy()
-        fonts.title = defaultFont.Copy()
-        fonts.caption = defaultFont.Copy()
-
-        fonts.title.SetSize(30, 0)
-        fonts.heading.SetSize(26, 0)
-        fonts.body.SetSize(22, 0)
-        fonts.small.SetSize(17, 0)
-        fonts.caption.SetSize(15, 0)
-    end if
-
-    return fonts
+' A font can only be missing if roFontRegistry itself failed, which means the
+' channel cannot draw text at all.  Log it once so the failure is diagnosable
+' from the debug console instead of surfacing as a blank screen.
+function FontsUsable(state as object) as boolean
+    if state = invalid or state.fonts = invalid then return false
+    if state.fonts.body = invalid then return false
+    return true
 end function
 
 ' ─── STATE ────────────────────────────────────────────────────────────
@@ -134,13 +142,18 @@ function BuildState(screen as object, port as object, deviceInfo as object, appI
     appVersion = "0.0.0"
     if appInfo <> invalid then appVersion = SafeStr(appInfo.GetVersion())
 
-    uiResolution = "fhd"
+    ' Report what the channel is actually rendering at, not what it asked for:
+    ' a 720p panel downscales the 1920x1080 canvas, and the Settings screen
+    ' diagnostics used to claim "fhd" regardless.
     canvasW = 1920
     canvasH = 1080
     if screen <> invalid
         canvasW = screen.GetWidth()
         canvasH = screen.GetHeight()
     end if
+    uiResolution = "fhd"
+    if canvasW <= 1280 then uiResolution = "hd"
+    if canvasW >= 3840 then uiResolution = "uhd"
 
     animClock = CreateObject("roTimespan")
     animClock.Mark()
@@ -176,6 +189,22 @@ function BuildState(screen as object, port as object, deviceInfo as object, appI
         dailyWallpaper: dailyWallpaper,
         totalCount: allWallpapers.Count(),
 
+        ' ── live filter state ──
+        ' Mirrors of the persisted preferences in settingsMgr.  They are NOT a
+        ' second source of truth: SyncFilterState() copies settings -> state
+        ' after every change, and the views read them from `state` because the
+        ' renderers have no access to the settings manager's cache AA.  Reading
+        ' `settingsMgr.activeCategory` would evaluate to invalid (the value
+        ' lives in settingsMgr.cache), which is exactly the bug that used to
+        ' blank out every filter chip in the gallery header.
+        activeCategory: settingsMgr.GetStr("activeCategory", "All"),
+        activeResolution: settingsMgr.GetStr("activeResolution", "All"),
+        activeSource: settingsMgr.GetStr("activeSource", "All"),
+        activeTag: settingsMgr.GetStr("activeTag", ""),
+        activeSearch: settingsMgr.GetStr("searchQuery", ""),
+        sortOrder: settingsMgr.GetStr("sortOrder", "newest"),
+        favoritesOnly: settingsMgr.GetBool("favoritesOnly", false),
+
         ' ── navigation ──
         activeView: "gallery",
         activeTab: TabGallery(),
@@ -210,7 +239,20 @@ function BuildState(screen as object, port as object, deviceInfo as object, appI
         ambientShowInfo: true,
         ambientTransition: 0,
         ambientTransStart: 0,
-        autoSwitchInterval: settingsMgr.GetInt("ambientInterval", 30),
+        ' AMBIENT SLIDESHOW interval.  Deliberately NOT named
+        ' autoSwitchInterval: that is Theme Studio's rotation interval
+        ' (themeMgr.autoSwitchInterval) and the two used to be read through the
+        ' same state key, so changing the rotation interval silently
+        ' rescheduled the slideshow.
+        ambientIntervalSec: settingsMgr.GetInt("ambientInterval", 30),
+
+        ' ── automatic wallpaper rotation (Theme Studio) ─────────────────
+        ' `autoSwitchAtMs` is the wall-clock time of the next rotation and
+        ' `autoSwitchIdx` walks the rotation pool, so the sequence is stable
+        ' instead of random.  Both are only meaningful while
+        ' themeMgr.autoSwitchEnabled is true.
+        autoSwitchAtMs: 0,
+        autoSwitchIdx: 0,
 
         ' ── render loop ──
         animClock: animClock,
@@ -292,15 +334,23 @@ function FrameIntervalMs(state as object) as integer
 end function
 
 function AnimationActive(state as object) as boolean
-    if state.spinnerVisible then return true
-    if state.slideshowActive then return true
+    if state.spinnerVisible then return true ' rotating dots
+    if state.slideshowActive then return true ' advance countdown
     if state.searchMode then return true ' blinking caret
     if state.activeView = "ambient" then return true ' Ken Burns drift
-    if state.activeView = "viewer" and state.browseList.Count() > 0 then return true
-    if state.toastMessage <> "" then return true
-    if state.storeMgr.IsBusy() then return true
-    if state.imgLoader.IsPending() then return true
-    ' The breathing focus ring is only visible where a ring is drawn.
+    if state.toastMessage <> "" then return true ' toast countdown
+    if state.storeMgr.IsBusy() then return true ' Roku Pay spinner
+    if state.imgLoader.IsPending() then return true ' thumbnails arriving
+    ' The viewer only animates while it is still streaming the full frame or
+    ' running a slideshow.  Returning true for any non-empty browse list kept
+    ' the loop at 20 fps forever, re-issuing a full-screen 1920x1080 rescale of
+    ' a static image about twenty times a second on a device with no
+    ' compositor.
+    if state.activeView = "viewer"
+        if state.imgLoader.IsPending() then return true
+        return false
+    end if
+    ' The breathing focus ring is only drawn on these screens.
     if state.activeView = "gallery" then return true
     if state.activeView = "screensavers" then return true
     if state.activeView = "daily" then return true
@@ -367,6 +417,59 @@ sub UpdateTimers(state as object, nowMs as integer)
 
     UpdateAmbient(state, nowMs)
     UpdateViewerSlideshow(state, nowMs)
+    UpdateAutoRotation(state, nowMs)
+end sub
+
+' ─── THEME STUDIO AUTO-ROTATION ───────────────────────────────────────
+' Theme Studio has always offered "Auto-Rotation" with a pool, an interval and
+' a target, but nothing ever acted on the setting - it was persisted and
+' displayed and then ignored.  This timer closes that gap.
+'
+' Roku gives a channel no way to change the device home screen or the system
+' screensaver (certification 4.5), so the two targets this can actually drive
+' are the wallpaper Ambient Mode opens on and the backdrop behind the gallery.
+sub UpdateAutoRotation(state as object, nowMs as integer)
+    tm = state.themeMgr
+    if tm = invalid then return
+    if not tm.autoSwitchEnabled then return
+
+    ' Never rotate mid-view: swapping the backdrop while the user is reading a
+    ' full-screen image is jarring, and the Ambient slideshow owns its own
+    ' sequencing.
+    if state.activeView = "viewer" or state.activeView = "ambient" then return
+
+    if state.autoSwitchAtMs = 0
+        state.autoSwitchAtMs = nowMs + (MaxI(60, tm.autoSwitchInterval) * 1000)
+        return
+    end if
+    if nowMs < state.autoSwitchAtMs then return
+
+    state.autoSwitchAtMs = nowMs + (MaxI(60, tm.autoSwitchInterval) * 1000)
+
+    pool = tm.BuildRotationPool(state.filtered)
+    if pool.Count() = 0 then pool = state.allWallpapers
+    if pool.Count() = 0 then return
+
+    state.autoSwitchIdx = WrapIndex(state.autoSwitchIdx + 1, pool.Count())
+    item = pool[state.autoSwitchIdx]
+    if item = invalid then return
+
+    target = tm.autoSwitchTarget
+    if target = "backdrop" or target = "both"
+        if tm.SetBackdropWallpaper(item)
+            ' Drop the baked 1920x1080 backdrop so it is rebuilt from the new
+            ' image on the next frame.
+            state.backdropBmp = invalid
+            state.backdropKey = ""
+        end if
+    end if
+    if target = "ambient" or target = "both"
+        tm.SetAmbientWallpaper(item)
+    end if
+
+    ' Warm the thumbnail so the new backdrop is not a blank panel for a second.
+    state.imgLoader.PrefetchThumb(WallpaperFilename(item))
+    if state.activeView = "theme" or state.activeView = "gallery" then state.dirty = true
 end sub
 
 ' A spinner is only worth animating when a visible card is still missing its
@@ -432,7 +535,7 @@ sub UpdateAmbient(state as object, nowMs as integer)
     ' second while animating, so a per-iteration counter would advance the
     ' slideshow twenty times too fast.
     elapsedSec = (nowMs - state.switchAtMs) / 1000
-    if elapsedSec >= state.autoSwitchInterval
+    if elapsedSec >= state.ambientIntervalSec
         state.switchAtMs = nowMs
         state.ambientTransition = 1
         state.ambientTransStart = nowMs
@@ -456,7 +559,7 @@ sub UpdateViewerSlideshow(state as object, nowMs as integer)
     if not state.slideshowActive then return
     if nowMs < state.nextSlideAtMs then return
 
-    state.nextSlideAtMs = nowMs + (MaxI(2, state.autoSwitchInterval) * 1000)
+    state.nextSlideAtMs = nowMs + (MaxI(2, state.ambientIntervalSec) * 1000)
     total = state.browseList.Count()
     if total > 0
         state.browseIdx = WrapIndex(state.browseIdx + 1, total)
@@ -659,7 +762,15 @@ sub HandleGalleryInput(code as integer, state as object)
         return
     end if
 
-    if code = 7 ' Instant Replay -> jump to today's Daily Spotlight
+    if code = 7 ' Instant Replay -> favourite the focused wallpaper
+        absoluteIdx = (state.currentPage * pageSize) + state.gridIdx
+        if absoluteIdx < totalItems
+            ToggleFavorite(state, state.filtered[absoluteIdx])
+        end if
+        return
+    end if
+
+    if code = 11 ' Channel Up -> jump to today's Daily Spotlight
         if state.dailyWallpaper <> invalid
             idx = FindWallpaperIndex(state.filtered, SafeStr(state.dailyWallpaper.id))
             if idx >= 0
@@ -667,7 +778,11 @@ sub HandleGalleryInput(code as integer, state as object)
                 state.gridIdx = idx MOD pageSize
                 ShowToast(state, "Jumped to today's Daily Spotlight")
             else
+                ' Today's pick is filtered out - widen the search and show it
+                ' on its own screen instead of silently doing nothing.
                 SetTab(state, TabDaily())
+                ActivateTab(state)
+                ShowToast(state, "Today's pick is outside the current filter")
             end if
             MarkDirty(state)
         end if
@@ -855,9 +970,9 @@ sub HandleViewerInput(code as integer, state as object)
 
     if code = 13 or code = 14 ' Play / Pause: slideshow
         state.slideshowActive = not state.slideshowActive
-        state.nextSlideAtMs = state.animClock.TotalMilliseconds() + (MaxI(2, state.autoSwitchInterval) * 1000)
+        state.nextSlideAtMs = state.animClock.TotalMilliseconds() + (MaxI(2, state.ambientIntervalSec) * 1000)
         if state.slideshowActive
-            ShowToast(state, "Slideshow on - a new wallpaper every " + FormatInterval(state.autoSwitchInterval))
+            ShowToast(state, "Slideshow on - a new wallpaper every " + FormatInterval(state.ambientIntervalSec))
         else
             ShowToast(state, "Slideshow paused")
         end if
@@ -895,7 +1010,7 @@ sub HandleAmbientInput(code as integer, state as object)
         state.slideshowActive = not state.slideshowActive
         state.switchAtMs = state.animClock.TotalMilliseconds()
         if state.slideshowActive
-            ShowToast(state, "Ambient slideshow on - " + FormatInterval(state.autoSwitchInterval) + " per image")
+            ShowToast(state, "Ambient slideshow on - " + FormatInterval(state.ambientIntervalSec) + " per image")
         else
             ShowToast(state, "Ambient slideshow paused")
         end if
@@ -937,11 +1052,14 @@ sub HandleAmbientInput(code as integer, state as object)
     end if
 
     if code = 8 or code = 9 ' interval down / up
-        state.autoSwitchInterval = CycleIntOption(AmbientIntervalOptions(), state.autoSwitchInterval, 1)
-        if code = 8 then state.autoSwitchInterval = CycleIntOption(AmbientIntervalOptions(), state.autoSwitchInterval, -2)
-        state.settingsMgr.Save("ambientInterval", StrI(state.autoSwitchInterval).Trim())
+        ' Reads as intent: the old version stepped +1 and then -2 for "down",
+        ' which was correct only by arithmetic accident.
+        direction = 1
+        if code = 8 then direction = -1
+        state.ambientIntervalSec = CycleIntOption(AmbientIntervalOptions(), state.ambientIntervalSec, direction)
+        state.settingsMgr.Save("ambientInterval", StrI(state.ambientIntervalSec).Trim())
         state.switchAtMs = state.animClock.TotalMilliseconds()
-        ShowToast(state, "Ambient interval: " + FormatInterval(state.autoSwitchInterval))
+        ShowToast(state, "Ambient interval: " + FormatInterval(state.ambientIntervalSec))
         MarkDirty(state)
         return
     end if
@@ -1198,7 +1316,6 @@ sub CycleThemeSetting(state as object, name as string, direction as integer)
     end if
     if name = "interval"
         tm.SetAutoSwitchInterval(CycleIntOption(AutoSwitchIntervalOptions(), tm.autoSwitchInterval, direction))
-        state.autoSwitchInterval = tm.autoSwitchInterval
         ShowToast(state, "Rotation interval: " + FormatInterval(tm.autoSwitchInterval))
         return
     end if
@@ -1330,7 +1447,7 @@ end sub
 sub StartTrial(state as object)
     if state.licenseMgr.HasProAccess()
         ShowToast(state, "Pro is already unlocked on this device")
-    else if state.licenseMgr.trialStartedMs > 0
+    else if state.licenseMgr.trialStartedSec > 0
         ShowToast(state, "The trial has already been used on this device")
     else
         state.licenseMgr.StartTrial()
@@ -1413,7 +1530,7 @@ sub CycleSetting(state as object, title as string, direction as integer)
     if title = "Clock Format"
         sm.Save("clockFormat", CycleOption(ClockFormatOptions(), sm.GetStr("clockFormat", "auto"), direction))
         state.lastClockMs = -60000 ' force an immediate clock refresh
-        ShowToast(state, "Clock: " + LabelFor(ClockFormatLabels(), sm.clockFormat))
+        ShowToast(state, "Clock: " + LabelFor(ClockFormatLabels(), sm.GetStr("clockFormat", "auto")))
         return
     end if
 
@@ -1428,7 +1545,7 @@ sub CycleSetting(state as object, title as string, direction as integer)
     if title = "Ambient Interval"
         nextInterval = CycleIntOption(AmbientIntervalOptions(), sm.GetInt("ambientInterval", 30), direction)
         sm.Save("ambientInterval", StrI(nextInterval).Trim())
-        state.autoSwitchInterval = nextInterval
+        state.ambientIntervalSec = nextInterval
         state.switchAtMs = state.animClock.TotalMilliseconds()
         ShowToast(state, "Ambient interval: " + FormatInterval(nextInterval))
         return
@@ -1436,7 +1553,7 @@ sub CycleSetting(state as object, title as string, direction as integer)
 
     if title = "Safe Area Guides"
         sm.Save("safeAreaGuides", CycleOption(SafeAreaOptions(), sm.GetStr("safeAreaGuides", "off"), direction))
-        ShowToast(state, "Safe area guides: " + LabelFor(SafeAreaLabels(), sm.safeAreaGuides))
+        ShowToast(state, "Safe area guides: " + LabelFor(SafeAreaLabels(), sm.GetStr("safeAreaGuides", "off")))
         return
     end if
 end sub
@@ -1486,6 +1603,29 @@ sub RunSettingsAction(state as object, title as string)
         return
     end if
 
+    if title = "Clear All Favorites"
+        count = state.favMgr.Count()
+        if count = 0
+            ShowToast(state, "You have no favorites to clear")
+            state.audioMgr.PlayDeadEnd()
+            return
+        end if
+        state.favMgr.ClearAll()
+        ' The favourites tab and the "favorites only" filter both read the set.
+        if state.settingsMgr.GetBool("favoritesOnly", false) then ApplyFilters(state)
+        ShowToast(state, StrI(count).Trim() + " favorites cleared")
+        state.audioMgr.PlaySelect()
+        return
+    end if
+
+    if title = "Retry Failed Images"
+        state.imgLoader.ResetFailures()
+        state.imgLoader.PrioritizeVisible(CurrentPageItems(state))
+        ShowToast(state, "Retrying images that failed to load")
+        state.audioMgr.PlaySelect()
+        return
+    end if
+
     if title = "Spotlight Pro Trial"
         StartTrial(state)
         return
@@ -1526,7 +1666,7 @@ sub HandleFilterInput(code as integer, state as object)
         if code = 4 then direction = -1
         if code = 6 then direction = 1
 
-        if state.filterRow = 5 ' Search opens the keyboard instead of cycling
+        if state.filterRow = FilterSearchRowIdx() ' opens the keyboard instead of cycling
             if code = 6 or code = 5
                 state.filterMode = false
                 state.searchMode = true
@@ -1599,7 +1739,7 @@ sub HandleSearchInput(code as integer, msg as object, state as object)
         else
             state.searchMode = false
             state.filterMode = true
-            state.filterRow = 5
+            state.filterRow = MaxI(0, FilterSearchRowIdx())
             state.audioMgr.PlayNav()
         end if
         MarkDirty(state)
@@ -1631,7 +1771,7 @@ sub HandleSearchInput(code as integer, msg as object, state as object)
         if key = KeyboardCancelKey()
             state.searchMode = false
             state.filterMode = true
-            state.filterRow = 5
+            state.filterRow = MaxI(0, FilterSearchRowIdx())
         else if key = KeyboardSearchKey()
             state.searchMode = false
             SetTab(state, TabGallery())
@@ -1782,7 +1922,7 @@ sub EnterAmbient(state as object, list as object, idx as integer, returnView as 
     state.ambientTransition = 0
     state.slideshowActive = true
     state.switchAtMs = state.animClock.TotalMilliseconds()
-    state.autoSwitchInterval = state.settingsMgr.GetInt("ambientInterval", 30)
+    state.ambientIntervalSec = state.settingsMgr.GetInt("ambientInterval", 30)
     RememberWallpaper(state)
     PrefetchNeighbours(state)
     ShowToast(state, "Ambient Mode - press Play to pause, any other key to exit")
@@ -1790,6 +1930,11 @@ sub EnterAmbient(state as object, list as object, idx as integer, returnView as 
 end sub
 
 ' Ambient Mode launched from a screen with no focused item.
+'
+' Honours the wallpaper assigned in Theme Studio first: the screen offers
+' "Set as Ambient Wallpaper" and then "Play preview Ambient Mode" directly
+' underneath it, but the preview used to ignore the assignment and start from
+' the top of the rotation pool instead.
 sub StartAmbientFromGallery(state as object)
     pool = state.themeMgr.BuildRotationPool(state.filtered)
     if pool.Count() = 0 then pool = state.filtered
@@ -1798,7 +1943,23 @@ sub StartAmbientFromGallery(state as object)
         MarkDirty(state)
         return
     end if
-    EnterAmbient(state, pool, 0, state.activeView)
+
+    ' Where Back should land. activeView is still the caller's view here, but
+    ' Ambient Mode can be re-entered from inside itself (code 13 from Theme
+    ' Studio, or an action=ambient deep link while already in Ambient), and
+    ' ExitToView() has no branch for "viewer" or "ambient" - it would leave
+    ' the channel on a screen with no chrome and no way out.
+    returnView = state.activeView
+    if returnView = "viewer" or returnView = "ambient" then returnView = "gallery"
+
+    startIdx = 0
+    assignedId = state.themeMgr.ambientWallpaperId
+    if assignedId <> 0
+        idx = FindWallpaperIndex(pool, StrI(assignedId).Trim())
+        if idx >= 0 then startIdx = idx
+    end if
+
+    EnterAmbient(state, pool, startIdx, returnView)
 end sub
 
 sub ExitToView(state as object, viewName as string)
@@ -1845,7 +2006,7 @@ sub ToggleFavorite(state as object, item as object)
     end if
 
     ' The favourites tab and the "favorites only" filter both depend on the set.
-    if state.settingsMgr.GetBool("favoritesOnly", false) then ApplyFilters(state)
+    if state.settingsMgr.GetBool("favoritesOnly", false) then ApplyFilters(state, true)
     state.audioMgr.PlaySelect()
     MarkDirty(state)
 end sub
@@ -1863,15 +2024,34 @@ sub ResetFilters(state as object)
 end sub
 
 ' Rebuild the working lists from the persisted filter state.
-sub ApplyFilters(state as object)
+'
+' `keepPosition` preserves the page and grid cursor where it still makes sense.
+' Without it, toggling a favourite on page 200 (or typing one more character in
+' the search box) dumped the user back on page 1, which made the 935-page
+' archive effectively unnavigable.
+sub ApplyFilters(state as object, keepPosition = false as boolean)
     sm = state.settingsMgr
     state.filtered = FilterWallpapers(state.allWallpapers, sm.GetStr("activeCategory", "All"), sm.GetStr("activeResolution", "All"), sm.GetStr("activeSource", "All"), sm.GetStr("searchQuery", ""), sm.GetBool("favoritesOnly", false), state.favMgr, sm.GetStr("sortOrder", "newest"))
 
-    state.currentPage = 0
-    state.gridIdx = 0
+    SyncFilterState(state)
+
+    pageSize = GalleryPageSize()
+    totalPages = MaxI(1, CeilDivI(state.filtered.Count(), pageSize))
+    if keepPosition
+        state.currentPage = ClampI(state.currentPage, 0, totalPages - 1)
+        state.gridIdx = ClampI(state.gridIdx, 0, pageSize - 1)
+        if (state.currentPage * pageSize) + state.gridIdx >= state.filtered.Count()
+            state.currentPage = 0
+            state.gridIdx = 0
+        end if
+    else
+        state.currentPage = 0
+        state.gridIdx = 0
+    end if
+
     state.screensaverList = BuildScreensaverList(state.filtered)
-    state.currentPageSS = 0
-    state.ssGridIdx = 0
+    state.currentPageSS = ClampI(state.currentPageSS, 0, MaxI(0, CeilDivI(state.screensaverList.Count(), ScreensaverPageSize()) - 1))
+    state.ssGridIdx = ClampI(state.ssGridIdx, 0, ScreensaverPageSize() - 1)
 
     ' Keep the browse session pointing at something real.
     if state.browseList.Count() > 0
@@ -1880,6 +2060,21 @@ sub ApplyFilters(state as object)
 
     state.imgLoader.PrioritizeVisible(CurrentPageItems(state))
     MarkDirty(state)
+end sub
+
+' Copy the persisted preferences into `state` so the renderers can read them.
+' Every view and every input handler that touches a filter value calls this
+' indirectly through ApplyFilters(); nothing should write these keys directly.
+sub SyncFilterState(state as object)
+    if state = invalid or state.settingsMgr = invalid then return
+    sm = state.settingsMgr
+    state.activeCategory = sm.GetStr("activeCategory", "All")
+    state.activeResolution = sm.GetStr("activeResolution", "All")
+    state.activeSource = sm.GetStr("activeSource", "All")
+    state.activeTag = sm.GetStr("activeTag", "")
+    state.activeSearch = sm.GetStr("searchQuery", "")
+    state.sortOrder = sm.GetStr("sortOrder", "newest")
+    state.favoritesOnly = sm.GetBool("favoritesOnly", false)
 end sub
 
 ' ─── LIST HELPERS ─────────────────────────────────────────────────────
@@ -2080,6 +2275,31 @@ sub ApplyDeepLinkParams(state as object, params as object)
     end if
     if action = "daily"
         SetTab(state, TabDaily())
+        ActivateTab(state)
+        MarkDirty(state)
+        return
+    end if
+    if action = "favorites" or action = "favourites"
+        SetTab(state, TabFavorites())
+        ActivateTab(state)
+        ShowToast(state, "Deep link: " + StrI(state.filtered.Count()).Trim() + " favorites")
+        MarkDirty(state)
+        return
+    end if
+    if action = "screensavers" or action = "collection"
+        SetTab(state, TabScreensavers())
+        ActivateTab(state)
+        MarkDirty(state)
+        return
+    end if
+    if action = "theme" or action = "settings" or action = "store"
+        if action = "theme"
+            SetTab(state, TabTheme())
+        else if action = "store"
+            SetTab(state, TabStore())
+        else
+            SetTab(state, TabSettings())
+        end if
         ActivateTab(state)
         MarkDirty(state)
         return

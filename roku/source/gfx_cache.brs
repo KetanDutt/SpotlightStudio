@@ -7,7 +7,7 @@
 '   1. Rounded geometry.  DrawRoundRect() emits 4*r + 3 DrawRect() calls, so a
 '      single badge is ~30 blits and a card frame ~60.  A gallery page is well
 '      over a thousand blits before a single thumbnail is drawn.
-'   2. Image resampling.  DrawResizedObject() re-scales a thumbnail on every
+'   2. Image resampling.  DrawScaledObject() re-scales a thumbnail on every
 '      frame it is visible, even when nothing on screen moved.
 '
 ' Both results are deterministic for a given (size, colour) or (source, size)
@@ -16,8 +16,11 @@
 '
 ' Every cache is a bounded LRU with an explicit pixel budget.  roBitmap is
 ' 32 bits per pixel, so an unbounded cache is an out-of-memory crash on a
-' 512 MB streaming stick - the budgets below cap the two caches at ~12 MB of
-' texture memory combined.
+' 512 MB streaming stick - the budgets below cap both caches together at
+' ~3.6 MB of texture memory.
+'
+' Both stores keep their key list in LRU order (oldest first), so eviction is
+' O(1) per victim rather than an O(n) scan for the smallest stamp.
 
 ' BrightScript has no compile-time constants, so the budget lives in one
 ' memoised associative array.  Tune these to trade memory against draw calls.
@@ -28,10 +31,10 @@ function GfxLimits() as object
             ' Anything larger than this (the filter modal, the settings panel) is
             ' cheaper to draw directly than to hold in texture memory.
             maxEntryPixels: 500000,
-            shapeMaxEntries: 48,
-            shapeMaxPixels: 1500000,
-            scaledMaxEntries: 24,
-            scaledMaxPixels: 1500000
+            shapeMaxEntries: 96,
+            shapeMaxPixels: 1800000,
+            scaledMaxEntries: 32,
+            scaledMaxPixels: 1800000
         }
     end if
     return gaa.__ssGfxLimits
@@ -74,9 +77,15 @@ function GetGfxCache() as object
             end while
         end function,
 
-        Touch: function(store as object, key as string) as void
+        ' Mark `key` as most-recently-used.  The key list doubles as the LRU
+        ' order (oldest first, newest last), so eviction stays O(1) instead of
+        ' scanning every entry for the smallest stamp.
+        Touch: function(store as object, keys as object, key as string) as void
             entry = store[key]
-            if entry <> invalid then entry.stamp = m.NextStamp()
+            if entry = invalid then return
+            entry.stamp = m.NextStamp()
+            m.RemoveKey(keys, key)
+            keys.Push(key)
         end function,
 
         ' Evict least-recently-used entries from one store until it is inside
@@ -88,17 +97,23 @@ function GetGfxCache() as object
                 if keys.Count() <= maxEntries and m[pixelField] <= maxPixels then exit while
                 if keys.Count() = 0 then exit while
 
-                oldestKey = ""
-                oldestStamp = 0
-                for each k in keys
-                    entry = store[k]
-                    if entry <> invalid
-                        if oldestKey = "" or entry.stamp < oldestStamp
-                            oldestKey = k
-                            oldestStamp = entry.stamp
+                ' keys[] is kept in LRU order by Touch(), so the victim is the
+                ' head of the list.  Fall back to a stamp scan only if the list
+                ' and the store ever disagree.
+                oldestKey = keys[0]
+                if store[oldestKey] = invalid
+                    oldestKey = ""
+                    oldestStamp = 0
+                    for each k in keys
+                        entry = store[k]
+                        if entry <> invalid
+                            if oldestKey = "" or entry.stamp < oldestStamp
+                                oldestKey = k
+                                oldestStamp = entry.stamp
+                            end if
                         end if
-                    end if
-                end for
+                    end for
+                end if
                 if oldestKey = "" or oldestKey = keepKey then exit while
 
                 entry = store[oldestKey]
@@ -128,7 +143,7 @@ function GetGfxCache() as object
             entry = m.shapes[key]
             if entry <> invalid and entry.bmp <> invalid
                 m.hits = m.hits + 1
-                m.Touch(m.shapes, key)
+                m.Touch(m.shapes, m.shapeKeys, key)
                 return entry.bmp
             end if
             m.misses = m.misses + 1
@@ -142,6 +157,39 @@ function GetGfxCache() as object
                 inset = CInt(borderThickness / 2)
                 DrawRoundedOutline(bmp, inset, inset, w - (inset * 2), h - (inset * 2), radius, borderColor, borderThickness)
             end if
+
+            m.shapes[key] = { bmp: bmp, pixels: pixels, stamp: m.NextStamp() }
+            m.shapeKeys.Push(key)
+            m.shapePixels = m.shapePixels + pixels
+            m.EnforceBudget(m.shapes, m.shapeKeys, "shapePixels", m.limits.shapeMaxEntries, m.limits.shapeMaxPixels, key)
+            return bmp
+        end function,
+
+        ' ── solid rounded rectangles ─────────────────────────────────────
+        ' A plain filled rounded rect is the most repeated shape in the app: the
+        ' image slot inside every card, every filter chip, every tag pill.  At
+        ' radius 12 it is 4*r + 3 = 51 DrawRect() calls, and the gallery issues
+        ' eight of them per frame - over 400 blits before a thumbnail is drawn.
+        ' Caching it turns that into one blit.
+        GetRoundedRect: function(w as integer, h as integer, radius as integer, color as integer) as object
+            if w <= 0 or h <= 0 then return invalid
+            pixels = w * h
+            if pixels > m.limits.maxEntryPixels then return invalid
+
+            key = StrI(w).Trim() + "x" + StrI(h).Trim() + "r" + StrI(radius).Trim() + "s" + StrI(color)
+            entry = m.shapes[key]
+            if entry <> invalid and entry.bmp <> invalid
+                m.hits = m.hits + 1
+                m.Touch(m.shapes, m.shapeKeys, key)
+                return entry.bmp
+            end if
+            m.misses = m.misses + 1
+
+            bmp = CreateObject("roBitmap", { width: w, height: h, AlphaEnable: true })
+            if bmp = invalid then return invalid
+            bmp.SetAlphaEnable(true)
+            bmp.Clear(&h00000000)
+            DrawRoundRect(bmp, 0, 0, w, h, radius, color)
 
             m.shapes[key] = { bmp: bmp, pixels: pixels, stamp: m.NextStamp() }
             m.shapeKeys.Push(key)
@@ -164,14 +212,19 @@ function GetGfxCache() as object
             entry = m.scaled[key]
             if entry <> invalid and entry.bmp <> invalid
                 m.hits = m.hits + 1
-                m.Touch(m.scaled, key)
+                m.Touch(m.scaled, m.scaledKeys, key)
                 return entry.bmp
             end if
             m.misses = m.misses + 1
 
             bmp = CreateObject("roBitmap", { width: w, height: h, AlphaEnable: false })
             if bmp = invalid then return invalid
-            ok = bmp.DrawResizedObject(0, 0, w, h, source)
+            ' DrawScaledObject() takes SCALE FACTORS, not pixel dimensions - it is
+            ' the only documented scaling blit in Roku's ifDraw2D interface.
+            srcW = source.GetWidth()
+            srcH = source.GetHeight()
+            if srcW < 1 or srcH < 1 then return invalid
+            ok = bmp.DrawScaledObject(0, 0, w / srcW, h / srcH, source)
             if not ok then return invalid
 
             m.scaled[key] = { bmp: bmp, pixels: pixels, stamp: m.NextStamp() }
@@ -244,7 +297,7 @@ sub DrawGlassPanelCached(screen as object, x as integer, y as integer, w as inte
 end sub
 
 ' Blit a bitmap scaled to (w, h) through the cache.  Returns false when the
-' caller should fall back to screen.DrawResizedObject().
+' caller should fall back to a direct DrawScaledObject().
 function DrawScaledCached(screen as object, x as integer, y as integer, w as integer, h as integer, source as object, cacheKey as string) as boolean
     if source = invalid then return false
     bmp = GetGfxCache().GetScaled(cacheKey, source, w, h)
@@ -252,3 +305,36 @@ function DrawScaledCached(screen as object, x as integer, y as integer, w as int
     screen.DrawObject(x, y, bmp)
     return true
 end function
+
+' Blit a cached solid rounded rect, falling back to drawing it directly.
+sub DrawRoundedRectCached(screen as object, x as integer, y as integer, w as integer, h as integer, radius as integer, color as integer)
+    bmp = GetGfxCache().GetRoundedRect(w, h, radius, color)
+    if bmp <> invalid
+        screen.DrawObject(x, y, bmp)
+        return
+    end if
+    DrawRoundRect(screen, x, y, w, h, radius, color)
+end sub
+
+' Scale `source` into (w, h) at (x, y).  The only documented scaling blit in
+' ifDraw2D is DrawScaledObject(x, y, scaleX, scaleY, src), which takes factors
+' rather than pixels - so the factors are derived here once, in floats.
+'
+' NOTE: ifDraw2D has no DrawResizedObject().  Calling it raises a runtime error
+' and terminates the channel; scripts/roku_audit.py now fails the build on it.
+sub DrawScaledTo(screen as object, x as integer, y as integer, w as integer, h as integer, source as object)
+    if source = invalid then return
+    srcW = source.GetWidth()
+    srcH = source.GetHeight()
+    if srcW < 1 or srcH < 1 then return
+    screen.DrawScaledObject(x, y, w / srcW, h / srcH, source)
+end sub
+
+' Pre-scaled when the cache can hold it, direct blit when it cannot (a
+' full-screen 1920x1080 frame is well over the per-entry pixel budget).
+sub DrawScaledOrResize(screen as object, x as integer, y as integer, w as integer, h as integer, source as object, cacheKey as string)
+    if source = invalid then return
+    if not DrawScaledCached(screen, x, y, w, h, source, cacheKey)
+        DrawScaledTo(screen, x, y, w, h, source)
+    end if
+end sub

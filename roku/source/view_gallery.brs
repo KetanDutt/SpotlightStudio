@@ -54,13 +54,23 @@ sub RenderGallery(screen as object, state as object)
         if logoScaled <> invalid
             screen.DrawObject(40, 30, logoScaled)
         else
-            screen.DrawResizedObject(40, 30, 100, 75, logoBmp)
+            DrawScaledTo(screen, 40, 30, 100, 75, logoBmp)
         end if
     end if
 
     screen.DrawText("Spotlight Studio", 130, 24, t.textPrimary, fonts.heading)
     DrawBadge(screen, state.appVersion, 400, 28, t.btnFocused, t.textOnAccent, fonts.caption)
     DrawBadge(screen, state.licenseMgr.GetStatusBadge(), 500, 28, t.btnNormal, t.textPrimary, fonts.caption)
+
+    ' Offline banner, right-aligned next to the clock.  Without it a dead link
+    ' looks identical to a broken app: every card just spins.
+    if IsOffline(state.deviceInfo)
+        offlineLabel = "OFFLINE"
+        offlineColor = t.dangerRed
+        if not state.deviceInfo.GetInternetStatus() then offlineLabel = "NO INTERNET"
+        badgeW = BadgeWidth(offlineLabel, fonts.caption)
+        DrawBadge(screen, offlineLabel, 1690 - badgeW, 64, offlineColor, t.textPrimary, fonts.caption)
+    end if
 
     screen.DrawText(SafeStr(state.clockTime), 1700, 20, t.textPrimary, fonts.heading)
     screen.DrawText(SafeStr(state.clockDate), 1700, 60, t.textAccent, fonts.small)
@@ -71,11 +81,16 @@ sub RenderGallery(screen as object, state as object)
     for i = 0 to tabs.Count() - 1
         isActive = (state.activeTab = i)
         tabText = tabs[i]
-        textW = fonts.heading.GetOneLineWidth(tabText)
+        textW = fonts.heading.GetOneLineWidth(tabText, 1920)
         tabW = textW + 24
 
         if isActive
-            DrawRoundRect(screen, tabX, 82, tabW, 36, 9, t.accentSoft)
+            tabPill = GetGfxCache().GetRoundedRect(tabW, 36, 9, t.accentSoft)
+            if tabPill <> invalid
+                screen.DrawObject(tabX, 82, tabPill)
+            else
+                DrawRoundRect(screen, tabX, 82, tabW, 36, 9, t.accentSoft)
+            end if
             DrawRoundedOutline(screen, tabX, 82, tabW, 36, 9, t.textAccent, 2)
             screen.DrawText(tabText, tabX + 12, 86, t.textAccent, fonts.heading)
         else
@@ -118,37 +133,26 @@ sub RenderGallery(screen as object, state as object)
     screen.DrawText(summary, 85, 198, t.textSecondary, fonts.caption)
 
     hint = "Press * for Filter & Sort"
-    hintW = fonts.caption.GetOneLineWidth(hint)
-    screen.DrawText(hint, 1835 - hintW, 198, t.textMuted, fonts.caption)
+    DrawRightText(screen, hint, 1835, 198, t.textMuted, fonts.caption)
 
     ' ── card grid ──────────────────────────────────────────────────────
-    if totalItems = 0
+    ' The empty state is drawn in place of the grid but the footer and the
+    ' toast still render, so the user keeps the key hints and any feedback
+    ' raised by the action that emptied the list.
+    if totalItems > 0
+        RenderGalleryGrid(screen, state, totalItems, L)
+    else
         RenderGalleryEmptyState(screen, state)
-        return
     end if
-
-    startIdx = state.currentPage * L.pageSize
-    for i = 0 to L.pageSize - 1
-        itemIdx = startIdx + i
-        if itemIdx >= totalItems then exit for
-
-        col = i MOD L.cols
-        row = CInt(i / L.cols)
-        cardX = L.startX + (col * (L.cardW + L.gapX))
-        cardY = L.startY + (row * (L.cardH + L.gapY))
-        isSelected = (state.gridIdx = i)
-
-        DrawWallpaperCard(screen, state, itemIdx, cardX, cardY, L.cardW, L.cardH, isSelected)
-    end for
 
     ' ── footer ─────────────────────────────────────────────────────────
     DrawGlassPanelR(screen, 0, 970, 1920, 110, t.borderSubtle, t.bgFooter, 0)
     screen.DrawRect(0, 970, 1920, 2, t.borderSubtle)
 
-    screen.DrawText("D-Pad Navigate  |  OK View Fullscreen  |  Right/Left Page  |  Play Ambient Mode  |  Rewind/FF Skip 10 Pages", 85, 1000, t.textSecondary, fonts.small)
-    screen.DrawText("Back from the tab bar exits to the Roku home screen", 85, 1035, t.textMuted, fonts.caption)
+    screen.DrawText("D-Pad Navigate   OK View Fullscreen   Play Ambient Mode   Rewind/FF Skip 10 Pages   Replay Favorite   Ch+ Today's Pick", 85, 1000, t.textSecondary, fonts.small)
+    screen.DrawText("Back moves to the tab bar, and Back again exits to the Roku home screen", 85, 1035, t.textMuted, fonts.caption)
 
-    if SafeAreaGuidesEnabled(state) then DrawSafeAreaGuides(screen, state.settingsMgr.safeAreaGuides)
+    if SafeAreaGuidesEnabled(state) then DrawSafeAreaGuides(screen, state.settingsMgr.GetStr("safeAreaGuides", "off"))
 
     ' Short fade after a page change.  ifDraw2D has no clipping, so a slide
     ' would need the grid drawn twice; a 180 ms fade reads just as well on a
@@ -164,16 +168,41 @@ sub RenderGallery(screen as object, state as object)
     RenderToast(screen, state)
 end sub
 
+sub RenderGalleryGrid(screen as object, state as object, totalItems as integer, L as object)
+    startIdx = state.currentPage * L.pageSize
+    for i = 0 to L.pageSize - 1
+        itemIdx = startIdx + i
+        if itemIdx >= totalItems then exit for
+
+        col = i MOD L.cols
+        row = CInt(i / L.cols)
+        cardX = L.startX + (col * (L.cardW + L.gapX))
+        cardY = L.startY + (row * (L.cardH + L.gapY))
+        isSelected = (state.gridIdx = i)
+
+        DrawWallpaperCard(screen, state, itemIdx, cardX, cardY, L.cardW, L.cardH, isSelected)
+    end for
+end sub
+
 ' A chip in the filter summary bar.  Returns the x position after the chip.
+'
+' The pill body is served from the shape cache: at radius 9 a rounded rect plus
+' its outline is ~80 DrawRect() calls, and up to six chips are drawn every
+' frame - ~500 blits a second on a device with no compositor.
 function DrawFilterChip(screen as object, state as object, x as integer, y as integer, label as string, color as integer, filled as boolean) as integer
     t = GetTheme()
     fonts = state.fonts
     if label = invalid or label = "" then return x
 
-    chipW = fonts.caption.GetOneLineWidth(label) + 24
+    chipW = TextWidth(label, fonts.caption, 8) + 24
     bg = t.bgPanelLight
     if filled then bg = t.accentSoft
-    DrawRoundRect(screen, x, y, chipW, 34, 9, bg)
+    body = GetGfxCache().GetRoundedRect(chipW, 34, 9, bg)
+    if body <> invalid
+        screen.DrawObject(x, y, body)
+    else
+        DrawRoundRect(screen, x, y, chipW, 34, 9, bg)
+    end if
     DrawRoundedOutline(screen, x, y, chipW, 34, 9, color, 1)
     screen.DrawText(label, x + 12, y + 7, color, fonts.caption)
     return x + chipW + 12
@@ -200,7 +229,7 @@ sub DrawGalleryBackdrop(screen as object, state as object)
 
     bmp = CreateObject("roBitmap", { width: 1920, height: 1080, AlphaEnable: false })
     if bmp = invalid then return
-    bmp.DrawResizedObject(0, 0, 1920, 1080, thumb)
+    DrawScaledTo(bmp, 0, 0, 1920, 1080, thumb)
     ' Bake the scrim in so the grid stays legible without a second full-screen
     ' blend every frame.
     bmp.DrawRect(0, 0, 1920, 1080, WithAlpha(0, 214))
@@ -212,7 +241,7 @@ end sub
 
 function SafeAreaGuidesEnabled(state as object) as boolean
     if state = invalid or state.settingsMgr = invalid then return false
-    mode = SafeStr(state.settingsMgr.safeAreaGuides)
+    mode = SafeStr(state.settingsMgr.GetStr("safeAreaGuides", "off"))
     return mode <> "" and mode <> "off"
 end function
 
@@ -225,18 +254,18 @@ sub RenderGalleryEmptyState(screen as object, state as object)
     headline = "No wallpapers match this filter"
     if state.totalCount = 0 then headline = "The archive could not be loaded"
 
-    headW = fonts.title.GetOneLineWidth(headline)
+    headW = fonts.title.GetOneLineWidth(headline, 1920)
     screen.DrawText(headline, CInt((1920 - headW) / 2), 440, t.textPrimary, fonts.title)
 
     detail = "Press * to open Filter & Sort and relax the category, resolution or search."
     if state.totalCount = 0 then detail = "The packaged catalog is missing or corrupt. Reinstall the channel to restore it."
-    detailW = fonts.body.GetOneLineWidth(detail)
+    detailW = fonts.body.GetOneLineWidth(detail, 1920)
     screen.DrawText(detail, CInt((1920 - detailW) / 2), 510, t.textSecondary, fonts.body)
 
-    screen.DrawText("Total archive size: " + StrI(state.totalCount).Trim() + " wallpapers", CInt((1920 - fonts.caption.GetOneLineWidth("Total archive size: " + StrI(state.totalCount).Trim() + " wallpapers")) / 2), 560, t.textMuted, fonts.caption)
+    screen.DrawText("Total archive size: " + StrI(state.totalCount).Trim() + " wallpapers", CInt((1920 - fonts.caption.GetOneLineWidth("Total archive size: " + StrI(state.totalCount).Trim() + " wallpapers", 1920)) / 2), 560, t.textMuted, fonts.caption)
 
     resetLabel = "Press * then choose All to reset every filter"
-    resetW = fonts.caption.GetOneLineWidth(resetLabel)
+    resetW = fonts.caption.GetOneLineWidth(resetLabel, 1920)
     DrawBadge(screen, resetLabel, CInt((1920 - resetW) / 2), 610, t.btnFocused, t.textOnAccent, fonts.caption)
 end sub
 
@@ -258,8 +287,10 @@ sub DrawWallpaperCard(screen as object, state as object, itemIdx as integer, car
     ' the cache key each frame, so focus is expressed with a ring instead.
     DrawGlassPanelCached(screen, cardX, cardY, cardW, cardH, t.borderMedium, t.bgPanel, 14)
 
-    ' Image slot: rounded placeholder, then the thumbnail on top.
-    DrawRoundRect(screen, imgX, imgY, imgW, imgH, 12, t.bgPanelLight)
+    ' Image slot: rounded placeholder, then the thumbnail on top.  The
+    ' placeholder is cached - at radius 12 it is 51 DrawRect() calls per card,
+    ' i.e. 408 per frame across the 4x2 grid.
+    DrawRoundedRectCached(screen, imgX, imgY, imgW, imgH, 12, t.bgPanelLight)
 
     filename = WallpaperFilename(curItem)
     thumbBmp = state.imgLoader.GetThumbnailSized(filename, imgW, imgH)
@@ -268,7 +299,7 @@ sub DrawWallpaperCard(screen as object, state as object, itemIdx as integer, car
     else
         fallback = state.imgLoader.GetThumbnail(filename)
         if fallback <> invalid
-            screen.DrawResizedObject(imgX, imgY, imgW, imgH, fallback)
+            DrawScaledTo(screen, imgX, imgY, imgW, imgH, fallback)
         else if state.spinnerVisible
             DrawLoadingSpinner(screen, imgX + CInt(imgW / 2), imgY + CInt(imgH / 2), 18, state.spinnerAngle, t.textAccent, t.borderSubtle)
         end if
@@ -313,7 +344,7 @@ sub DrawWallpaperCard(screen as object, state as object, itemIdx as integer, car
     if isSelected
         glowAlpha = CalcGlowAlpha(state, 210)
         DrawFocusRingAnimated(screen, cardX, cardY, cardW, cardH, t.borderFocused, 14, glowAlpha)
-        DrawRoundRect(screen, cardX + 2, cardY + cardH - 6, cardW - 4, 4, 2, t.textAccent)
+        DrawRoundedRectCached(screen, cardX + 2, cardY + cardH - 6, cardW - 4, 4, 2, t.textAccent)
     end if
 end sub
 
@@ -340,7 +371,7 @@ sub RenderToast(screen as object, state as object)
     fonts = state.fonts
 
     text = TruncateText(state.toastMessage, 96)
-    textW = fonts.body.GetOneLineWidth(text)
+    textW = fonts.body.GetOneLineWidth(text, 1920)
     toastW = textW + 60
     if toastW > 1600 then toastW = 1600
     toastH = 64

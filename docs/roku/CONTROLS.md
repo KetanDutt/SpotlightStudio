@@ -20,9 +20,10 @@ it never reaches this code.
 | OK | Open the focused wallpaper in the fullscreen viewer |
 | Back | Grid → tab bar; **tab bar → exit to the Roku home screen** (cert 4.6) |
 | ★ | Open the Filter & Sort dialog |
-| Replay | Jump to today's Daily Spotlight in the grid |
+| Replay | Add / remove the focused wallpaper in Favorites |
 | Play | Start Ambient Mode from the focused card |
 | Rewind / FF / A / B | Skip ±10 pages |
+| Ch+ / Ch− | Jump to today's Daily Spotlight (moves to the Daily screen when the current filter excludes it) |
 
 While the tab bar is focused, Left/Right move between the eight tabs and OK
 activates one (Favorites and Filter & Sort are actions, the rest are views).
@@ -38,6 +39,7 @@ activates one (Favorites and Filter & Sort are actions, the rest are views).
 | Play / Pause | Toggle the slideshow |
 | Replay | Toggle the focused wallpaper in Favorites |
 | Rewind / FF | Jump ±10 wallpapers |
+| Up / Down | Zoom in / out (100 % – 300 %) — zoom resets when you change wallpaper |
 | Back | Return to the screen the viewer was opened from |
 
 ## Ambient Mode
@@ -84,6 +86,13 @@ activates one (Favorites and Filter & Sort are actions, the rest are views).
 | Play | Preview Ambient Mode with the current rotation pool |
 | Back | Return to the gallery |
 
+The two assignment rows at the bottom (**Ambient Wallpaper** and **Menu
+Backdrop**) show what is currently assigned; OK assigns the wallpaper named in
+the panel hint — the last one you opened, falling back to today's Daily
+Spotlight.  Turn on **Auto-Rotation** and a timer walks the rotation pool on the
+chosen interval, reassigning whichever of the two targets you picked.  Rotation
+is skipped while the viewer or Ambient Mode is on screen.
+
 ## Pro Store
 
 | Key | Action |
@@ -122,3 +131,33 @@ activates one (Favorites and Filter & Sort are actions, the rest are views).
 | Back | Delete the last character; closes the keyboard once the query is empty |
 | ★ | Clear the whole query |
 | Physical keyboard | Characters type directly into the query (simulator / keyboard remotes) |
+
+## Key-code reference
+
+| Code | Button | Code | Button |
+|---|---|---|---|
+| 0 | Back | 10 | ★ Info |
+| 2 | Up | 11 | Channel Up |
+| 3 | Down | 12 | Channel Down |
+| 4 | Left | 13 | Play / Pause |
+| 5 | Right | 15 / 16 | Volume / Mute (owned by the OS) |
+| 6 | OK (Select) | 17 / 18 | A / B (game remotes) |
+| 7 | Instant Replay | 19 | Find Remote (owned by the OS) |
+| 8 | Rewind | 20 | Mute (owned by the OS) |
+| 9 | Fast Forward | | |
+
+Volume, mute and Find Remote are handled by the Roku OS before the channel sees
+them; `HandleCommonKey()` acknowledges them so a press is never silently
+dropped into a dead end.
+
+## Remote conventions used throughout
+
+* **Back is the only exit.**  The Home button is intercepted by the OS, so
+  certification 4.6 is satisfied with a Back ladder: viewer/secondary screen →
+  gallery grid → tab bar → exit.
+* **★ always opens Filter & Sort** from the home screen, the settings screen and
+  the filter dialog itself (where it resets instead).
+* **Modals own the remote while open** — the search keyboard first, then the
+  filter dialog, then the active view's handler.
+* **Any unhandled key in Ambient Mode exits**, which is what a screensaver-like
+  experience should do on a ten-foot screen.

@@ -27,8 +27,9 @@ no SceneGraph XML, no framework, every pixel drawn by this code.
 ## Build and sideload
 
 ```bash
+make roku-audit       # static gate: state keys, Roku API surface, dead calls
 make roku-lint        # BrighterScript compile gate
-make roku-check       # certification pre-flight (size, artwork, entry points…)
+make roku-check       # audit + certification pre-flight (size, artwork, entry points…)
 make roku-zip         # dist/spotlight-studio-<version>.zip
 ```
 
@@ -51,5 +52,9 @@ never enter the 4 MB budget.
   `CreateObject("roBitmap", path)` — 4K wallpapers would stop displaying.
 * **Back must exit only from the home screen** (certification 4.6).  Keep the
   grid → tab bar → exit ladder in `main.brs`.
+* **`make roku-audit` is not optional.**  BrightScript returns `invalid` for a
+  missing associative-array key and only discovers a call to a non-existent Roku
+  method at runtime, on the main thread.  The auditor catches both before they
+  reach a device — see `docs/roku/AUDIT.md`.
 * Artwork must stay fully opaque (certification 6.4).  After touching
   `scripts/make_icons.py`, run `make roku-art`.

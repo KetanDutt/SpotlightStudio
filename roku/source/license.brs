@@ -12,13 +12,12 @@
 ' access forever.
 
 function CreateLicenseManager() as object
-    oneDayMs = 86400000
-
     mgr = {
         section: CreateObject("roRegistrySection", "SpotlightStudio_License"),
-        trialStartedMs: 0,
-        trialDurationMs: oneDayMs * 3,
-        oneDayMs: oneDayMs,
+        ' Trial window, in epoch SECONDS.  See WallSeconds() below for why this
+        ' is not a monotonic roTimespan any more.
+        trialStartedSec: 0,
+        trialDurationSec: 259200, ' 3 days
 
         hasFullVersion: false,   ' lifetime product purchased
         ' Subscription expiry as Unix epoch SECONDS, not milliseconds: a
@@ -28,21 +27,22 @@ function CreateLicenseManager() as object
         proProductCode: "",
         purchaseCount: 0,
 
-        ' Monotonic clock, used for the short-lived trial window.
-        NowMs: function() as integer
-            if m.__clock = invalid
-                m.__clock = CreateObject("roTimespan")
-                m.__clock.Mark()
-            end if
-            return m.__clock.TotalMilliseconds()
-        end function,
-
-        ' Wall clock in Unix epoch seconds, used for subscription expiry.
+        ' Wall clock in Unix epoch seconds, used for the trial window and for
+        ' subscription expiry.
+        '
+        ' The trial used to be stored against a monotonic roTimespan that starts
+        ' at ~0 on every launch, so `trialStartedSec` was re-seeded each time the
+        ' channel started and the three-day window never actually elapsed.  The
+        ' epoch wall clock is the only thing that survives a reboot.
         WallSeconds: function() as integer
             wall = CreateObject("roDateTime")
             if wall = invalid then return 0
             return wall.AsSeconds()
         end function,
+
+        ' Trial start/expiry bookkeeping, in epoch SECONDS (see the note above
+        ' the fields: a millisecond epoch does not fit in a 32-bit Integer).
+        TrialSecondsPerDay: 86400,
 
         Load: function() as void
             m.hasFullVersion = false
@@ -51,10 +51,17 @@ function CreateLicenseManager() as object
             m.purchaseCount = 0
             if m.section = invalid then return
 
-            if m.section.Exists("trialStarted")
-                stored = SafeStr(m.section.Read("trialStarted"))
-                if stored <> "" then m.trialStartedMs = Val(stored)
+            if m.section.Exists("trialStartedSec")
+                stored = SafeStr(m.section.Read("trialStartedSec"))
+                if stored <> "" then m.trialStartedSec = CInt(Val(stored))
+            else if m.section.Exists("trialStarted")
+                ' Migration: the old value was a monotonic roTimespan reading
+                ' from the launch that started the trial, which is meaningless
+                ' after a reboot.  Restart the window rather than honouring a
+                ' timestamp that can never expire.
+                m.trialStartedSec = 0
             end if
+            if m.trialStartedSec < 0 then m.trialStartedSec = 0
             if m.section.Exists("hasFullVersion") then m.hasFullVersion = (Val(SafeStr(m.section.Read("hasFullVersion"))) = 1)
             if m.section.Exists("proExpiresAt")
                 stored = SafeStr(m.section.Read("proExpiresAt"))
@@ -73,6 +80,7 @@ function CreateLicenseManager() as object
             m.section.Write("proExpiresAt", StrI(m.proExpiresAtSec).Trim())
             m.section.Write("proProductCode", m.proProductCode)
             m.section.Write("purchaseCount", StrI(m.purchaseCount).Trim())
+            m.section.Write("trialStartedSec", StrI(m.trialStartedSec).Trim())
             m.section.Flush()
         end function,
 
@@ -84,26 +92,36 @@ function CreateLicenseManager() as object
         ' ── trial ────────────────────────────────────────────────────────
 
         StartTrial: function() as void
-            m.trialStartedMs = m.NowMs()
+            m.trialStartedSec = m.WallSeconds()
             if m.section <> invalid
-                m.section.Write("trialStarted", StrI(m.trialStartedMs).Trim())
+                m.section.Write("trialStartedSec", StrI(m.trialStartedSec).Trim())
                 m.section.Flush()
             end if
             LogInfo("3-day Spotlight Pro trial started")
         end function,
 
         IsTrialActive: function() as boolean
-            if m.trialStartedMs = 0 then return false
-            elapsed = m.NowMs() - m.trialStartedMs
-            return elapsed < m.trialDurationMs
+            ' A trial started before the Roku clock was valid (epoch 0, or a
+            ' device that has never synced) would expire instantly; treat a
+            ' wall clock below 2016 as "not started" rather than "expired".
+            if m.trialStartedSec <= 0 then return false
+            if m.WallSeconds() < 1451606400 then return true
+            elapsed = m.WallSeconds() - m.trialStartedSec
+            return elapsed < m.trialDurationSec and elapsed >= 0
         end function,
 
         GetTrialDaysRemaining: function() as integer
             if not m.IsTrialActive() then return 0
-            remaining = m.trialDurationMs - (m.NowMs() - m.trialStartedMs)
-            days = CInt(remaining / m.oneDayMs)
+            remaining = m.trialDurationSec - (m.WallSeconds() - m.trialStartedSec)
+            days = CInt(remaining / m.TrialSecondsPerDay)
             if days < 0 then days = 0
             return days
+        end function,
+
+        ' Epoch seconds at which the trial lapses (0 when no trial is running).
+        TrialEndsAtSec: function() as integer
+            if m.trialStartedSec <= 0 then return 0
+            return m.trialStartedSec + m.trialDurationSec
         end function,
 
         ' ── entitlements ─────────────────────────────────────────────────
@@ -146,7 +164,7 @@ function CreateLicenseManager() as object
             if m.IsTrialActive()
                 return "Trial active - " + StrI(m.GetTrialDaysRemaining()).Trim() + " days remaining"
             end if
-            if m.trialStartedMs > 0 then return "Trial expired - Pro features are locked"
+            if m.trialStartedSec > 0 then return "Trial expired - Pro features are locked"
             return "Free mode - start the 3-day Pro trial from Settings"
         end function,
 
@@ -176,7 +194,10 @@ function CreateLicenseManager() as object
                     end if
                 end if
                 if expiry > m.proExpiresAtSec then m.proExpiresAtSec = expiry
-                m.hasFullVersion = false
+                ' hasFullVersion is deliberately left alone here: it records a
+                ' LIFETIME purchase, and a subscription must never clear it.
+                ' The previous code set it to false unconditionally, so buying a
+                ' monthly plan after owning Pro Lifetime demoted the customer.
             end if
 
             m.Persist()
@@ -190,9 +211,14 @@ function CreateLicenseManager() as object
             if purchases = invalid then return
             if type(purchases) <> "roList" and type(purchases) <> "roArray" then return
 
+            ' Recomputed from scratch, not merged into the previous state.
+            ' Seeding these from the current values meant a subscription that
+            ' Roku has already lapsed kept granting Pro access forever (Roku Pay
+            ' requirement RP4.3).  `applied = 0` below still protects a local
+            ' purchase when GetPurchases() cannot be reached.
             lifetime = false
-            bestExpiry = m.proExpiresAtSec
-            bestCode = m.proProductCode
+            bestExpiry = 0
+            bestCode = ""
             applied = 0
 
             for each entry in purchases
@@ -217,23 +243,31 @@ function CreateLicenseManager() as object
 
             if applied = 0 then return
 
-            changed = (lifetime <> m.hasFullVersion) or (bestExpiry <> m.proExpiresAtSec) or (bestCode <> m.proProductCode)
+            ' A lifetime purchase can only ever be granted by this sync; a
+            ' subscription window is authoritative in both directions.
+            newFull = lifetime
+            changed = (newFull <> m.hasFullVersion) or (bestExpiry <> m.proExpiresAtSec) or (bestCode <> m.proProductCode)
             if not changed then return
 
-            m.hasFullVersion = lifetime or m.hasFullVersion
+            m.hasFullVersion = newFull
             m.proExpiresAtSec = bestExpiry
-            if bestCode <> "" then m.proProductCode = bestCode
+            m.proProductCode = bestCode
             m.Persist()
             LogInfo("Roku Pay entitlements synced (" + StrI(applied).Trim() + " products)")
         end function,
 
         ' ISO-8601 -> Unix epoch seconds.  Returns 0 when the value is missing
         ' or unparseable, which callers treat as "use the product's own term".
+        '
+        ' The roDateTime method is FromISO8601String().  FromISOString() does not
+        ' exist - calling it raises a runtime error in the middle of purchase
+        ' handling, which killed the channel the moment Roku Pay reported a
+        ' subscription with an expirationDate.
         ParseIsoSeconds: function(iso as string) as integer
             if iso = invalid or Len(iso) < 10 then return 0
             dt = CreateObject("roDateTime")
             if dt = invalid then return 0
-            ok = dt.FromISOString(iso)
+            ok = dt.FromISO8601String(iso)
             if not ok then return 0
             return dt.AsSeconds()
         end function,
@@ -244,13 +278,14 @@ function CreateLicenseManager() as object
 
         ResetForTesting: function() as void
             if not IsDevBuild() then return
-            m.trialStartedMs = 0
+            m.trialStartedSec = 0
             m.hasFullVersion = false
             m.proExpiresAtSec = 0
             m.proProductCode = ""
             m.purchaseCount = 0
             if m.section <> invalid
                 m.section.Delete("trialStarted")
+                m.section.Delete("trialStartedSec")
                 m.section.Delete("hasFullVersion")
                 m.section.Delete("proExpiresAt")
                 m.section.Delete("proProductCode")
@@ -262,9 +297,9 @@ function CreateLicenseManager() as object
 
         ExpireTrialForTesting: function() as void
             if not IsDevBuild() then return
-            m.trialStartedMs = m.NowMs() - (m.trialDurationMs + 1000)
+            m.trialStartedSec = m.WallSeconds() - (m.trialDurationSec + 60)
             if m.section <> invalid
-                m.section.Write("trialStarted", StrI(m.trialStartedMs).Trim())
+                m.section.Write("trialStartedSec", StrI(m.trialStartedSec).Trim())
                 m.section.Flush()
             end if
             LogInfo("Trial forced to expire (developer build only)")
