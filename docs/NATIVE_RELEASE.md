@@ -1,6 +1,6 @@
 # Native 1.2 release readiness
 
-**Reviewed 8 October 2026 · app 1.2.0 · bridge 0.3.0.**
+**Reviewed 25 October 2026 · app 1.2.0 · bridge 0.3.0.**
 The requested native hardening is implemented. **Do not submit this as a certified store release yet:**
 dependency advisories, native compiler/device evidence and publishing approvals remain open.
 The existing Still Glass UI and tracked wallpaper archive/bundled catalog were preserved.
@@ -16,41 +16,40 @@ The existing Still Glass UI and tracked wallpaper archive/bundled catalog were p
 | Lifecycle | Root scheduler restores registration without opening Settings and reconciles on foreground. Unknown/unregister errors are not mistaken for stopped scheduling. Outer provider-independent recovery and an 8-second splash watchdog. |
 | Reset/preferences | Refuse destructive work while actions/export/rotation are active; exclude new cache work during reset; drain writes, reject stale writes and reload providers/navigation. Preserve saved Photos. Theme writes outside state updaters with visible persistence errors. |
 | Shipping policy | Default HTTPS-only, explicit development `.dev` identities, no production overlay/broad gallery-read permissions or unused iOS background modes, no app/wallpaper backup opt-in, release minification/resource shrinking, disabled production network inspector, offline privacy notice and reason declarations. |
-| Automation | Resolved native-mod validation; EAS profile guard and high-severity audit block for production; fast JS/export/config CI plus Android release / unsigned iOS simulator compiler jobs. |
+| Automation | Resolved native-mod validation and EAS profile guard; repository CI runs JavaScript/config checks, but this checkout has no hosted Android/iOS compiler jobs. Production release remains blocked by the audit gate. |
 
 ## Evidence obtained in this workspace
 
 | Gate | Result |
 |---|---|
 | TypeScript / ESLint | Passed, zero lint warnings |
-| Jest | **207 passed in 22 suites**, coverage floor passed |
-| Coverage | **82.97% statements · 71.29% branches · 78.39% functions · 87.34% lines** |
+| Jest | **209 passed in 22 suites** in the current JS-only verification gate |
+| Coverage | **81.81% statements · 70.49% branches · 75.82% functions · 86.15% lines** (`npm run test:ci`; configured thresholds pass) |
 | Expo SDK compatibility | Passed offline installed-SDK check; Reanimated pinned to expected **4.5.1** (worklets 0.10.1) |
 | Resolved production config | Passed actual Android/iOS mod inspection: HTTPS, add-only descriptions, blocked permissions, no iOS background modes, backup/inspector/minify policy and version agreement |
 | Native generation | Android/iOS `expo prebuild --clean --no-install` passed, no package mutation or prebuild warnings |
 | Autolinking | Android local Kotlin class and Apple local pod/Swift class discovered |
 | JS/Hermes exports | All platforms passed: approximately web **6.6 MB**, Android **7.4 MB**, iOS **7.2 MB**; sizes are exported JS, not final app download sizes |
-| Repository regressions | **261 Python / 29 Node tests** passed again; browser's **16 tests** were verified in the preceding web pass (no web runtime edits in this native pass) |
-| Data integrity | No changes to tracked DB/catalog/images/mobile bundled catalog/design screenshot assets |
+| Repository regressions | **345 Python / 31 Node tests** and **209 mobile Jest tests** pass in the current checkout. The 16-test browser suite is configured as a separate CI job and requires a real Chromium install. |
+| Data integrity | Public DB/catalog/images unchanged; the mobile offline bundle was synced to the matching 7,475-row public catalog. No original image bytes were changed. |
 
 These are not substitutes for Gradle/Xcode compilation or an installed native app. Jest mocks the
 OS/bridge. Prebuild writes project/config files; Hermes compiles JavaScript only. No JDK/Gradle,
-Android SDK or Xcode toolchain is available in this sandbox. The new hosted compiler workflow has
-not been executed, and no signed APK/AAB/IPA, device wallpaper change or store submission was made.
+Android SDK or Xcode toolchain was exercised in this environment; this repository currently has no
+hosted Kotlin/Swift compiler workflow. No signed APK/AAB/IPA, device wallpaper change or store
+submission was made.
 
 ## Remaining blockers — release owner must close
 
-- [ ] **Dependencies:** current npm audit reports **55 affected nodes: 48 high, 7 moderate**, in
-  three inherited advisory families: [braces](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm),
-  [node-forge](https://github.com/advisories/GHSA-86w9-cpqp-85rv),
-  [sprintf-js](https://github.com/advisories/GHSA-hp3w-g68c-fv3c). This is not 55 distinct flaws.
-  Checked published family versions (3.0.3 / 1.4.0 / 1.1.3) remain affected. Classify real
-  build/test/runtime exposure and resolve upstream or obtain documented owner acceptance.
-  `verify:release`/production EAS hook currently fail and have no automatic waiver. Any approved
-  policy change must itself be reviewed; do not force an incompatible Expo/Jest downgrade.
-- [ ] **Compiler gates:** execute both native CI jobs on the SDK-compatible toolchains. Verify
-  final merged Android manifests, minified release behavior, resolved Pods/frameworks and app plus
-  dependency privacy-manifest aggregation. Local generated source policy alone is not final evidence.
+- [ ] **Dependencies:** as of 2026-10-25, mobile `npm audit` reports **5 high, 0 critical**
+  findings in Expo CLI / `@expo/code-signing-certificates` / `node-forge` / `zod` dependency paths.
+  The suggested automatic fix downgrades Expo to 44.0.6, incompatible with SDK 57; do not apply
+  it. Resolve via compatible upstream updates or an explicit owner risk decision, then rerun
+  audit and native tests. `verify:release` / the production EAS hook remain intentionally blocked.
+- [ ] **Compiler gates:** compile on SDK-compatible Android/iOS toolchains (no hosted native
+  compiler jobs exist in this repository). Verify final merged Android manifests, minified release
+  behavior, resolved Pods/frameworks and app plus dependency privacy-manifest aggregation. Local
+  generated source policy alone is not final evidence.
 - [ ] **Device matrix:** complete the tests below, not just an emulator/web view.
 - [ ] **Publishing:** link a real EAS project; confirm package/bundle ownership, monotonic store
   build numbers, provisioning/signing, App Store privacy/Play Data Safety and an approved hosted

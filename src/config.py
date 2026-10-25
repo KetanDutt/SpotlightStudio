@@ -147,15 +147,17 @@ class Settings:
         self.LOG_BACKUPS: int = _env_int("LOG_BACKUPS", 3, 0, 50)
 
         # ── Download concurrency ──────────────────────────────────────────
-        # Simultaneous image downloads (asyncio tasks).
+        # Upper bound on download worker slots; actual image pipelines are separately memory-bounded.
         self.CONCURRENT_DOWNLOADS: int = _env_int("CONCURRENT_DOWNLOADS", 32, 1, 256)
+        # Cap complete fetch→decode→store pipelines so queued 40 MiB payloads cannot exhaust RAM.
+        self.MAX_INFLIGHT_IMAGES: int = _env_int("MAX_INFLIGHT_IMAGES", 8, 1, 256)
         # Simultaneous gallery pages scraped (asyncio tasks).
         self.CONCURRENT_SCRAPERS: int = _env_int("CONCURRENT_SCRAPERS", 4, 1, 32)
         # Total open TCP connections across the whole session.
         self.MAX_CONNECTIONS: int = _env_int("MAX_CONNECTIONS", 128, 4, 1024)
         # Max connections to a single hostname.
         self.MAX_CONNECTIONS_PER_HOST: int = _env_int("MAX_CONNECTIONS_PER_HOST", 48, 1, 512)
-        # Threads for CPU-bound Pillow work.  0 → Python default (min(32, cpu_count + 4)).
+        # Threads for CPU-bound Pillow work. 0 → a conservative cap of min(4, cpu_count).
         self.CPU_THREADS: int = _env_int("CPU_THREADS", 0, 0, 128)
 
         # ── Reliability ───────────────────────────────────────────────────

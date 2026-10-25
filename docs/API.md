@@ -104,6 +104,9 @@ Stop the run. Returns immediately with `status: "stopping"`; poll `/api/status` 
 
 ### `GET /api/wallpapers`
 Paginated, filtered, **deterministically ordered** list (a unique tie-breaker keeps pages stable).
+Each wallpaper row includes `colors` (a JSON-encoded array of representative hex colors) and
+`aspect_ratio` (`portrait`, `standard`, `landscape` or `ultrawide); older records may have an
+empty palette until the preview-maintenance endpoint is run on hydrated originals.
 
 | Query | Type / values | Default | |
 |---|---|---|---|
@@ -134,7 +137,9 @@ curl "http://127.0.0.1:8765/api/wallpapers?search=lavaredo&per_page=1"
     "tags": "clouds,italy,landmark,landscape,mountain range,mountains,nature,outdoors,…",
     "date_spotted": "2026-10-02",
     "downloaded_at": "2026-10-02T09:25:49.767033+00:00",
-    "quality": "FHD (1080p)"
+    "quality": "FHD (1080p)",
+    "colors": "[\"#405060\",\"#d0c0b0\"]",
+    "aspect_ratio": "landscape"
   }]
 }
 ```
@@ -208,7 +213,7 @@ Regenerates `data/wallpapers.json` (it is only rewritten when the content change
 ```
 
 ### `GET /api/export/json` · `GET /api/export/csv`
-Streamed downloads of **every column** of every row (constant memory). The CSV starts with a UTF-8 BOM (Excel friendly) and neutralises spreadsheet formulas: cells starting with `=`, `+`, `-` or `@` are prefixed with `'`.
+Streamed downloads of **every column** of every row (constant memory). The CSV starts with a UTF-8 BOM (Excel friendly), includes the palette/aspect metadata columns, and neutralises spreadsheet formulas: cells starting with `=`, `+`, `-` or `@` are prefixed with `'`.
 
 ---
 
@@ -219,7 +224,7 @@ Streamed downloads of **every column** of every row (constant memory). The CSV s
 | `GET /api/library/check` | read-only consistency report: missing images/thumbnails, orphan files, Git-LFS pointers, invalid hashes, duplicate pairs (`ok: true` when clean) |
 | `POST /api/maintenance/dedupe` | sweep the library for near-duplicates → `{"removed": n}` |
 | `POST /api/maintenance/thumbnails` | rebuild missing thumbnails → `{"created": n}` |
-| `POST /api/maintenance/previews` | generate missing WebP previews and enrich palette/aspect metadata → `{"created": n}` |
+| `POST /api/maintenance/previews` | repair missing/LFS WebP previews and enrich palette/aspect metadata → `{"previews_created": n, "metadata_updated": n}` |
 
 The two `POST` endpoints return `409` while the crawler is running.
 

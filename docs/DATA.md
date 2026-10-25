@@ -2,7 +2,7 @@
 
 ## Static catalog — `data/wallpapers.json`
 
-A JSON **array** of objects, newest first (`downloaded_at DESC, id DESC`), written compactly and **deterministically** (an unchanged library produces a byte-identical file, so git diffs only show real changes). It is regenerated automatically after a crawl (and every 30 s while crawling), on `Pause`/`Stop`, at start-up, by `python main.py --sync-catalog` and by `POST /api/catalog/sync`.
+A JSON **array** of objects, newest first (`downloaded_at DESC, id DESC`), written compactly and **deterministically** (an unchanged library produces a byte-identical file, so git diffs only show real changes). It is regenerated automatically after a crawl (and every 30 s while crawling), on `Pause`/`Stop`, at start-up, by `python main.py --sync-catalog` and by `POST /api/catalog/sync`. After updating it, copy it into the Expo offline bundle with `cd mobile && npm run sync:catalog`; Python CI enforces byte-for-byte parity.
 
 | Field | Type | Notes |
 |---|---|---|
@@ -17,6 +17,8 @@ A JSON **array** of objects, newest first (`downloaded_at DESC, id DESC`), writt
 | `date_spotted` | string | `YYYY-MM-DD`, or `""` when unknown |
 | `downloaded_at` | string | ISO-8601 timestamp **with** UTC offset |
 | `quality` | string | `4K / UHD`, `2K / QHD`, `FHD (1080p)`, `HD (720p)`, `SD` (derived from the width) |
+| `colors` | string | Compact JSON array of up to five dominant `#rrggbb` colors; `[]` until image metadata is generated |
+| `aspect_ratio` | string | `portrait`, `standard`, `landscape`, `ultrawide`; derived from dimensions during metadata repair |
 
 The perceptual hash (`phash`) is deliberately **not** published: it made up 12 % of the file, does not compress, and the UI never needs it. `GET /api/export/*` and `GET /api/wallpapers` still include it.
 
@@ -36,7 +38,7 @@ SQLite, WAL journal while the app runs (the committed file is in `DELETE` mode; 
 
 | Table | Columns (besides `id`) | Purpose |
 |---|---|---|
-| `wallpapers` | `phash` (unique), `filename`, `title`, `source`, `source_url`, `page_url`, `width`, `height`, `file_size`, `tags`, `date_spotted`, `downloaded_at`, `quality` | the library |
+| `wallpapers` | `phash` (unique), `filename`, `title`, `source`, `source_url`, `page_url`, `width`, `height`, `file_size`, `tags`, `date_spotted`, `downloaded_at`, `quality`, `colors`, `aspect_ratio` | the library |
 | `scrape_queue` | `url` (unique), `source`, `priority`, `added_at`, `retries`, `claimed_at` | gallery pages still to scrape (page 1 of a full crawl has priority 100) |
 | `download_queue` | `image_url` (unique), `page_url`, `title`, `source`, `tags`, `date_spotted`, `added_at`, `retries`, `claimed_at` | images still to download |
 | `suppressed_urls` | `url` (pk), `reason`, `created_at` | lower-quality duplicates that must never be fetched again |
@@ -53,6 +55,7 @@ Indexes: `source`, `source_url`, `page_url`, `downloaded_at`, `date_spotted`, `q
 | 1 | original schema (≤ 2.1.0) |
 | 2 | `claimed_at` on both queues, `retries` on `scrape_queue`, new indexes, redundant indexes dropped; **data normalisation**: `date_spotted` → ISO, legacy quality labels (`FHD`, `UHD`) → canonical, naive timestamps → UTC-aware, tags → lower-case/unique. Unparseable dates are left untouched — nothing is ever discarded. |
 | 3 | Eight `LOWER(SUBSTR(phash, …))` expression indexes for dHash candidate lookups; no wallpaper rows/files are rewritten. A newer unsupported schema is refused. |
+| 4 | Add `colors` (compact JSON array) and `aspect_ratio` presentation metadata; original rows and files are preserved. Existing rows are backfilled from hydrated originals with `POST /api/maintenance/previews`. |
 
 Add a migration by writing `_migrate_to_vN(conn)`, registering it in `_MIGRATIONS` and bumping `SCHEMA_VERSION` in `src/database.py`; `tests/test_database.py::test_migration_from_v1_is_lossless_and_normalises` shows how to test it against a fixture of the old schema.
 
@@ -69,7 +72,8 @@ Add a migration by writing `_migrate_to_vN(conn)`, registering it in `_MIGRATION
 
 * New names are content-addressed: `sha256(image_bytes)` (64 hex characters; legacy URL-derived paths are not renamed) + extension taken from the *decoded* format (`jpg`, `png`, `webp`). A file therefore never changes, which is what allows `Cache-Control: immutable`.
 * Thumbnails: centre-cropped to 16:9, 480×270, progressive JPEG quality 82.
-* Files are written to `*.part` and renamed, so a crash never leaves a truncated image.
+* WebP previews: full-frame, at most 1440×1440, quality 78; stored below `images/previews/` with the corresponding relative name. Browsing uses previews when present; explicit downloads/set-wallpaper actions use originals.
+* Files are written atomically, so a crash never leaves a truncated image. Preview repair treats Git LFS pointer files as missing and backfills in bounded CPU batches.
 * The repository tracks `images/**` with **Git LFS** (`.gitattributes`). Without LFS the files are 130-byte pointers; `python main.py --check` and the UI both report that.
 
 ## Portable browser/mobile favorites backup (version 1)

@@ -9,7 +9,7 @@ from src.config import ROOT, Settings
 
 
 def fresh(monkeypatch, **env) -> Settings:
-    for key in ("HOST", "PORT", "CONCURRENT_DOWNLOADS", "VERIFY_SSL", "ALLOWED_HOSTS", "DB_PATH", "IMAGES_DIR",
+    for key in ("HOST", "PORT", "CONCURRENT_DOWNLOADS", "MAX_INFLIGHT_IMAGES", "VERIFY_SSL", "ALLOWED_HOSTS", "DB_PATH", "IMAGES_DIR",
                 "CATALOG_PATH", "LOG_PATH", "PEAPIX_BASE_URL", "MAX_RETRIES", "REQUEST_DELAY_SECONDS",
                 "CORS_ORIGINS", "AUTO_DETECT_PAGES", "LOG_LEVEL"):
         monkeypatch.delenv(key, raising=False)
@@ -22,7 +22,8 @@ def test_defaults(monkeypatch):
     cfg = fresh(monkeypatch)
     assert cfg.VERSION == __version__
     assert (cfg.HOST, cfg.PORT) == ("127.0.0.1", 8765)
-    assert cfg.CONCURRENT_DOWNLOADS == 32 and cfg.VERIFY_SSL is True and cfg.AUTO_DETECT_PAGES is True
+    assert (cfg.CONCURRENT_DOWNLOADS, cfg.MAX_INFLIGHT_IMAGES) == (32, 8)
+    assert cfg.VERIFY_SSL is True and cfg.AUTO_DETECT_PAGES is True
     assert cfg.DB_PATH == ROOT / "data" / "wallpapers.db"
     assert cfg.IMAGES_DIR == ROOT / "images" and cfg.THUMBS_DIR == ROOT / "images" / "thumbs"
     assert cfg.CATALOG_PATH == ROOT / "data" / "wallpapers.json" and cfg.DATA_DIR == ROOT / "data"
@@ -32,16 +33,18 @@ def test_defaults(monkeypatch):
 
 def test_invalid_values_fall_back_instead_of_crashing(monkeypatch, caplog):
     with caplog.at_level("WARNING"):
-        cfg = fresh(monkeypatch, PORT="abc", CONCURRENT_DOWNLOADS="lots", VERIFY_SSL="maybe",
+        cfg = fresh(monkeypatch, PORT="abc", CONCURRENT_DOWNLOADS="lots", MAX_INFLIGHT_IMAGES="lots", VERIFY_SSL="maybe",
                     REQUEST_DELAY_SECONDS="fast")
-    assert cfg.PORT == 8765 and cfg.CONCURRENT_DOWNLOADS == 32 and cfg.VERIFY_SSL is True
+    assert (cfg.PORT, cfg.CONCURRENT_DOWNLOADS, cfg.MAX_INFLIGHT_IMAGES) == (8765, 32, 8)
+    assert cfg.VERIFY_SSL is True
     assert cfg.REQUEST_DELAY == 0.1
     assert "Invalid" in caplog.text
 
 
 def test_values_are_clamped(monkeypatch):
-    cfg = fresh(monkeypatch, CONCURRENT_DOWNLOADS="100000", PORT="99999", MAX_RETRIES="-5")
-    assert cfg.CONCURRENT_DOWNLOADS == 256 and cfg.PORT == 65535 and cfg.MAX_RETRIES == 0
+    cfg = fresh(monkeypatch, CONCURRENT_DOWNLOADS="100000", MAX_INFLIGHT_IMAGES="-5", PORT="99999", MAX_RETRIES="-5")
+    assert cfg.CONCURRENT_DOWNLOADS == 256 and cfg.MAX_INFLIGHT_IMAGES == 1
+    assert cfg.PORT == 65535 and cfg.MAX_RETRIES == 0
 
 
 @pytest.mark.parametrize(("raw", "expected"), [("true", True), ("1", True), ("YES", True), ("off", False),

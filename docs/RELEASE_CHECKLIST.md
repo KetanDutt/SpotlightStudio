@@ -72,7 +72,7 @@
 3. Restore DB **and** images from the same backup; don't mix old DB and new WAL/SHM files.
    Never delete live WAL files. Version 2.5 migrates v2 → v3 (indexes); future schemas
    are refused. Roll back with a matching stopped-process backup, not a forced version edit.
-4. Regenerate `data/wallpapers.json` (`python main.py --sync-catalog`) and run `--check`.
+4. Regenerate `data/wallpapers.json` (`python main.py --sync-catalog`), run `python main.py --check`, then sync the offline mobile bundle (`cd mobile && npm run sync:catalog`).
 5. Restart and verify deep links, file bytes, counters, controls and HTTP cache validators.
 6. If hard-kill orphans are reported, inspect them manually before deletion. The health
    command deliberately does not delete data.
@@ -94,5 +94,5 @@ and blocks on high-severity npm findings. The EAS production post-install hook h
 block and no automatic waiver; preview builds exist for device QA, not store submission.
 
 Record the date, exact environment, JSON findings and owner decisions with the release.
-Current mobile findings/override rationale: [REVIEW.md](REVIEW.md#dependency-audit--2026-10-08).
+Current mobile findings/override rationale: [REVIEW.md](REVIEW.md#mobile-dependency-advisories).
 Do not accept a zero count from a different dependency environment as evidence for this build.

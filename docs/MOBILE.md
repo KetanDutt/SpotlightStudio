@@ -158,16 +158,16 @@ npx eas-cli build --platform ios --profile production
 ```
 
 The EAS post-install hook verifies profile policy and blocks production on high-severity audit
-failure; it contains **no automatic waiver**. There are currently 55 affected npm dependency nodes
-in three inherited advisory families, with no patched family versions published in the checked
-registry. Do not force an incompatible Expo/Jest downgrade to silence the audit.
+failure; it contains **no automatic waiver**. As of 2026-10-25, mobile `npm audit` reports five
+high-severity findings (see [REVIEW.md](REVIEW.md)); npm's suggested Expo 44 downgrade is
+incompatible with this SDK 57 project. Do not force that downgrade to silence the audit.
 
-Local `APP_VARIANT=production npm run build:android` is a compilation smoke path with generated
-signing configuration, **not a signed Play release**. `.github/workflows/mobile-native.yml` adds
-Android release and unsigned iOS simulator compilation; hosted jobs have not been executed in this
-sandbox. JavaScript exports/prebuild/autolinking do not compile Kotlin/Swift. Real-device tests,
-final merged manifests/privacy aggregation, signing, permissions, rights and store declarations
-remain mandatory. Follow [NATIVE_RELEASE.md](NATIVE_RELEASE.md) and [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md).
+The current repository CI runs JS/config checks but has no Android/iOS compiler jobs. Local
+`APP_VARIANT=production npm run build:android` is a compilation smoke path with generated
+signing configuration, **not a signed Play release**. JavaScript exports/prebuild/autolinking do
+not compile Kotlin/Swift. Real-device tests, final merged manifests/privacy aggregation, signing,
+permissions, rights and store declarations remain mandatory. Follow
+[NATIVE_RELEASE.md](NATIVE_RELEASE.md) and [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md).
 
 ## Project layout and privacy
 
@@ -177,7 +177,7 @@ remain mandatory. Follow [NATIVE_RELEASE.md](NATIVE_RELEASE.md) and [RELEASE_CHE
 - `src/providers/`: offline catalog and defensive local preferences; `src/hooks/`: action/scheduler lifecycles.
 - `modules/wallpaper/`: local Kotlin/Swift bridge; `plugins/`: resolved native-policy finalizer.
 - `scripts/verify-*.cjs`: release/EAS gates; `tests/`: deterministic Jest/native doubles.
-- `node scripts/sync-catalog.mjs`: deliberate offline-catalog refresh; not part of verification.
+- `npm run sync:catalog`: deliberately refresh the offline catalog from `data/wallpapers.json`; Python CI fails if the committed bundle is stale.
 - Brand icons/splash follow `python scripts/make_icons.py`; retain the existing design/assets.
 
 No account/advertising/analytics or automatic crash uploads are implemented. GitHub/configured hosts

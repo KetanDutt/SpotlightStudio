@@ -9,6 +9,7 @@ test('gallery recovers corrupt preferences and supports favorites backup/restore
   });
   await page.goto('/');
   await expect(page.locator('.card')).toHaveCount(24);
+  await expect(page.locator('#color-chips')).toContainText('Palette data is not available in this catalog yet.');
   await expect(page.locator('#crawler')).toBeHidden();
   await expect(page.locator('.read-only-notice')).toBeVisible();
   await page.locator('.card-fav').first().click();

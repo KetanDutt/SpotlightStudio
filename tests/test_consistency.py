@@ -123,6 +123,14 @@ def _config_env_names() -> set[str]:
     return names
 
 
+def test_mobile_offline_catalog_matches_the_public_catalog():
+    public_catalog = ROOT / "data" / "wallpapers.json"
+    bundled_catalog = ROOT / "mobile" / "src" / "data" / "catalog.json"
+    assert bundled_catalog.read_bytes() == public_catalog.read_bytes(), (
+        "refresh the offline mobile catalog with `cd mobile && npm run sync:catalog`"
+    )
+
+
 def test_every_setting_is_documented():
     names = _config_env_names()
     assert len(names) >= 25

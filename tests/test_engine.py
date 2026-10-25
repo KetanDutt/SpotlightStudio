@@ -395,6 +395,30 @@ def test_a_dispatcher_crash_fails_the_run_instead_of_hanging(site, eng, monkeypa
         assert conn.execute("SELECT COUNT(*) FROM scrape_queue WHERE claimed_at IS NOT NULL").fetchone()[0] == 0
 
 
+def test_image_pipeline_limit_bounds_active_download_memory(site, eng, monkeypatch):
+    import threading
+
+    monkeypatch.setattr(settings, "CONCURRENT_DOWNLOADS", 32)
+    monkeypatch.setattr(settings, "MAX_INFLIGHT_IMAGES", 2)
+    active = maximum = 0
+    lock = threading.Lock()
+
+    async def slow_download(_session, _item, **_kwargs):
+        nonlocal active, maximum
+        with lock:
+            active += 1
+            maximum = max(maximum, active)
+        await asyncio.sleep(0.05)
+        with lock:
+            active -= 1
+        return "rejected"
+
+    monkeypatch.setattr(engine_mod, "process_download", slow_download)
+    eng.start("peapix", "quick")
+    finish(eng)
+    assert maximum == 2  # worker slots remain high, but only two full image pipelines run
+
+
 def test_pausing_a_saturated_dispatcher_does_not_dispatch_one_more_item(site, eng, monkeypatch):
     import threading
 

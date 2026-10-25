@@ -520,12 +520,12 @@
       const key = String(color).toLowerCase(); colorCount.set(key, (colorCount.get(key) || 0) + 1);
     }
     const colors = [...colorCount].sort((a, b) => b[1] - a[1]).slice(0, 8);
-    $("color-chips").replaceChildren(...colors.map(([color]) => {
+    $("color-chips").replaceChildren(...(colors.length ? colors.map(([color]) => {
       const button = chip("", null, s.color === color, { filter: "color", value: color });
       button.classList.add("color-chip"); button.style.setProperty("--swatch", color);
       button.setAttribute("aria-label", `Filter color ${color}`); button.title = color;
       return button;
-    }));
+    }) : [h("span", { class: "hint", text: "Palette data is not available in this catalog yet." })]));
 
     const collectionSelect = $("collection-filter");
     const selectedCollection = s.collection;

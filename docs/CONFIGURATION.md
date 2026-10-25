@@ -37,7 +37,8 @@ Settings are read from environment variables and from a `.env` file in the proje
 
 | Variable | Default | Range | Description |
 |---|---|---|---|
-| `CONCURRENT_DOWNLOADS` | `32` | 1–256 | Simultaneous image downloads. 64 is reasonable on 100+ Mbit/s lines. |
+| `CONCURRENT_DOWNLOADS` | `32` | 1–256 | Maximum available image worker slots. |
+| `MAX_INFLIGHT_IMAGES` | `8` | 1–256 | Maximum active fetch→decode→store pipelines; effective download concurrency is the lower of this and `CONCURRENT_DOWNLOADS`, bounding large image buffers. Lower it on memory-constrained machines. |
 | `CONCURRENT_SCRAPERS` | `4` | 1–32 | Gallery pages scraped in parallel. |
 | `MAX_CONNECTIONS` | `128` | 4–1024 | Open TCP connections in total. |
 | `MAX_CONNECTIONS_PER_HOST` | `48` | 1–512 | Open connections per host. |

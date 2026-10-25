@@ -66,8 +66,8 @@ The separate Expo client consumes catalog JSON and image URLs; it never shares t
   claim recovery or engine startup. It rejects competing instances (CLI exit 3). Keep one
   worker on a local filesystem, never unlink the sidecar, and give separate libraries
   separate DB/catalog/image folders. Storage settings are process-wide.
-* One **engine thread** owns an asyncio loop. Two *dispatchers* (not N polling workers) claim work and spawn tasks, bounded by semaphores (`CONCURRENT_SCRAPERS`, `CONCURRENT_DOWNLOADS`), so an idle engine polls the DB only a few times per second.
-* CPU work (decode, hash, resize, JPEG encode, file writes) runs in a shared `ThreadPoolExecutor`. Doing decode+hash+thumbnail as **one** job means at most *pool-size* decoded 4K bitmaps (~25 MB each) exist at the same time, instead of one per in-flight download.
+* One **engine thread** owns an asyncio loop. Two *dispatchers* (not N polling workers) claim work and spawn tasks, bounded by semaphores (`CONCURRENT_SCRAPERS`, `CONCURRENT_DOWNLOADS`, and `MAX_INFLIGHT_IMAGES`), so idle polling stays low and buffered image payloads cannot grow to the raw download-worker count.
+* CPU work (decode, hash, resize, JPEG/WebP encode, file writes) runs in a shared `ThreadPoolExecutor`. The in-flight pipeline cap bounds retained compressed payloads; the pool-size cap bounds simultaneous decoded images. Metadata-only preview repair skips needless WebP encoding and uses small batches.
 * **SQLite**: one connection per thread (WAL, `busy_timeout` 30 s), autocommit mode with explicit transactions. Nested `get_db()` blocks join the outermost transaction; write paths use `BEGIN IMMEDIATE` to avoid lock-upgrade failures. Streaming exports use their own connection because a generator may resume on another worker thread.
 * `start/pause/stop/snapshot` are thread-safe; they signal the loop via `call_soon_threadsafe`.
 

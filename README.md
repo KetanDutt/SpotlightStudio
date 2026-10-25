@@ -3,7 +3,7 @@
 **An archive and gallery of Windows Spotlight wallpapers** — crawl them from Peapix and Windows10Spotlight, de-duplicate them by perceptual hash, keep the best resolution of every picture and browse the whole collection in the restrained **Liquid Glass** interface, either as a static GitHub Pages showcase or as a desktop app with crawler controls.
 
 [![CI](https://github.com/KetanDutt/SpotlightStudio/actions/workflows/ci.yml/badge.svg)](https://github.com/KetanDutt/SpotlightStudio/actions/workflows/ci.yml)
-![Version](https://img.shields.io/badge/version-2.8.0-739b8b)
+![Version](https://img.shields.io/badge/version-2.8.1-739b8b)
 ![Python](https://img.shields.io/badge/python-3.10%2B-3776ab)
 ![License](https://img.shields.io/badge/license-all%20rights%20reserved-lightgrey)
 
@@ -22,13 +22,19 @@
 | | |
 |---|---|
 | 🖼️ **~7,500 wallpapers** | 4K (Peapix) and Full HD (Windows10Spotlight), perceptually de-duplicated; the best resolution of each picture wins |
-| ⚡ **Fast** | 32 parallel downloads, one CPU job per image, atomic file writes; a 4 MB catalog (0.8 MB gzipped) that is parsed once and searched in memory in ~5 ms |
+| ⚡ **Fast & bounded** | Async crawling with a configurable in-flight image cap, one CPU job per image, atomic writes; a compact catalog parsed once and searched in memory |
 | 🛡️ **Reliable** | queue claims recover on restart; safe graceful stop and single-process ownership; automatic retries; a circuit breaker for network outages; page counts are auto-discovered |
 | 🔎 **Great browsing** | UTC daily spotlight, instant multi-term search, tag & resolution filters, portable favorites, shareable deep links (`#w=1234`), random wallpaper, keyboard shortcuts, light/dark theme |
 | 📱 **Installable PWA** | works on phones, offline-capable, accessible (keyboard, screen-reader, reduced-motion) |
 | 🤖 **Android / iOS app** | Expo client: offline search, favourites, history, **set the wallpaper on Android** (home/lock/both) with automatic rotation; on iOS it saves to Photos and guides you through the Shortcuts step ([details](docs/MOBILE.md#setting-a-wallpaper)) |
 | 📺 **Roku TV channel** | pure 2D canvas (`roScreen`) gallery with Ambient Mode, a deterministic Daily Spotlight, six Liquid Glass palettes, search and Roku Pay Pro — plus a separate standalone screensaver app ([details](docs/roku/README.md)) |
 | 🔒 **Locked down** | strict CSP, Host/Origin checks on the local API, no XSS from scraped titles, CSV-injection-safe exports, DB and logs are never served |
+
+## What’s new in 2.8.1 — project hardening
+
+- **Broader release-blocking CI:** Python/JavaScript tests, static-site and catalog checks, Roku static audit, hermetic Chromium browser flows, and mobile TypeScript/ESLint/Jest checks. GitHub Pages deploys only after all platform jobs pass; failed browser runs retain Playwright traces for seven days.
+- **Safer media repair:** Existing Git LFS preview pointers are now treated as missing and regenerated after hydration. Preview backfills use bounded CPU batches, avoid encoding throwaway previews for metadata-only repairs, and report preview and metadata counts separately.
+- **Reject mislabeled originals:** Image formats without a matching preserved file extension are rejected instead of being stored as JPEG-named GIF/TIFF bytes.
 
 ## What’s new in 2.7 — Roku production readiness
 
@@ -133,7 +139,7 @@ Use **More options → Back up favorites** to download `spotlight-favorites.json
 **Restore favorites** merges a version-1 backup without deleting existing favorites.
 Backups contain relative image filenames, not image bytes. Limits: 2 MB import / 20,000
 favorites. Unknown keys are retained for later catalogs. Storage is local to each browser;
-backup before clearing site data. Mobile exports have a separate format.
+backup before clearing site data. The same version-1 favorites JSON format works in the web and mobile apps.
 
 ## Configuration
 
@@ -141,7 +147,8 @@ Copy `.env.example` to `.env` (the Windows launchers do it for you). Everything 
 
 | Setting | Default | |
 |---|---|---|
-| `CONCURRENT_DOWNLOADS` | `32` | parallel image downloads |
+| `CONCURRENT_DOWNLOADS` | `32` | worker slots; active image pipelines are also capped by `MAX_INFLIGHT_IMAGES` |
+| `MAX_INFLIGHT_IMAGES` | `8` | cap fetch→decode→store memory usage |
 | `QUICK_UPDATE_PAGES` | `3` | pages per site scanned by a quick update |
 | `HOST` / `PORT` | `127.0.0.1` / `8765` | bind address (non-loopback ⇒ read [the security notes](docs/SECURITY.md)) |
 | `READ_ONLY` | `false` | disable all HTTP mutations for a public gallery |
@@ -152,36 +159,36 @@ Full reference: [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 ## Project layout
 
 ```
-main.py                 entry point (desktop window · server · crawl · check)
+main.py                 entry point (desktop · server · crawl · tray · rotation · maintenance)
 src/
   config.py             validated settings from .env
-  database.py           SQLite layer: schema v2 migrations, claim-based queues, search, catalog
+  database.py           SQLite schema v4, claim queues, search, catalog export
   scrapers.py           Peapix + Windows10Spotlight parsers, page discovery, title enrichment
-  downloader.py         fetch → analyse (CPU pool) → de-duplicate → store
-  engine.py             crawl orchestrator (quick / full / repair, pause, stop, circuit breaker)
-  maintenance.py        dedupe sweep, thumbnail repair, health check, start-up tasks
-  hashing.py            256-bit dHash (bit-identical to imagehash, no NumPy/SciPy)
-  storage.py            file layout, atomic writes, Git-LFS pointer detection
-  api.py · security.py  FastAPI app, Host/Origin checks, CSP and security headers
-  wallpaper.py          set the desktop wallpaper (Windows, macOS, GNOME/KDE)
-index.html              the single-page UI shell
-static/                 css/app.css · js/core.js (pure logic) · js/app.js (UI) · icons/
-sw.js · manifest.webmanifest   PWA
-data/                   wallpapers.db (SQLite) · wallpapers.json (static catalog)
-images/                 wallpapers + thumbnails (Git LFS)
-tests/                  pytest + Node core/service-worker tests + hermetic Playwright smoke tests
-mobile/                 Expo (React Native) app for Android & iOS – browse, search, set wallpaper
-docs/                   architecture, API, configuration, deployment, mobile, security, …
-scripts/                setup_env.bat · make_icons.py · build_site.py (safe static publication)
-start_*.bat · Makefile  Windows launchers · developer shortcuts
-.github/                CI workflow, Dependabot, issue / PR templates
+  downloader.py         capped fetch → image analysis → perceptual dedupe → atomic storage
+  engine.py             crawl orchestration, bounded workers, retry/breaker/pause/stop
+  maintenance.py        dedupe, thumbnail/preview repair, health check, startup recovery
+  storage.py            safe file paths, atomic writes, Git-LFS pointer detection
+  tray.py               optional system-tray desktop controls
+  api.py · security.py  FastAPI, Host/Origin checks, CSP and security headers
+  wallpaper.py          Windows monitor/fit controls plus platform wallpaper setters
+index.html              single-page gallery and desktop UI
+static/                 CSS, pure catalog logic, browser UI, API docs and icons
+sw.js · manifest.webmanifest   PWA shell and offline catalog behavior
+data/                   SQLite database and public static catalog
+images/                 original images, previews and thumbnails (Git LFS)
+tests/                  Python, Node, hermetic browser, and Roku audit regressions
+mobile/                 Expo client for Android and iOS
+docs/                   architecture, API, operations, security, platform and release guides
+scripts/                catalog/site/Roku tooling and asset generators
+start_*.bat · Makefile  Windows launchers and developer shortcuts
+.github/workflows/      blocking CI jobs and GitHub Pages deployment
 ```
 
 ## How it works (in short)
 
 1. **Scrape** gallery pages (parsers are structure-agnostic: they rely on content patterns, not CSS class names).
 2. **Queue** every unknown image URL in SQLite.
-3. **Download** with up to 32 workers; decode, hash and thumbnail each image in *one* thread-pool job.
+3. **Download** with bounded async workers; each fetch→decode→preview→store pipeline consumes a limited memory slot.
 4. **De-duplicate** with a 256-bit difference hash: near-duplicates (Hamming distance ≤ 4) keep the higher resolution and merge titles/tags.
 5. **Export** a compact `data/wallpapers.json` that the static site loads.
 
@@ -191,12 +198,12 @@ Details and diagrams: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ```bash
 pip install -r requirements-dev.txt
-pytest                                  # 200+ tests, fully offline (a fake Peapix/Win10 site)
-node --test tests/js/*.test.mjs         # unit tests of the front-end logic
-ruff check .
+ruff check . && pytest                 # 345 Python tests; crawler tests use fake source sites
+node --test tests/js/*.test.mjs         # 31 DOM-free JavaScript tests
+npm ci && npm test                      # root tooling; run browser suite with `make browser`
 
-cd mobile                               # the Expo app (supported Node 22.13+ LTS)
-npm ci && npm run verify                # typecheck + lint + Jest (110+ tests)
+cd mobile                               # Expo client (supported Node 22.13+ LTS)
+npm ci && npm run verify                # typecheck + lint + 209 Jest tests
 npm run android                         # dev build on a device/emulator
 ```
 

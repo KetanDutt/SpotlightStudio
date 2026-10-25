@@ -4,13 +4,13 @@ downloader.py – fetch one wallpaper, analyse it, de-duplicate it, store it.
 Pipeline (``process_download``)
 -------------------------------
 1. **Fetch**   aiohttp, streamed with a hard size cap (``MAX_IMAGE_BYTES``).
-2. **Analyse** *one* job in a thread pool: decode → 256-bit dHash → 480×270
-   thumbnail.  Doing everything in a single job keeps at most ``pool-size``
-   decoded 4K bitmaps (~25 MB each) alive instead of one per in-flight download.
+2. **Analyse** *one* job in a thread pool: decode → 256-bit dHash → thumbnail,
+   1440px WebP preview and dominant palette. A separately bounded in-flight cap
+   limits compressed download buffers; the pool limits decoded 4K bitmaps.
 3. **Dedupe**  near-duplicate look-up (Hamming distance ≤ 4) against the library.
    * the existing copy is at least as good  → skip (but merge its metadata);
    * the new copy is strictly better        → replace, keeping the union of tags.
-4. **Store**   image + thumbnail written atomically, then the DB row.
+4. **Store**   original + thumbnail + WebP preview written atomically, then the DB row.
 
 Steps 3 and 4 are **one critical section** (a per-event-loop ``asyncio.Lock``): downloads run
 concurrently and the copies of one picture from two sources are often in flight together, so
@@ -71,6 +71,7 @@ log = logging.getLogger("downloader")
 
 THUMB_SIZE = (480, 270)  # 16 : 9 @ 480 px
 THUMB_QUALITY = 82
+SUPPORTED_IMAGE_FORMATS = frozenset({"JPEG", "PNG", "WEBP"})
 MIN_IMAGE_BYTES = 5_000  # anything smaller is an error page / tracking pixel
 MAX_PIXELS = 120_000_000  # decompression-bomb guard (~11k × 11k)
 _LANCZOS = getattr(getattr(Image, "Resampling", Image), "LANCZOS")  # noqa: B009
@@ -202,7 +203,9 @@ def analyze_image(data: bytes) -> ImageInfo:
     Raises ``ValueError`` / ``OSError`` for corrupt or absurdly large images.
     """
     with Image.open(io.BytesIO(data)) as im:
-        fmt = im.format or "JPEG"
+        fmt = (im.format or "JPEG").upper()
+        if fmt not in SUPPORTED_IMAGE_FORMATS:
+            raise ValueError(f"unsupported image format {fmt}")
         width, height = im.size
         if width < 1 or height < 1 or width * height > MAX_PIXELS:
             raise ValueError(f"unsupported image dimensions {width}x{height}")
@@ -232,6 +235,16 @@ def regenerate_preview(source_path: Path) -> tuple[bytes, str]:
         rgb = im.convert("RGB")
     try:
         return render_preview(rgb), dominant_colors(rgb)
+    finally:
+        rgb.close()
+
+
+def regenerate_colors(source_path: Path) -> str:
+    """Extract dominant colors without encoding a throwaway WebP preview."""
+    with Image.open(source_path) as im:
+        rgb = im.convert("RGB")
+    try:
+        return dominant_colors(rgb)
     finally:
         rgb.close()
 

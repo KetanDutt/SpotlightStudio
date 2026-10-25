@@ -12,7 +12,7 @@ Engine       ``/api/health``  ``/api/status``  ``/api/control/{start,pause,stop}
 Library      ``/api/wallpapers``  ``/api/wallpapers/random``  ``/api/wallpapers/{id}``
              ``/api/tags``  ``/api/catalog``  ``/api/export/{json,csv}``  ``/api/catalog/sync``
 Desktop      ``/api/wallpapers/{id}/set-wallpaper``  ``/api/wallpapers/{id}/image``
-Maintenance  ``/api/library/check``  ``/api/maintenance/{dedupe,thumbnails}``
+Maintenance  ``/api/library/check``  ``/api/maintenance/{dedupe,previews,thumbnails}``
 """
 from __future__ import annotations
 
@@ -89,6 +89,7 @@ QualityFilter = Literal["", "4k", "2k", "fhd", "hd", "sd"]
 CSV_COLUMNS = (
     "id", "phash", "filename", "title", "source", "source_url", "page_url",
     "width", "height", "file_size", "tags", "date_spotted", "downloaded_at", "quality",
+    "colors", "aspect_ratio",
 )
 
 
@@ -112,6 +113,8 @@ class WallpaperModel(BaseModel):
     date_spotted: str
     downloaded_at: str
     quality: str
+    colors: str
+    aspect_ratio: str
 
 
 class WallpaperPage(BaseModel):
@@ -174,6 +177,11 @@ class CatalogSyncResponse(BaseModel):
     success: bool
     wallpapers_synced: int
     path: str
+
+
+class PreviewMaintenanceResponse(BaseModel):
+    previews_created: int
+    metadata_updated: int
 
 
 class TagCount(BaseModel):
@@ -355,6 +363,7 @@ def create_app(cfg: Settings = settings, eng: DownloadEngine = engine) -> FastAP
             "config": {
                 "read_only": cfg.READ_ONLY,
                 "concurrent_downloads": cfg.CONCURRENT_DOWNLOADS,
+                "max_inflight_images": cfg.MAX_INFLIGHT_IMAGES,
                 "concurrent_scrapers": cfg.CONCURRENT_SCRAPERS,
                 "max_connections": cfg.MAX_CONNECTIONS,
                 "max_connections_per_host": cfg.MAX_CONNECTIONS_PER_HOST,
@@ -636,11 +645,11 @@ def create_app(cfg: Settings = settings, eng: DownloadEngine = engine) -> FastAP
                 export_catalog_json()
         return {"removed": removed}
 
-    @app.post("/api/maintenance/previews", tags=["Maintenance"],
-              summary="Generate missing WebP previews and palette metadata")
-    def maintenance_previews() -> dict:
+    @app.post("/api/maintenance/previews", response_model=PreviewMaintenanceResponse,
+              tags=["Maintenance"], summary="Generate missing WebP previews and palette metadata")
+    def maintenance_previews() -> dict[str, int]:
         with eng.maintenance_guard():
-            return {"created": maintenance.create_missing_previews()}
+            return maintenance.create_missing_previews()
 
     @app.post("/api/maintenance/thumbnails", tags=["Maintenance"],
               summary="Rebuild missing thumbnails")

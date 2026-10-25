@@ -104,7 +104,9 @@ export function FilterSheet({ visible, onClose, catalog, state, onChange, onRese
                 onPress={() => onChange({ color: state.color === color ? '' : color })} />
             ))}
           </View>
-        </Section> : null}
+        </Section> : <Section title="Dominant color">
+          <AppText variant="caption" tone="muted">Palette data is not available in this catalog yet.</AppText>
+        </Section>}
 
         <Section title="Sort by">
           <View style={styles.chips}>

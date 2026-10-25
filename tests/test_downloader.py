@@ -149,6 +149,13 @@ def test_analyze_png_and_garbage():
         analyze_image(b"definitely not an image" * 100)
 
 
+def test_analyze_rejects_unsupported_formats_instead_of_mislabeling_original_bytes():
+    buf = io.BytesIO()
+    Image.new("RGB", (800, 450), "red").save(buf, "GIF")
+    with pytest.raises(ValueError, match="unsupported image format GIF"):
+        analyze_image(buf.getvalue())
+
+
 # ── Full pipeline ──────────────────────────────────────────────────────────
 
 
