@@ -83,6 +83,12 @@ sub RenderAmbient(screen as object, state as object)
         ' A quiet spinner only while the very first frame is still loading.
         DrawLoadingSpinner(screen, 960, 540, 20, state.spinnerAngle, &hFFFFFF44, &hFFFFFF18)
     end if
+
+    if state.ambientSleepDimmed
+        ' Burn-in protection: hold a very dim, static frame after the selected timer.
+        screen.DrawRect(0, 0, 1920, 1080, WithAlpha(0, 220))
+        screen.DrawText("Sleep timer complete", 60, 1020, &hFFFFFF88, state.fonts.caption)
+    end if
 end sub
 
 ' Black-overlay alpha for the current transition phase (0 when idle).

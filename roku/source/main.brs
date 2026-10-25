@@ -245,6 +245,9 @@ function BuildState(screen as object, port as object, deviceInfo as object, appI
         ' same state key, so changing the rotation interval silently
         ' rescheduled the slideshow.
         ambientIntervalSec: settingsMgr.GetInt("ambientInterval", 30),
+        ambientSleepMinutes: settingsMgr.GetInt("ambientSleepMinutes", 0),
+        ambientSleepAtMs: 0,
+        ambientSleepDimmed: false,
 
         ' ── automatic wallpaper rotation (Theme Studio) ─────────────────
         ' `autoSwitchAtMs` is the wall-clock time of the next rotation and
@@ -510,6 +513,15 @@ end sub
 sub UpdateAmbient(state as object, nowMs as integer)
     if state.activeView <> "ambient" then return
     if state.browseList.Count() = 0 then return
+    if not state.ambientSleepDimmed and state.ambientSleepAtMs > 0 and nowMs >= state.ambientSleepAtMs
+        state.ambientSleepDimmed = true
+        state.slideshowActive = false
+        state.ambientTransition = 0
+        state.dirty = true
+        ShowToast(state, "Ambient sleep timer complete - screen dimmed")
+        return
+    end if
+    if state.ambientSleepDimmed then return
 
     if state.ambientTransition = 1
         if (nowMs - state.ambientTransStart) >= AmbientFadeDuration()
@@ -1551,6 +1563,15 @@ sub CycleSetting(state as object, title as string, direction as integer)
         return
     end if
 
+    if title = "Ambient Sleep Timer"
+        nextSleep = CycleIntOption(AmbientSleepOptions(), sm.GetInt("ambientSleepMinutes", 0), direction)
+        sm.Save("ambientSleepMinutes", StrI(nextSleep).Trim())
+        sleepLabel = "Off"
+        if nextSleep > 0 then sleepLabel = StrI(nextSleep).Trim() + " minutes"
+        ShowToast(state, "Ambient sleep timer: " + sleepLabel)
+        return
+    end if
+
     if title = "Safe Area Guides"
         sm.Save("safeAreaGuides", CycleOption(SafeAreaOptions(), sm.GetStr("safeAreaGuides", "off"), direction))
         ShowToast(state, "Safe area guides: " + LabelFor(SafeAreaLabels(), sm.GetStr("safeAreaGuides", "off")))
@@ -1923,6 +1944,12 @@ sub EnterAmbient(state as object, list as object, idx as integer, returnView as 
     state.slideshowActive = true
     state.switchAtMs = state.animClock.TotalMilliseconds()
     state.ambientIntervalSec = state.settingsMgr.GetInt("ambientInterval", 30)
+    state.ambientSleepMinutes = state.settingsMgr.GetInt("ambientSleepMinutes", 0)
+    state.ambientSleepAtMs = 0
+    state.ambientSleepDimmed = false
+    if state.ambientSleepMinutes > 0
+        state.ambientSleepAtMs = state.animClock.TotalMilliseconds() + (state.ambientSleepMinutes * 60000)
+    end if
     RememberWallpaper(state)
     PrefetchNeighbours(state)
     ShowToast(state, "Ambient Mode - press Play to pause, any other key to exit")

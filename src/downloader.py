@@ -4,13 +4,13 @@ downloader.py – fetch one wallpaper, analyse it, de-duplicate it, store it.
 Pipeline (``process_download``)
 -------------------------------
 1. **Fetch**   aiohttp, streamed with a hard size cap (``MAX_IMAGE_BYTES``).
-2. **Analyse** *one* job in a thread pool: decode → 256-bit dHash → 480×270
-   thumbnail.  Doing everything in a single job keeps at most ``pool-size``
-   decoded 4K bitmaps (~25 MB each) alive instead of one per in-flight download.
+2. **Analyse** *one* job in a thread pool: decode → 256-bit dHash → thumbnail,
+   1440px WebP preview and dominant palette. A separately bounded in-flight cap
+   limits compressed download buffers; the pool limits decoded 4K bitmaps.
 3. **Dedupe**  near-duplicate look-up (Hamming distance ≤ 4) against the library.
    * the existing copy is at least as good  → skip (but merge its metadata);
    * the new copy is strictly better        → replace, keeping the union of tags.
-4. **Store**   image + thumbnail written atomically, then the DB row.
+4. **Store**   original + thumbnail + WebP preview written atomically, then the DB row.
 
 Steps 3 and 4 are **one critical section** (a per-event-loop ``asyncio.Lock``): downloads run
 concurrently and the copies of one picture from two sources are often in flight together, so
@@ -33,6 +33,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import io
+import json
 import logging
 import os
 import re
@@ -70,6 +71,7 @@ log = logging.getLogger("downloader")
 
 THUMB_SIZE = (480, 270)  # 16 : 9 @ 480 px
 THUMB_QUALITY = 82
+SUPPORTED_IMAGE_FORMATS = frozenset({"JPEG", "PNG", "WEBP"})
 MIN_IMAGE_BYTES = 5_000  # anything smaller is an error page / tracking pixel
 MAX_PIXELS = 120_000_000  # decompression-bomb guard (~11k × 11k)
 _LANCZOS = getattr(getattr(Image, "Resampling", Image), "LANCZOS")  # noqa: B009
@@ -131,6 +133,9 @@ class ImageInfo:
     phash: str
     thumb: bytes
     fmt: str
+    preview: bytes
+    colors: str
+    aspect_ratio: str
 
 
 def render_thumbnail(img: Image.Image) -> bytes:
@@ -152,6 +157,45 @@ def render_thumbnail(img: Image.Image) -> bytes:
     return buffer.getvalue()
 
 
+def render_preview(img: Image.Image) -> bytes:
+    """Encode a full-frame, maximum-1440px WebP preview for routine web viewing."""
+    preview = img.copy()
+    preview.thumbnail((1440, 1440), _LANCZOS, reducing_gap=3.0)
+    buffer = io.BytesIO()
+    preview.save(buffer, "WEBP", quality=78, method=5)
+    preview.close()
+    return buffer.getvalue()
+
+
+def dominant_colors(img: Image.Image, limit: int = 5) -> str:
+    """Return a compact JSON array of the image's most frequent representative colors."""
+    small = img.copy()
+    small.thumbnail((160, 160), _LANCZOS)
+    quantized = small.quantize(colors=limit, method=Image.Quantize.FASTOCTREE)
+    palette = quantized.getpalette() or []
+    counts = sorted(quantized.getcolors(160 * 160) or [], reverse=True)
+    colors = []
+    for _count, index in counts[:limit]:
+        offset = index * 3
+        if offset + 2 < len(palette):
+            colors.append("#{:02x}{:02x}{:02x}".format(*palette[offset:offset + 3]))
+    quantized.close()
+    small.close()
+    return json.dumps(colors, separators=(",", ":"))
+
+
+def aspect_category(width: int, height: int) -> str:
+    """Classify common desktop/mobile proportions with tolerant ratio bands."""
+    ratio = width / max(1, height)
+    if ratio < 0.80:
+        return "portrait"
+    if ratio >= 21 / 9:
+        return "ultrawide"
+    if ratio >= 1.70:
+        return "landscape"
+    return "standard"
+
+
 def analyze_image(data: bytes) -> ImageInfo:
     """
     Decode ``data`` once and derive everything the pipeline needs.
@@ -159,13 +203,18 @@ def analyze_image(data: bytes) -> ImageInfo:
     Raises ``ValueError`` / ``OSError`` for corrupt or absurdly large images.
     """
     with Image.open(io.BytesIO(data)) as im:
-        fmt = im.format or "JPEG"
+        fmt = (im.format or "JPEG").upper()
+        if fmt not in SUPPORTED_IMAGE_FORMATS:
+            raise ValueError(f"unsupported image format {fmt}")
         width, height = im.size
         if width < 1 or height < 1 or width * height > MAX_PIXELS:
             raise ValueError(f"unsupported image dimensions {width}x{height}")
         rgb = im.convert("RGB")
     try:
-        return ImageInfo(width, height, dhash_hex(rgb), render_thumbnail(rgb), fmt)
+        return ImageInfo(
+            width, height, dhash_hex(rgb), render_thumbnail(rgb), fmt,
+            render_preview(rgb), dominant_colors(rgb), aspect_category(width, height),
+        )
     finally:
         rgb.close()
 
@@ -176,6 +225,26 @@ def regenerate_thumbnail(source_path: Path, dest_path: Path) -> None:
         rgb = im.convert("RGB")
     try:
         atomic_write_bytes(dest_path, render_thumbnail(rgb))
+    finally:
+        rgb.close()
+
+
+def regenerate_preview(source_path: Path) -> tuple[bytes, str]:
+    """Build the preview and color palette for an existing stored original."""
+    with Image.open(source_path) as im:
+        rgb = im.convert("RGB")
+    try:
+        return render_preview(rgb), dominant_colors(rgb)
+    finally:
+        rgb.close()
+
+
+def regenerate_colors(source_path: Path) -> str:
+    """Extract dominant colors without encoding a throwaway WebP preview."""
+    with Image.open(source_path) as im:
+        rgb = im.convert("RGB")
+    try:
+        return dominant_colors(rgb)
     finally:
         rgb.close()
 
@@ -370,6 +439,8 @@ async def process_download(
             "date_spotted": date_spotted,
             "downloaded_at": utcnow_iso(),
             "quality": quality_label(info.width),
+            "colors": info.colors,
+            "aspect_ratio": info.aspect_ratio,
         }
 
         def commit_download() -> None:
@@ -378,6 +449,7 @@ async def process_download(
             try:
                 storage.write_image(filename, fetched.data)
                 storage.write_thumbnail(filename, info.thumb)
+                storage.write_preview(filename, info.preview)
                 with get_db(write=True) as conn:
                     if replaced:
                         delete_wallpaper(existing["phash"])

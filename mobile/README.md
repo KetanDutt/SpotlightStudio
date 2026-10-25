@@ -1,9 +1,10 @@
 # Spotlight Studio — native app 1.2.0
 
 Expo SDK 57 / React Native client for the same Spotlight wallpaper catalog and Still Glass design.
-Browse/search offline, discover a UTC daily image, keep local favorites/history, back up favorites,
-export the catalog, save/share validated images and apply/rotate wallpapers on Android. iOS saves
-explicitly to Photos for manual application; it cannot directly set wallpaper.
+Browse/search offline, discover a UTC daily image, filter by aspect/palette, keep local favorites/history,
+back up favorites in the shared web/mobile JSON schema, export the catalog, and apply/rotate wallpapers
+on Android. Detail views use compact WebP previews when available; save/share actions fetch the original.
+iOS saves explicitly to Photos for manual application; it cannot directly set wallpaper.
 
 **Implementation and JS/config checks are complete; store release is still gated.**
 See [native release evidence](../docs/NATIVE_RELEASE.md) and the [full mobile guide](../docs/MOBILE.md).
@@ -17,7 +18,7 @@ npm ci
 APP_VARIANT=development npm start
 APP_VARIANT=development npm run android
 APP_VARIANT=development npm run ios       # macOS
-npm run verify                          # types, lint, 207 tests
+npm run verify                          # types, lint, 209 tests
 npm run test:ci                          # coverage
 ```
 
@@ -61,14 +62,16 @@ phone-reachable host, never an assumed localhost backend. See the guide for trus
 | `npm run prebuild` | Generate ignored Android/iOS projects; does not compile them |
 | `npm run build:android[:debug]` | Local Gradle smoke build; not a certified/signed store artifact |
 | `npx expo export --platform all` | Web and native JS/Hermes bundling |
-| `node scripts/sync-catalog.mjs` | Deliberately refresh bundled catalog; verification never mutates the archive |
+| `npm run sync:catalog` | Copy the current public catalog into the offline app bundle; checked for parity in Python CI |
 
 EAS profiles: development, HTTPS-only preview, iOS simulator, production. The post-install hook
 validates policy and **does not waive production audit failures**. Link your own EAS project and
 manage signing through store tooling; no credentials are committed.
 
-Current evidence: **207 Jest tests**, types/lint/Expo compatibility clean, web/Android/iOS exports,
-both-platform prebuild and native autolinking pass. Native compiler/device/signing gates are pending;
-**55 affected npm packages (48 high / 7 moderate)** inherit three advisory families. The newly added
-native CI jobs have not been run here. Rights, real image/LFS serving and approved store/privacy
-metadata also require review. Read [../docs/NATIVE_RELEASE.md](../docs/NATIVE_RELEASE.md) before shipping.
+Current evidence: **209 Jest tests in 22 suites**, TypeScript and ESLint pass. As of
+2026-10-25, npm audit reports **5 high-severity mobile dependency findings**; the automatic
+suggestion downgrades Expo to an incompatible SDK, so native release remains blocked pending a
+safe upstream resolution or documented owner decision. Repository CI runs JS/config checks but
+not Kotlin/Swift compilation. Device, signing, content-rights, real LFS serving and approved
+store/privacy metadata also require review. Read [../docs/NATIVE_RELEASE.md](../docs/NATIVE_RELEASE.md)
+before shipping.

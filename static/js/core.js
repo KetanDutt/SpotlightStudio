@@ -45,6 +45,9 @@
     per: 24,
     view: "grid",
     fav: false,
+    aspect: "",
+    color: "",
+    collection: "",
   });
 
   /* ───────────────────────────── text helpers ───────────────────────────── */
@@ -226,6 +229,10 @@
       item.title = item.placeholder ? generatedTitle(item, tagShare) : String(raw.title).trim();
       item.generated = item.placeholder;
       item.q = qualityClass(raw.width);
+      const ratio = Number(raw.width || 0) / Math.max(1, Number(raw.height || 0));
+      item.aspect = raw.aspect_ratio || (ratio < 0.8 ? "portrait" : ratio >= 21 / 9 ? "ultrawide" : ratio >= 1.7 ? "landscape" : "standard");
+      try { item.colors = Array.isArray(raw.colors) ? raw.colors : JSON.parse(raw.colors || "[]"); }
+      catch (_) { item.colors = []; }
       item.dateTs = parseDateTs(raw.date_spotted);
       item.addedTs = Date.parse(raw.downloaded_at || "") || 0;
       item.search = foldText(
@@ -322,6 +329,8 @@
     if (state.source) list = list.filter((i) => i.source === state.source);
     if (state.quality) list = list.filter((i) => i.q === state.quality);
     if (state.tag) list = list.filter((i) => i.tags.includes(state.tag));
+    if (state.aspect) list = list.filter((i) => i.aspect === state.aspect);
+    if (state.color) list = list.filter((i) => i.colors.some((color) => String(color).toLowerCase() === state.color.toLowerCase()));
     if (state.fav) list = list.filter((i) => favorites && favorites.has(i.key));
     const terms = tokenize(state.q);
     if (terms.length) list = list.filter((i) => terms.every((t) => i.search.includes(t)));
@@ -333,7 +342,7 @@
   /** Key identifying the *filter* part of a state (page/per/view do not change the list). */
   function filterKey(state, favVersion) {
     // `fav` must be part of the key on its own: favVersion is 0 until the first heart is toggled.
-    return JSON.stringify([state.q, state.source, state.quality, state.tag, state.sort, state.fav ? 1 : 0, state.fav ? favVersion : 0]);
+    return JSON.stringify([state.q, state.source, state.quality, state.tag, state.aspect, state.color, state.sort, state.fav ? 1 : 0, state.fav ? favVersion : 0]);
   }
 
   function paginate(list, page, perPage) {
@@ -377,6 +386,8 @@
     if (s.source) params.set("source", s.source);
     if (s.quality) params.set("quality", s.quality);
     if (s.tag) params.set("tag", s.tag);
+    if (["landscape", "ultrawide", "standard", "portrait"].includes(s.aspect)) params.set("aspect", s.aspect);
+    if (/^#[0-9a-f]{6}$/i.test(s.color)) params.set("color", s.color.toLowerCase());
     if (s.sort !== DEFAULT_STATE.sort) params.set("sort", s.sort);
     if (s.page > 1) params.set("page", String(s.page));
     if (s.per !== DEFAULT_STATE.per) params.set("per", String(s.per));
@@ -393,6 +404,8 @@
     if (SOURCES.includes(p.get("source"))) state.source = p.get("source");
     if (QUALITIES.includes(p.get("quality"))) state.quality = p.get("quality");
     state.tag = (p.get("tag") || "").slice(0, 60).toLowerCase();
+    if (["landscape", "ultrawide", "standard", "portrait"].includes(p.get("aspect"))) state.aspect = p.get("aspect");
+    if (/^#[0-9a-f]{6}$/i.test(p.get("color") || "")) state.color = p.get("color").toLowerCase();
     if (Object.prototype.hasOwnProperty.call(SORTS, p.get("sort"))) state.sort = p.get("sort");
     const page = parseInt(p.get("page"), 10);
     if (page >= 1 && page < 100000) state.page = page;
@@ -430,6 +443,15 @@
     if (!validFavoriteKey(filename)) return "";
     const encoded = filename.split("/").map(encodeURIComponent).join("/");
     const path = `images/${thumb ? "thumbs/" : ""}${encoded}`;
+    if (opts.local) return `/${path}`;
+    return `${String(opts.base).replace(/\/+$/, "")}/${path}?raw=true`;
+  }
+
+  function previewUrl(opts, filename) {
+    if (!validFavoriteKey(filename)) return "";
+    const encoded = filename.split("/").map(encodeURIComponent).join("/");
+    const preview = encoded.replace(/\.[^/.]+$/, ".webp");
+    const path = `images/previews/${preview}`;
     if (opts.local) return `/${path}`;
     return `${String(opts.base).replace(/\/+$/, "")}/${path}?raw=true`;
   }
@@ -517,6 +539,6 @@
     fmtInt, fmtBytes, fmtDate, fmtRelative, fmtDuration, parseDateTs,
     qualityClass, buildCatalog, dailyWallpaper, topTags, comparator, filterAndSort, filterKey, paginate, pageNumbers,
     encodeState, decodeState, parseHash,
-    deriveImageBase, imageUrl, safeHttpUrl, csvCell, toCsv, debounce, clamp,
+    deriveImageBase, imageUrl, previewUrl, safeHttpUrl, csvCell, toCsv, debounce, clamp,
   };
 });

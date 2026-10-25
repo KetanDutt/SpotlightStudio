@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import json
 import random
 
 from PIL import Image
@@ -53,6 +54,21 @@ def test_dedupe_ignores_distinct_images_and_small_libraries(env):
         add_wallpaper()
     assert maintenance.deduplicate_downloaded_wallpapers() == 0
     assert db.count_wallpapers() == 31
+
+
+def test_preview_backfill_repairs_lfs_previews_and_metadata_idempotently(env):
+    row = add_wallpaper_with_files(filename="peapix/preview.jpg", width=1280, height=720)
+    target = storage.preview_path(row["filename"])
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("version https://git-lfs.github.com/spec/v1\\noid sha256:00\\nsize 1\\n")
+
+    assert maintenance.create_missing_previews() == {"previews_created": 1, "metadata_updated": 1}
+    assert not storage.is_lfs_pointer(target)
+    with Image.open(target) as preview:
+        assert preview.format == "WEBP" and preview.size == (1280, 720)
+    updated = db.get_wallpaper(row["id"])
+    assert updated["aspect_ratio"] == "landscape" and len(json.loads(updated["colors"])) > 0
+    assert maintenance.create_missing_previews() == {"previews_created": 0, "metadata_updated": 0}
 
 
 def test_missing_thumbnails_are_rebuilt_but_lfs_pointers_skipped(env):

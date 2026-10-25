@@ -5,6 +5,19 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [2.8.1] — 2026-10-25
+
+### Reliability and performance
+- Bound active image pipelines independently from network worker capacity with `MAX_INFLIGHT_IMAGES` (default 8). This limits retained download buffers and decoded images on memory-constrained hosts.
+- Reject unsupported source image formats instead of preserving GIF/TIFF bytes under a misleading `.jpg` filename.
+- Make preview maintenance replace Git LFS pointer files, parallelize work in bounded batches, avoid throwaway WebP encoding for palette-only repair, and report preview and metadata updates separately.
+
+### CI and documentation
+- Add blocking hermetic Chromium and mobile JavaScript checks; gate GitHub Pages deployment on those jobs plus Python/Node/catalog/site/Roku validation.
+- Upload browser failure artifacts for seven days, and refresh architecture, configuration, release-risk and roadmap documentation to distinguish shipped features from open work.
+
+---
+
 ## [2.8.0] — 2026-10-22
 
 ### Roku channel: a static gate for what the compiler cannot see

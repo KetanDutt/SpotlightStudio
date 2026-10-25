@@ -161,6 +161,21 @@ describe('catalog model', () => {
   });
 });
 
+describe('orientation and color filters', () => {
+  it('derives safe metadata and filters across the same catalog model', () => {
+    const base = cloneRows()[0];
+    const rows = [
+      { ...base, id: 801, filename: 'test/landscape.jpg', width: 1920, height: 1080, colors: '["#112233"]' },
+      { ...base, id: 802, filename: 'test/portrait.jpg', width: 1080, height: 1920, colors: ['#abcdef'] },
+      { ...base, id: 803, filename: 'test/standard.jpg', width: 1920, height: 1200, colors: '[]' },
+    ];
+    const data = buildCatalog(rows);
+    expect(filterAndSort(data, { ...DEFAULT_STATE, aspect: 'portrait' }).map(item => item.id)).toEqual([802]);
+    expect(filterAndSort(data, { ...DEFAULT_STATE, color: '#112233' }).map(item => item.id)).toEqual([801]);
+    expect(filterAndSort(data, { ...DEFAULT_STATE, aspect: 'standard' }).map(item => item.id)).toEqual([803]);
+  });
+});
+
 describe('filtering and sorting', () => {
   it('sorts newest first by default and puts unknown dates last', () => {
     const sorted = filterAndSort(catalog, { ...DEFAULT_STATE, sort: 'newest' });
@@ -231,6 +246,13 @@ describe('url state', () => {
       view: 'list',
       fav: '1',
     });
+  });
+
+  it('round-trips aspect and dominant-color filters', () => {
+    const params = encodeState({ ...DEFAULT_STATE, aspect: 'portrait', color: '#aabbcc' });
+    expect(params).toEqual({ aspect: 'portrait', color: '#aabbcc' });
+    expect(decodeState(params)).toMatchObject({ aspect: 'portrait', color: '#aabbcc' });
+    expect(decodeState({ aspect: 'invalid', color: 'red' })).toMatchObject({ aspect: '', color: '' });
   });
 
   it('parses and validates parameters', () => {

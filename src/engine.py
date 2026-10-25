@@ -10,7 +10,7 @@ Architecture
   │        (CONCURRENT_SCRAPERS)                                                │          │
   │                                                                             ▼          │
   │   download dispatcher ◄── claim item ◄──────────── SQLite download_queue ◄──┘          │
-  │        (CONCURRENT_DOWNLOADS)  └─► fetch → analyse (CPU pool) → dedupe → store         │
+  │ (min(download slots, MAX_INFLIGHT_IMAGES)) └► fetch → analyse → dedupe → store       │
   │                                                                                        │
   │   supervisor: progress, phase, periodic catalog export, completion detection          │
   └────────────────────────────────────────────────────────────────────────────────────────┘
@@ -632,7 +632,7 @@ class DownloadEngine:
 
     async def _download_dispatcher(self, session: aiohttp.ClientSession) -> None:
         assert self._pause_event is not None
-        sem = asyncio.Semaphore(settings.CONCURRENT_DOWNLOADS)
+        sem = asyncio.Semaphore(min(settings.CONCURRENT_DOWNLOADS, settings.MAX_INFLIGHT_IMAGES))
         tasks: set[asyncio.Task] = set()
         try:
             while not self._stopping():

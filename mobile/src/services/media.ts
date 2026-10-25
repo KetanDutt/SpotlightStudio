@@ -21,7 +21,7 @@ import type { Album } from 'expo-media-library';
 import * as Sharing from 'expo-sharing';
 import * as Clipboard from 'expo-clipboard';
 
-import { GITHUB_OWNER, GITHUB_REPO, IMAGE_BASE, LIMITS, imageUrl, isFetchableUrl } from '../core/config';
+import { GITHUB_OWNER, GITHUB_REPO, IMAGE_BASE, LIMITS, imageUrl, isFetchableUrl, previewUrl as makePreviewUrl } from '../core/config';
 import type { Wallpaper } from '../core/types';
 import { downloadFilename } from '../core/utils';
 
@@ -75,6 +75,11 @@ export function fullImageUrl(item: Wallpaper, base = IMAGE_BASE): string {
 
 export function thumbnailUrl(item: Wallpaper, base = IMAGE_BASE): string {
   return imageUrl(item.raw.filename, true, base);
+}
+
+/** Compact full-frame preview for the detail viewer. */
+export function previewImageUrl(item: Wallpaper, base = IMAGE_BASE): string {
+  return makePreviewUrl(item.raw.filename, base);
 }
 
 export function shareWebUrl(item: Wallpaper): string {

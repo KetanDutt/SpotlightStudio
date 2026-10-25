@@ -111,6 +111,8 @@ def test_list_wallpapers_paging_search_and_validation(client):
     titles = [w["title"] for w in asc["wallpapers"]]
     assert titles == sorted(titles, key=str.lower)
     assert "phash" in asc["wallpapers"][0]
+    assert asc["wallpapers"][0]["colors"] == "[]"
+    assert "aspect_ratio" in asc["wallpapers"][0]
     for bad in ({"per_page": 201}, {"per_page": 0}, {"page": 0}, {"sort": "id; DROP"}, {"order": "sideways"},
                 {"quality": "ultra"}):
         assert client.get("/api/wallpapers", params=bad).status_code == 422, bad
@@ -185,6 +187,7 @@ def test_csv_export_is_excel_friendly_and_formula_safe(client):
     assert text.startswith("\ufeff")                                       # BOM for Excel
     rows = list(csv.reader(io.StringIO(text.lstrip("\ufeff"))))
     assert rows[0][:3] == ["id", "phash", "filename"]
+    assert rows[0][-2:] == ["colors", "aspect_ratio"]
     titles = {r[3] for r in rows[1:]}
     assert "'=HYPERLINK(\"http://evil\",\"click\")" in titles               # neutralised
     assert 'Galápagos, "quoted"' in titles                                  # unicode + escaping survive

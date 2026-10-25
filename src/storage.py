@@ -62,6 +62,18 @@ def thumb_path(filename: str) -> Path:
     return _safe_join(settings.THUMBS_DIR, filename)
 
 
+def preview_path(filename: str) -> Path:
+    """Absolute path of the optimized WebP preview belonging to ``filename``."""
+    return _safe_join(settings.IMAGES_DIR / "previews", str(Path(filename).with_suffix(".webp")))
+
+
+def write_preview(filename: str, data: bytes) -> Path:
+    """Atomically store a web-sized WebP rendition."""
+    dest = preview_path(filename)
+    atomic_write_bytes(dest, data)
+    return dest
+
+
 def write_image(filename: str, data: bytes) -> Path:
     """Atomically store a full-resolution image."""
     dest = image_path(filename)
@@ -83,6 +95,17 @@ def delete_wallpaper_files(filename: str, *, legacy: bool = True) -> int:
     """
     removed = 0
     flat = Path(filename).name
+    try:
+        preview = preview_path(filename)
+    except ValueError:
+        preview = None
+    if preview is not None:
+        try:
+            if preview.is_file():
+                preview.unlink()
+                removed += 1
+        except OSError as exc:
+            log.warning("Could not delete %s: %s", preview, exc)
     for base in (settings.IMAGES_DIR, settings.THUMBS_DIR):
         for rel in ({filename, flat} if legacy else {filename}):
             try:

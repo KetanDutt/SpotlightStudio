@@ -12,7 +12,7 @@ Engine       ``/api/health``  ``/api/status``  ``/api/control/{start,pause,stop}
 Library      ``/api/wallpapers``  ``/api/wallpapers/random``  ``/api/wallpapers/{id}``
              ``/api/tags``  ``/api/catalog``  ``/api/export/{json,csv}``  ``/api/catalog/sync``
 Desktop      ``/api/wallpapers/{id}/set-wallpaper``  ``/api/wallpapers/{id}/image``
-Maintenance  ``/api/library/check``  ``/api/maintenance/{dedupe,thumbnails}``
+Maintenance  ``/api/library/check``  ``/api/maintenance/{dedupe,previews,thumbnails}``
 """
 from __future__ import annotations
 
@@ -22,6 +22,7 @@ import hashlib
 import io
 import json
 import logging
+import platform
 import threading
 from collections.abc import Iterator
 from contextlib import asynccontextmanager
@@ -72,7 +73,12 @@ from src.security import (
     SecurityHeadersMiddleware,
 )
 from src.utils import csv_safe, is_lfs_pointer
-from src.wallpaper import UnsupportedPlatform, WallpaperError, set_desktop_wallpaper
+from src.wallpaper import (
+    UnsupportedPlatform,
+    WallpaperError,
+    get_windows_monitors,
+    set_desktop_wallpaper,
+)
 
 log = logging.getLogger("api")
 
@@ -83,6 +89,7 @@ QualityFilter = Literal["", "4k", "2k", "fhd", "hd", "sd"]
 CSV_COLUMNS = (
     "id", "phash", "filename", "title", "source", "source_url", "page_url",
     "width", "height", "file_size", "tags", "date_spotted", "downloaded_at", "quality",
+    "colors", "aspect_ratio",
 )
 
 
@@ -106,6 +113,8 @@ class WallpaperModel(BaseModel):
     date_spotted: str
     downloaded_at: str
     quality: str
+    colors: str
+    aspect_ratio: str
 
 
 class WallpaperPage(BaseModel):
@@ -168,6 +177,11 @@ class CatalogSyncResponse(BaseModel):
     success: bool
     wallpapers_synced: int
     path: str
+
+
+class PreviewMaintenanceResponse(BaseModel):
+    previews_created: int
+    metadata_updated: int
 
 
 class TagCount(BaseModel):
@@ -349,6 +363,7 @@ def create_app(cfg: Settings = settings, eng: DownloadEngine = engine) -> FastAP
             "config": {
                 "read_only": cfg.READ_ONLY,
                 "concurrent_downloads": cfg.CONCURRENT_DOWNLOADS,
+                "max_inflight_images": cfg.MAX_INFLIGHT_IMAGES,
                 "concurrent_scrapers": cfg.CONCURRENT_SCRAPERS,
                 "max_connections": cfg.MAX_CONNECTIONS,
                 "max_connections_per_host": cfg.MAX_CONNECTIONS_PER_HOST,
@@ -484,9 +499,23 @@ def create_app(cfg: Settings = settings, eng: DownloadEngine = engine) -> FastAP
 
     # ── Desktop integration ───────────────────────────────────────────────
 
+    @app.get("/api/desktop/monitors", tags=["Desktop"], summary="List Windows wallpaper targets")
+    def desktop_monitors() -> list[dict[str, str]]:
+        """List Windows monitor device paths for use with the set-wallpaper `monitor` query."""
+        if platform.system() != "Windows":
+            return []
+        try:
+            return get_windows_monitors()
+        except WallpaperError as exc:
+            raise HTTPException(status_code=501, detail=str(exc)) from exc
+
     @app.post("/api/wallpapers/{wallpaper_id}/set-wallpaper", response_model=SetWallpaperResponse,
               tags=["Desktop"], summary="Set as desktop wallpaper")
-    def set_wallpaper(wallpaper_id: int = Path(..., ge=1)) -> dict:
+    def set_wallpaper(
+        wallpaper_id: int = Path(..., ge=1),
+        fit: Literal["Fill", "Fit", "Stretch", "Tile", "Center", "Span"] = Query("Fill"),
+        monitor: str | None = Query(None, max_length=512),
+    ) -> dict:
         """Apply the image as the desktop background (Windows; best effort on macOS/Linux)."""
         row = get_wallpaper(wallpaper_id)
         if not row:
@@ -503,7 +532,10 @@ def create_app(cfg: Settings = settings, eng: DownloadEngine = engine) -> FastAP
                 detail="This image is a Git LFS pointer. Run `git lfs install && git lfs pull`.",
             )
         try:
-            set_desktop_wallpaper(path)
+            if fit == "Fill" and monitor is None:
+                set_desktop_wallpaper(path)
+            else:
+                set_desktop_wallpaper(path, fit=fit, monitor_id=monitor)
         except UnsupportedPlatform as exc:
             raise HTTPException(status_code=501, detail=str(exc)) from exc
         except WallpaperError as exc:
@@ -612,6 +644,12 @@ def create_app(cfg: Settings = settings, eng: DownloadEngine = engine) -> FastAP
             if removed:
                 export_catalog_json()
         return {"removed": removed}
+
+    @app.post("/api/maintenance/previews", response_model=PreviewMaintenanceResponse,
+              tags=["Maintenance"], summary="Generate missing WebP previews and palette metadata")
+    def maintenance_previews() -> dict[str, int]:
+        with eng.maintenance_guard():
+            return maintenance.create_missing_previews()
 
     @app.post("/api/maintenance/thumbnails", tags=["Maintenance"],
               summary="Rebuild missing thumbnails")

@@ -51,9 +51,9 @@ export interface Palette {
 }
 
 export const DARK: Palette = {
-  bg: '#151918', surface: '#202624', surfaceAlt: '#2a332d',
-  glass: 'rgba(32,39,35,0.82)', glassStrong: 'rgba(35,43,38,0.95)',
-  glassSecondary: 'rgba(37,46,41,0.45)', glassFloating: 'rgba(42,51,45,0.93)',
+  bg: '#141a17', surface: '#202824', surfaceAlt: '#2a342e',
+  glass: 'rgba(30,40,35,0.68)', glassStrong: 'rgba(30,39,34,0.96)',
+  glassSecondary: 'rgba(38,49,43,0.48)', glassFloating: 'rgba(39,49,43,0.92)',
   fill: 'rgba(222,236,227,0.045)', fillHover: 'rgba(222,236,227,0.085)',
   stroke: 'rgba(232,242,234,0.08)', strokeStrong: 'rgba(232,242,234,0.15)',
   text: '#eef2ef', textMuted: '#bac4be', textFaint: '#98a69d',
@@ -67,9 +67,9 @@ export const DARK: Palette = {
 };
 
 export const LIGHT: Palette = {
-  bg: '#f5f5f1', surface: '#fcfcf9', surfaceAlt: '#eef1ea',
-  glass: 'rgba(253,254,250,0.78)', glassStrong: 'rgba(253,254,250,0.96)',
-  glassSecondary: 'rgba(250,252,247,0.5)', glassFloating: 'rgba(253,254,250,0.94)',
+  bg: '#f3f5f0', surface: '#fcfdf9', surfaceAlt: '#e9ede6',
+  glass: 'rgba(252,253,249,0.78)', glassStrong: 'rgba(250,251,248,0.97)',
+  glassSecondary: 'rgba(250,252,247,0.55)', glassFloating: 'rgba(252,253,250,0.93)',
   fill: 'rgba(34,57,43,0.035)', fillHover: 'rgba(34,57,43,0.065)',
   stroke: 'rgba(35,57,44,0.07)', strokeStrong: 'rgba(35,57,44,0.14)',
   text: '#252f29', textMuted: '#58675d', textFaint: '#5f6d63',

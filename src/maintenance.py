@@ -26,7 +26,7 @@ from src.database import (
     merge_wallpaper_metadata,
     reset_runtime_state,
 )
-from src.downloader import get_cpu_pool, regenerate_thumbnail
+from src.downloader import get_cpu_pool, regenerate_colors, regenerate_preview, regenerate_thumbnail
 from src.hashing import (
     DEFAULT_MAX_DISTANCE,
     chunk_keys,
@@ -205,6 +205,70 @@ def deduplicate_downloaded_wallpapers(max_distance: int = DEFAULT_MAX_DISTANCE) 
 # ══════════════════════════════════════════════════════════════════════════
 # Thumbnails
 # ══════════════════════════════════════════════════════════════════════════
+
+
+def create_missing_previews() -> dict[str, int]:
+    """Repair WebP previews and palette/aspect metadata in bounded parallel batches."""
+    with get_db() as conn:
+        rows = [dict(row) for row in conn.execute(
+            "SELECT id, filename, width, height, colors, aspect_ratio FROM wallpapers"
+        )]
+
+    jobs: list[tuple[dict, Path, bool, bool, bool]] = []
+    for row in rows:
+        try:
+            full = storage.image_path(row["filename"])
+            target = storage.preview_path(row["filename"])
+        except ValueError:
+            continue
+        if not full.is_file() or is_lfs_pointer(full):
+            continue
+        needs_preview = not target.is_file() or is_lfs_pointer(target)
+        needs_colors = not row["colors"] or row["colors"] == "[]"
+        needs_aspect = not row["aspect_ratio"]
+        if needs_preview or needs_colors or needs_aspect:
+            jobs.append((row, full, needs_preview, needs_colors, needs_aspect))
+
+    def repair(job: tuple[dict, Path, bool, bool, bool]) -> tuple | None:
+        row, full, needs_preview, needs_colors, needs_aspect = job
+        try:
+            colors = None
+            if needs_preview:
+                preview, extracted_colors = regenerate_preview(full)
+                storage.write_preview(row["filename"], preview)
+                if needs_colors:
+                    colors = extracted_colors
+            elif needs_colors:
+                colors = regenerate_colors(full)
+            aspect = None
+            if needs_aspect:
+                ratio = row["width"] / max(1, row["height"])
+                aspect = ("portrait" if ratio < 0.8 else "ultrawide" if ratio >= 21 / 9
+                          else "landscape" if ratio >= 1.7 else "standard")
+            return row["id"], colors, aspect, needs_preview, needs_colors or needs_aspect
+        except Exception as exc:  # corrupt/unsupported originals should not abort the backfill
+            log.warning("Could not repair preview/metadata for %s: %s", row["filename"], exc)
+            return None
+
+    preview_count = metadata_count = 0
+    batch_size = 12  # bound completed WebP buffers while keeping CPU workers busy
+    pool = get_cpu_pool()
+    for start in range(0, len(jobs), batch_size):
+        results = [result for result in pool.map(repair, jobs[start:start + batch_size]) if result]
+        preview_count += sum(bool(result[3]) for result in results)
+        updates = [(result[1], result[2], result[0]) for result in results if result[4]]
+        if updates:
+            with get_db(write=True) as conn:
+                conn.executemany(
+                    "UPDATE wallpapers SET colors=COALESCE(?, colors), "
+                    "aspect_ratio=COALESCE(?, aspect_ratio) WHERE id=?",
+                    updates,
+                )
+            metadata_count += len(updates)
+
+    if metadata_count:
+        export_catalog_json()
+    return {"previews_created": preview_count, "metadata_updated": metadata_count}
 
 
 def create_missing_thumbnails() -> int:

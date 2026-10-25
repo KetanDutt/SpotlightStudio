@@ -1,74 +1,44 @@
-# Suggested improvements
+# Roadmap
 
-Ideas still **not** implemented after 2.5.0 — either because they need decisions only the owner can make, access to real accounts/hardware, or simply more room than one release. Effort: **S** ≤ a day · **M** a few days · **L** a week or more.
+This page tracks **work that is not already shipped**. Shipped capabilities are in the
+[README](../README.md), implementation contracts in the relevant guides, and dated changes in
+the [CHANGELOG](../CHANGELOG.md). Priorities are suggestions; owner decisions and real-device
+access are needed for a few items.
 
-Immediate release blockers and prioritized security work are in [REVIEW.md](REVIEW.md#release-gates-and-prioritized-follow-up).
+## Highest-value follow-up
 
-## High value, small effort
-
-| Idea | Why | Effort |
+| Proposal | Why it matters | Effort / dependency |
 |---|---|---|
-| **Run "Repair metadata" once on the real library and commit the result** | 57 % of Windows10Spotlight titles are file hashes and every Peapix row lacks tags; the tooling is ready (`python main.py --crawl --mode repair`) but it needs the real sites. It makes search, tags and titles dramatically better for every visitor of the showcase. | S |
-| **A scheduled GitHub Action that only *verifies* the catalog** (`--check`, JSON validity, link check) | catches broken pushes before they reach Pages without touching LFS quotas | S |
-| **Preview tier for the viewer** — generate a ~1280 px WebP (≈ 100–150 KB) next to each full image and show *that* in the viewer; keep the original for *Download* | the viewer currently loads 1–2 MB per image from LFS; this cuts bandwidth by ~90 % and is the main lever against GitHub LFS quotas | M |
-| **Colour palette per wallpaper** (3 dominant colours at download time, stored in the DB) and a *Browse by colour* filter | highly requested in wallpaper galleries; cheap with Pillow's `quantize` | M |
+| **Resolve the mobile dependency audit findings** | `npm audit` currently reports five high-severity findings in the Expo toolchain. Its automatic remediation proposes downgrading Expo to 44, incompatible with this SDK 57 app. Investigate upstream compatible releases and validate with the native release matrix; do not force a downgrade. | High; upstream/toolchain |
+| **Build and exercise signed Android/iOS releases on real devices** | JS tests and Hermes exports do not prove Kotlin/Swift compilation, OS permission behavior, background scheduling, or lifecycle correctness. | High; toolchains, signing and device QA |
+| **Test desktop wallpaper integration on Windows** | Windows COM monitor enumeration, per-display selection, fit modes, and shell/tray behavior need Windows validation. | Medium; Windows runner/device |
+| **Document and verify source-site terms / LFS budgets** | The catalog contains third-party wallpapers; publishing, retention, request rates, attribution, and Git LFS bandwidth need owner review. | High; owner/legal review |
+| **Add an authenticated remote-control option** | The local API deliberately has no built-in authentication. Remote writable use should require an authenticated TLS reverse proxy or a carefully designed token/session model, plus rate limits. | Medium; threat-model decision |
 
-## Quality of the library
+## Product and scale
 
-| Idea | Why | Effort |
+| Proposal | Why it matters | Effort |
 |---|---|---|
-| **Portrait / phone wallpapers** | every Windows10Spotlight post also has a 576×1024 variant that is ignored today | M |
-| **Duplicate review screen** (side by side, "keep both") | the automatic policy is sound but some pairs are judgement calls; the distance can be derived from the stored hashes | M |
-| **Additional sources** (Bing daily wallpaper, NASA APOD, Unsplash) via a small source-plugin interface | the scraper layer is already pure-parser + thin network wrapper | M–L |
-| **FTS5 full-text index** for the server-side search | only matters if the library grows beyond ~100 k rows; today the UI searches in memory | M |
-| **Verify downloads against the checksums Windows10Spotlight publishes** (`size`/`sha256` on post pages) | detect truncated or altered files | S |
+| **Duplicate-review workflow** | Let users compare close perceptual matches and choose to keep both before destructive cleanup. | Medium |
+| **Virtualized catalog browsing** | Current client-side filtering and pagination are appropriate for the present ~7,500-row catalog. Virtualization or cursor pagination becomes valuable if catalog size grows substantially. | Medium; scale-triggered |
+| **Stable favorite identity and migration** | Current portable favorites are filename-keyed. Rebuilds or alternate-resolution files can leave unmatched keys; a stable content identity needs migration rules. | Medium; compatibility design |
+| **Installer / signed desktop package with update channel** | A PyInstaller/MSIX distribution could simplify installation, but requires signing, platform testing, rollback and update policy. | Large |
+| **Localization** | Translate UI labels and accessibility strings once the initial supported language set is chosen. | Medium |
+| **Additional source plug-ins** | New sources need explicit permission/terms review, resilient parsers, tests and attribution policy before implementation. | Medium–large |
 
-## Desktop experience
+## Operations and maintenance
 
-| Idea | Why | Effort |
-|---|---|---|
-| **Wallpaper rotation** (change daily / hourly from favorites or a tag) with a system-tray icon | the natural next feature after "Set as wallpaper"; reuses `src/wallpaper.py` | M |
-| **Multi-monitor and fit options** (fill/fit/span) for `set-wallpaper` | Windows exposes them via the registry/`IDesktopWallpaper` COM API | M |
-| **Installer / single-file build** (PyInstaller or MSIX) with auto-update | removes the Python prerequisite for non-developers | L |
-| **"Open images folder" / "Reveal in Explorer"** actions | tiny but loved | S |
-| **Docker image** for headless NAS use | needs a decision about LFS and persistence | M |
+- **Dependency reproducibility:** add reviewed Python locks/SBOMs for each supported OS and automate upgrade PRs only after compatibility checks.
+- **Observability:** a privacy-preserving metrics endpoint and structured diagnostics could help long-running self-hosted instances.
+- **Backup/restore workflow:** document or automate consistent stopped-instance backups of the SQLite database, images and LFS-backed content.
+- **Network politeness:** periodically verify rate limits, robots/terms and source availability; keep crawl concurrency conservative and configurable.
 
-## Operations & security
+## Deliberately not planned
 
-| Idea | Why | Effort |
-|---|---|---|
-| **Optional API token** (`API_TOKEN`) for LAN deployments, sent by the UI after a one-time prompt | closes the remaining gap of exposing the server beyond loopback without a reverse proxy | M |
-| **Prometheus-style `/metrics`** | observability for long-running servers | S |
-| **Per-host rate limiting** and `robots.txt` awareness | being a better citizen of the source sites | S–M |
-| **Cursor-based pagination** in the API | stable paging while the crawler inserts rows | S |
-| **Pin and lock dependencies** (`pip-compile`) in addition to ranges | reproducible builds | S |
-| **Windows CI as a blocking job** | the CI workflow already runs the suite on Windows non-blocking; make it blocking once it has been green for a while | S |
+- Accounts, comments, user uploads, analytics or cross-device cloud synchronization. The project has no account backend and avoids tracking.
+- Re-hosting or redistributing images outside the existing repository/LFS model without explicit rights and storage review.
+- Promising precise OS wallpaper scheduling where platform APIs provide only best-effort background execution.
 
-## Front-end
+## Already implemented
 
-| Idea | Why | Effort |
-|---|---|---|
-| **Virtualised grid / infinite scroll** option | pagination is fine at 24–96 per page; infinite scroll only pays off beyond that | M |
-| **Image zoom / pan** in the viewer (pinch, wheel) | wallpapers are detailed | M |
-| **Internationalisation** (the strings are already centralised in a few places) | wider audience | M |
-| **Copy as Markdown** (Web Share API/fallbacks are implemented) | richer portable citations/links | S |
-
-## Deliberately out of scope
-
-* **Re-hosting or redistributing images outside this repository's current model** — the wallpapers are third-party content.
-* **Accounts, comments, uploads** — it is an archive, not a social site.
-* **Tracking / analytics** — the privacy stance (no analytics requests) is a feature.
-
-## Completed in 2.5 / mobile 1.1
-
-OS-backed application library ownership; indexed hash candidates and wide-radius correctness;
-UTC daily discovery; portable mobile favorites backups; source-provenance catalog caching;
-staged/cancellable media; preference write serialization; strict rotation pools/intervals;
-scoped first-visit PWA offline caching. The Still Glass UI remains the visual foundation.
-
-## Remaining priority
-
-Native-device certification/advisory triage, platform dependency locks/SBOM, aggregate mobile
-aggregate SDK cache/codec behavior verification (managed quota/stale-part cleanup and bounded native validation are implemented), stable favorite migration
-and real-library/source-rights verification. Desktop OS rotation and account synchronization
-remain proposals, not shipped features. Distributed ownership is intentionally unsupported.
+The following items were proposed by older roadmap versions and are now shipped: WebP previews with original downloads, palette/aspect metadata and filters, viewer pan/zoom, batch favorites/downloads, named collections, shared favorites JSON backups, desktop rotation/tray controls, Windows fit/per-monitor controls, Roku Ambient Mode timers/dimming, catalog validation, CI deployment, and mobile gallery enhancements. See [README feature notes](../README.md) and the [API guide](API.md).

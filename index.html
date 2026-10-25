@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>Spotlight Studio — Windows Spotlight wallpaper gallery</title>
   <meta name="description" content="Browse, search and download thousands of Windows Spotlight wallpapers in 4K and Full HD. A fast, installable gallery with favorites, tags and shareable links." />
-  <meta name="app-version" content="2.8.0" />
+  <meta name="app-version" content="2.8.1" />
   <meta name="color-scheme" content="dark light" />
   <meta name="theme-color" content="#151918" />
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob: https://github.com https://*.githubusercontent.com; font-src 'self'; connect-src 'self'; manifest-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'" />
@@ -24,11 +24,11 @@
   <link rel="preconnect" href="https://github.com" />
   <link rel="preconnect" href="https://media.githubusercontent.com" />
 
-  <link rel="stylesheet" href="static/css/tokens.css?v=2.8.0" />
-  <link rel="stylesheet" href="static/css/app.css?v=2.8.0" />
-  <script src="static/js/theme-init.js?v=2.8.0"></script>
-  <script src="static/js/core.js?v=2.8.0" defer></script>
-  <script src="static/js/app.js?v=2.8.0" defer></script>
+  <link rel="stylesheet" href="static/css/tokens.css?v=2.8.1" />
+  <link rel="stylesheet" href="static/css/app.css?v=2.8.1" />
+  <script src="static/js/theme-init.js?v=2.8.1"></script>
+  <script src="static/js/core.js?v=2.8.1" defer></script>
+  <script src="static/js/app.js?v=2.8.1" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to wallpapers</a>
@@ -70,6 +70,7 @@
             <button class="menu-item" role="menuitem" type="button" data-action="export-csv"><span data-icon="download"></span>Export catalog (CSV)</button>
             <button class="menu-item" role="menuitem" type="button" data-action="backup-favorites"><span data-icon="heart"></span>Back up favorites</button>
             <button class="menu-item" role="menuitem" type="button" data-action="restore-favorites"><span data-icon="refresh"></span>Restore favorites</button>
+            <button class="menu-item" role="menuitem" type="button" data-action="create-collection"><span data-icon="image"></span>Create collection from favorites</button>
             <a class="menu-item desktop-only" role="menuitem" href="/api/docs" target="_blank" rel="noopener"><span data-icon="external"></span>API documentation</a>
             <hr class="menu-sep" />
             <button class="menu-item" role="menuitem" type="button" data-action="shortcuts"><span data-icon="keyboard"></span>Keyboard shortcuts</button>
@@ -163,6 +164,21 @@
           <div class="chips" id="quality-chips" role="group" aria-label="Filter by resolution"></div>
         </section>
 
+        <section class="panel" aria-labelledby="aspect-title">
+          <div class="panel-title" id="aspect-title"><span>Orientation</span></div>
+          <div class="chips" id="aspect-chips" role="group" aria-label="Filter by orientation"></div>
+        </section>
+
+        <section class="panel" aria-labelledby="color-title">
+          <div class="panel-title" id="color-title"><span>Dominant color</span></div>
+          <div class="chips color-chips" id="color-chips" role="group" aria-label="Filter by dominant color"></div>
+        </section>
+
+        <section class="panel" aria-labelledby="collections-title">
+          <div class="panel-title" id="collections-title"><span>My collections</span></div>
+          <label class="field"><span>Show collection</span><select id="collection-filter" class="select"><option value="">All wallpapers</option></select></label>
+        </section>
+
         <section class="panel" aria-labelledby="tags-title">
           <div class="panel-title" id="tags-title"><span>Popular tags</span>
             <button class="link-btn" type="button" id="tags-more" hidden>More</button></div>
@@ -201,6 +217,13 @@
           </div>
         </div>
         <div class="active-filters" id="active-filters"></div>
+        <div class="batch-tools" id="batch-tools">
+          <button class="btn btn-sm" type="button" id="batch-toggle" aria-pressed="false">Select wallpapers</button>
+          <span id="batch-count" class="hint">0 selected</span>
+          <button class="btn btn-sm" type="button" id="batch-favorite" disabled>♥ Add to favorites</button>
+          <button class="btn btn-sm btn-primary" type="button" id="batch-download" disabled>Download ZIP</button>
+          <button class="btn btn-sm btn-ghost" type="button" id="batch-clear">Clear</button>
+        </div>
 
         <section class="daily-spotlight" id="daily-spotlight" aria-labelledby="daily-label" hidden>
           <button class="daily-photo" id="daily-photo" type="button" aria-labelledby="daily-label daily-title"></button>
@@ -259,7 +282,7 @@
     <button class="lb-nav lb-prev" type="button" id="lb-prev" title="Previous (←)" aria-label="Previous wallpaper"><span data-icon="chevron-left" data-size="26"></span></button>
     <button class="lb-nav lb-next" type="button" id="lb-next" title="Next (→)" aria-label="Next wallpaper"><span data-icon="chevron-right" data-size="26"></span></button>
     <figure class="lb-stage" id="lb-stage">
-      <img id="lb-img" class="lb-img" alt="" decoding="async" draggable="false" />
+      <picture class="lb-picture"><source id="lb-webp" type="image/webp" /><img id="lb-img" class="lb-img" alt="" decoding="async" draggable="false" /></picture>
       <div class="lb-spinner" id="lb-spinner" aria-hidden="true"></div>
       <div class="lb-error" id="lb-error" role="status" hidden>
         <span data-icon="alert" data-size="26"></span>
@@ -287,6 +310,19 @@
         <button class="btn" type="button" id="lb-copy-image" title="Copy the direct image URL"><span data-icon="copy"></span>Image URL</button>
       </div>
     </section>
+  </dialog>
+
+  <dialog class="modal" id="dlg-wallpaper-options" aria-labelledby="wallpaper-options-title">
+    <div class="modal-head"><h2 id="wallpaper-options-title">Set desktop wallpaper</h2>
+      <button class="btn btn-icon btn-ghost" type="button" data-close aria-label="Close"><span data-icon="x"></span></button></div>
+    <div class="about-body">
+      <label class="field"><span>Fit mode</span><select class="select" id="wallpaper-fit">
+        <option>Fill</option><option>Fit</option><option>Stretch</option><option>Tile</option><option>Center</option><option>Span</option>
+      </select></label>
+      <label class="field"><span>Display (Windows)</span><select class="select" id="wallpaper-monitor"><option value="">All displays</option></select></label>
+      <p class="hint">Per-display targets and fit modes are supported on Windows 10/11. Other platforms use their system default.</p>
+      <button class="btn btn-primary" id="wallpaper-apply" type="button">Apply wallpaper</button>
+    </div>
   </dialog>
 
   <!-- ═════════════ Shortcuts & About ═════════════ -->

@@ -153,8 +153,10 @@ export default function BrowseScreen() {
     if (filters.source) chips.push({ key: 'source', label: SOURCE_LABELS[filters.source] ?? filters.source, onRemove: () => patch({ source: '' }) });
     if (filters.quality) chips.push({ key: 'quality', label: QUALITY_LABELS[filters.quality] ?? filters.quality, onRemove: () => patch({ quality: '' }) });
     if (filters.tag) chips.push({ key: 'tag', label: `#${filters.tag}`, onRemove: () => patch({ tag: '' }) });
+    if (filters.aspect) chips.push({ key: 'aspect', label: filters.aspect, onRemove: () => patch({ aspect: '' }) });
+    if (filters.color) chips.push({ key: 'color', label: filters.color, onRemove: () => patch({ color: '' }) });
     return chips;
-  }, [debouncedQuery, filters.quality, filters.source, filters.tag, patch]);
+  }, [debouncedQuery, filters.quality, filters.source, filters.tag, filters.aspect, filters.color, patch]);
 
   if (loading && !catalog) {
     return (
@@ -191,7 +193,7 @@ export default function BrowseScreen() {
                 icon="options-outline"
                 accessibilityLabel="Filters and sorting"
                 onPress={() => setFilterOpen(true)}
-                active={Boolean(filters.source || filters.quality || filters.tag || filters.sort !== DEFAULT_STATE.sort)}
+                active={Boolean(filters.source || filters.quality || filters.tag || filters.aspect || filters.color || filters.sort !== DEFAULT_STATE.sort)}
 
               />
             </>
@@ -270,7 +272,7 @@ export default function BrowseScreen() {
         onEndReached={() => setVisible((current) => (current >= filtered.length ? current : current + PAGE_SIZE))}
         refreshing={refreshing}
         onRefresh={() => void refresh()}
-        ListHeaderComponent={daily && !effective.q && !filters.source && !filters.quality && !filters.tag && !filters.fav ?
+        ListHeaderComponent={daily && !effective.q && !filters.source && !filters.quality && !filters.tag && !filters.aspect && !filters.color && !filters.fav ?
           <DailySpotlight key={daily.key} item={daily} favorite={isFavorite(daily.key)} onOpen={open} onToggleFavorite={onToggleFavorite} /> : null}
         ListEmptyComponent={
           <EmptyState

@@ -163,6 +163,10 @@
     catalogVersion: 0,
     state: Object.assign({}, C.DEFAULT_STATE),
     favorites: new Set(C.normalizeFavorites(store.get("favorites", []))),
+    collections: store.get("collections", {}),
+    selectedKeys: new Set(),
+    batchMode: false,
+    pendingWallpaperId: null,
     favVersion: 0,
     cache: { key: "", list: [] },
     info: null,
@@ -176,7 +180,7 @@
     lastSignature: "",
     lastCatalogLoad: 0,
     reloading: false,
-    lb: { item: null, list: [], index: -1, pushed: false, token: 0, loader: null },
+    lb: { item: null, list: [], index: -1, pushed: false, token: 0, loader: null, zoom: 1, panX: 0, panY: 0, drag: null },
   };
 
   const SOURCE_LABELS = C.SOURCE_LABELS;
@@ -411,14 +415,21 @@
   /* ═══════════════════════════ filtering & render ═══════════════════════════ */
 
   function getFiltered() {
-    const key = `${C.filterKey(app.state, app.favVersion)}|${app.catalogVersion}`;
-    if (app.cache.key !== key) app.cache = { key, list: C.filterAndSort(app.catalog, app.state, app.favorites) };
+    const key = `${C.filterKey(app.state, app.favVersion)}|${app.state.collection}|${app.catalogVersion}`;
+    if (app.cache.key !== key) {
+      let list = C.filterAndSort(app.catalog, app.state, app.favorites);
+      if (app.state.collection) {
+        const keys = new Set(C.normalizeFavorites(app.collections[app.state.collection] || []));
+        list = list.filter((item) => keys.has(item.key));
+      }
+      app.cache = { key, list };
+    }
     return app.cache.list;
   }
 
   function activeFilterCount() {
     const s = app.state;
-    return [s.source, s.quality, s.tag, s.fav].filter(Boolean).length;
+    return [s.source, s.quality, s.tag, s.fav, s.aspect, s.color, s.collection].filter(Boolean).length;
   }
 
   function render() {
@@ -469,6 +480,9 @@
     if (s.source) add("source", SOURCE_LABELS[s.source] || s.source);
     if (s.quality) add("quality", C.QUALITY_LABELS[s.quality] || s.quality);
     if (s.tag) add("tag", `#${s.tag}`);
+    if (s.aspect) add("aspect", s.aspect);
+    if (s.color) add("color", `Color ${s.color}`);
+    if (s.collection) add("collection", s.collection);
     if (s.fav) add("fav", "Favorites");
     if (pills.length > 1) pills.push(h("button", { class: "pill-clear", type: "button", dataset: { clear: "all" }, text: "Clear all" }));
     const box = $("active-filters");
@@ -495,6 +509,29 @@
     $("quality-chips").replaceChildren(
       chip("Any", null, !s.quality, { filter: "quality", value: "" }),
       ...qualities.map((q) => chip(C.QUALITY_LABELS[q], cat.qualityCounts[q], s.quality === q, { filter: "quality", value: q })));
+
+    const aspects = [["landscape", "Landscape"], ["ultrawide", "Ultrawide"], ["standard", "Standard"], ["portrait", "Portrait"]];
+    $("aspect-chips").replaceChildren(chip("Any", null, !s.aspect, { filter: "aspect", value: "" }),
+      ...aspects.filter(([key]) => cat.items.some((item) => item.aspect === key))
+        .map(([key, label]) => chip(label, null, s.aspect === key, { filter: "aspect", value: key })));
+
+    const colorCount = new Map();
+    for (const item of cat.items) for (const color of item.colors.slice(0, 3)) {
+      const key = String(color).toLowerCase(); colorCount.set(key, (colorCount.get(key) || 0) + 1);
+    }
+    const colors = [...colorCount].sort((a, b) => b[1] - a[1]).slice(0, 8);
+    $("color-chips").replaceChildren(...(colors.length ? colors.map(([color]) => {
+      const button = chip("", null, s.color === color, { filter: "color", value: color });
+      button.classList.add("color-chip"); button.style.setProperty("--swatch", color);
+      button.setAttribute("aria-label", `Filter color ${color}`); button.title = color;
+      return button;
+    }) : [h("span", { class: "hint", text: "Palette data is not available in this catalog yet." })]));
+
+    const collectionSelect = $("collection-filter");
+    const selectedCollection = s.collection;
+    collectionSelect.replaceChildren(h("option", { value: "", text: "All wallpapers" }),
+      ...Object.keys(app.collections).sort().map((name) => h("option", { value: name, text: `${name} (${app.collections[name].length})` })));
+    collectionSelect.value = selectedCollection;
 
     const limit = app.tagsExpanded ? 48 : 14;
     const tags = C.topTags(cat, limit + 1, list).filter((t) => t[0] !== s.tag);
@@ -612,6 +649,8 @@
           h("span", { class: `card-title${item.generated ? " is-generated" : ""}`, text: item.title }),
           h("span", { class: "card-sub", text: cardSubtitle(item) }))),
       badges,
+      app.batchMode ? h("button", { class: "card-select", type: "button", dataset: { act: "select" },
+        "aria-pressed": app.selectedKeys.has(item.key) ? "true" : "false", "aria-label": app.selectedKeys.has(item.key) ? "Deselect wallpaper" : "Select wallpaper" }, "✓") : null,
       h("button", {
         class: "card-fav", type: "button", dataset: { act: "fav" }, "aria-pressed": isFav ? "true" : "false",
         "aria-label": isFav ? "Remove from favorites" : "Add to favorites", title: "Favorite",
@@ -641,7 +680,7 @@
     }
     // A quality upgrade keeps its ID/title but changes its filename and metadata.
     // Compare all rendered fields, not only the title, without rebuilding unchanged pages.
-    const sig = JSON.stringify([app.state.view, info.items.map((i) => [i.id, i.key, i.title,
+    const sig = JSON.stringify([app.state.view, app.batchMode, [...app.selectedKeys], info.items.map((i) => [i.id, i.key, i.title,
       i.generated, i.source, i.q, i.raw.width, i.raw.height, i.raw.file_size, i.raw.date_spotted])]);
     if (sig === app.gallerySig) return syncFavoriteButtons(); // identical page → keep the DOM (no flicker)
     app.gallerySig = sig;
@@ -811,6 +850,88 @@
     }
   }
 
+  function toggleSelected(key) {
+    if (app.selectedKeys.has(key)) app.selectedKeys.delete(key);
+    else app.selectedKeys.add(key);
+    updateBatchControls();
+    render();
+  }
+
+  function updateBatchControls() {
+    $("batch-tools").classList.toggle("is-active", app.batchMode);
+    $("batch-toggle").setAttribute("aria-pressed", String(app.batchMode));
+    $("batch-toggle").textContent = app.batchMode ? "Exit select mode" : "Select wallpapers";
+    $("batch-count").textContent = `${app.selectedKeys.size} selected`;
+    $("batch-favorite").disabled = app.selectedKeys.size === 0;
+    $("batch-download").disabled = app.selectedKeys.size === 0;
+  }
+
+  const CRC_TABLE = (() => {
+    const table = new Uint32Array(256);
+    for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; table[n] = c >>> 0; }
+    return table;
+  })();
+
+  function crc32(bytes) {
+    let crc = 0xffffffff;
+    for (const byte of bytes) crc = CRC_TABLE[(crc ^ byte) & 255] ^ (crc >>> 8);
+    return (crc ^ 0xffffffff) >>> 0;
+  }
+
+  async function downloadSelectedZip() {
+    const items = [...app.selectedKeys].map((key) => app.catalog.items.find((item) => item.key === key)).filter(Boolean);
+    if (!items.length) return;
+    if (items.length > 50) return toast("ZIP batches are limited to 50 wallpapers.", "error");
+    try {
+      toast(`Preparing ${items.length} full-resolution downloads…`, "info", 5000);
+      const encoder = new TextEncoder();
+      const files = []; let downloadedTotal = 0;
+      for (const item of items) {
+        const response = await fetch(imgUrl(item, false));
+        if (!response.ok) throw new Error(`Could not fetch ${item.title}`);
+        const declared = Number(response.headers.get("content-length")) || 0;
+        if (declared && downloadedTotal + declared > 100 * 1024 * 1024) throw new Error("ZIP exceeds the 100 MB safety limit.");
+        const data = new Uint8Array(await response.arrayBuffer());
+        downloadedTotal += data.length;
+        if (downloadedTotal > 100 * 1024 * 1024) throw new Error("ZIP exceeds the 100 MB safety limit.");
+        files.push({ name: encoder.encode(niceFilename(item)), data });
+      }
+      const local = [], central = []; let offset = 0;
+      for (const file of files) {
+        const crc = crc32(file.data), localHeader = new Uint8Array(30 + file.name.length), lv = new DataView(localHeader.buffer);
+        lv.setUint32(0, 0x04034b50, true); lv.setUint16(4, 20, true); lv.setUint16(6, 0x0800, true); lv.setUint16(8, 0, true);
+        lv.setUint16(10, 0, true); lv.setUint16(12, 0x21, true);
+        lv.setUint32(14, crc, true); lv.setUint32(18, file.data.length, true); lv.setUint32(22, file.data.length, true);
+        lv.setUint16(26, file.name.length, true); localHeader.set(file.name, 30);
+        local.push(localHeader, file.data);
+        const header = new Uint8Array(46 + file.name.length), cv = new DataView(header.buffer);
+        cv.setUint32(0, 0x02014b50, true); cv.setUint16(4, 20, true); cv.setUint16(6, 20, true);
+        cv.setUint16(8, 0x0800, true); cv.setUint16(12, 0, true); cv.setUint16(14, 0x21, true);
+        cv.setUint32(16, crc, true); cv.setUint32(20, file.data.length, true); cv.setUint32(24, file.data.length, true);
+        cv.setUint16(28, file.name.length, true); cv.setUint32(42, offset, true); header.set(file.name, 46);
+        central.push(header); offset += localHeader.length + file.data.length;
+      }
+      const centralSize = central.reduce((sum, part) => sum + part.length, 0), end = new Uint8Array(22), ev = new DataView(end.buffer);
+      ev.setUint32(0, 0x06054b50, true); ev.setUint16(8, files.length, true); ev.setUint16(10, files.length, true);
+      ev.setUint32(12, centralSize, true); ev.setUint32(16, offset, true);
+      downloadBlob(new Blob([...local, ...central, end], { type: "application/zip" }), "spotlight-wallpapers.zip");
+      toast(`ZIP ready · ${files.length} wallpapers`, "success");
+    } catch (error) { toast(error.message || "Could not create ZIP. Try a smaller batch.", "error"); }
+  }
+
+  function createCollection() {
+    const keys = app.selectedKeys.size ? [...app.selectedKeys] : [...app.favorites];
+    if (!keys.length) return toast("Select wallpapers or add favorites before creating a collection.", "info");
+    const name = window.prompt("Collection name (for example, Mountain Landscapes):");
+    if (!name || !name.trim()) return;
+    const clean = name.trim().slice(0, 48);
+    app.collections[clean] = [...new Set([...(app.collections[clean] || []), ...keys])].slice(0, C.MAX_FAVORITES);
+    store.set("collections", app.collections);
+    app.state.collection = clean;
+    render();
+    toast(`Collection “${clean}” saved`, "success");
+  }
+
   function toggleFavoritesView() {
     if (!app.state.fav && !app.favorites.size) {
       toast("No favorites yet – tap the heart on a wallpaper.", "info");
@@ -822,7 +943,7 @@
   /* ═══════════════════════════ lightbox ═══════════════════════════ */
 
   const lb = {
-    dlg: $("lightbox"), img: $("lb-img"), stage: $("lb-stage"),
+    dlg: $("lightbox"), img: $("lb-img"), webp: $("lb-webp"), stage: $("lb-stage"),
   };
 
   function hashUrl(id) {
@@ -848,7 +969,14 @@
     }
   }
 
+  function applyViewerTransform() {
+    const state = app.lb;
+    lb.img.style.transform = `translate(${state.panX}px, ${state.panY}px) scale(${state.zoom})`;
+    lb.stage.classList.toggle("is-zoomed", state.zoom > 1);
+  }
+
   function showLightboxItem(item) {
+    app.lb.zoom = 1; app.lb.panX = 0; app.lb.panY = 0; applyViewerTransform();
     const w = item.raw;
     const token = ++app.lb.token;
     app.lb.item = item;
@@ -890,48 +1018,41 @@
     $("lb-next").disabled = app.lb.index >= app.lb.list.length - 1;
     syncFavoriteButtons();
 
-    // Abort the previous detached loader when navigating quickly.
+    // The viewer uses a compact WebP rendition by default. Full originals are
+    // fetched only when the user explicitly downloads or sets the wallpaper.
     if (app.lb.loader) {
       app.lb.loader.onload = app.lb.loader.onerror = null;
       app.lb.loader.removeAttribute("src");
     }
     $("lb-error").hidden = true;
-    // Progressive loading: instantly show the (cached) thumbnail, then swap in the full image.
     lb.stage.classList.add("is-loading");
-    lb.img.classList.remove("is-failed");
-    lb.img.classList.add("is-preview");
+    lb.img.classList.remove("is-failed", "is-preview");
     lb.img.alt = item.title;
+    lb.webp.removeAttribute("srcset");
     lb.img.src = imgUrl(item, true);
-    const loader = app.lb.loader = new Image();
-    loader.decoding = "async";
-    loader.onload = () => {
+    lb.img.onload = () => { if (token === app.lb.token) { lb.stage.classList.remove("is-loading"); preloadNeighbours(); } };
+    lb.img.onerror = () => {
       if (token !== app.lb.token) return;
-      lb.img.src = full;
-      lb.img.classList.remove("is-preview");
-      lb.stage.classList.remove("is-loading");
-      preloadNeighbours();
-    };
-    loader.onerror = () => {
-      if (token !== app.lb.token) return;
+      if (lb.webp.hasAttribute("srcset")) {
+        lb.webp.removeAttribute("srcset");
+        lb.img.src = imgUrl(item, true);
+        return;
+      }
       lb.stage.classList.remove("is-loading");
       lb.img.classList.add("is-failed");
       $("lb-error-text").textContent = app.health?.lfs_pointers_detected
         ? "Local images are Git LFS pointers. Run git lfs install && git lfs pull, then retry."
-        : "Check your connection and try again. The thumbnail may still be available.";
+        : "The preview is unavailable. The original remains available through Download full resolution.";
       $("lb-error").hidden = false;
     };
-    loader.src = full;
+    lb.webp.srcset = C.previewUrl(app.imageOpts, item.raw.filename);
   }
 
   function preloadNeighbours() {
     for (const delta of [1, -1]) {
       const next = app.lb.list[app.lb.index + delta];
-      // LFS originals cost megabytes. Preload only thumbnails on static hosts or
-      // constrained connections; local desktop browsing can warm originals.
-      const connection = navigator.connection;
-      const original = app.imageOpts.local && !connection?.saveData &&
-        !/^(slow-2g|2g|3g)$/.test(connection?.effectiveType || "");
-      if (next) new Image().src = imgUrl(next, !original);
+      // Previews are small and preserve the original's complete frame.
+      if (next) new Image().src = C.previewUrl(app.imageOpts, next.raw.filename);
     }
   }
 
@@ -1047,6 +1168,28 @@
   }
 
   function bindLightbox() {
+    lb.stage.addEventListener("wheel", (event) => {
+      if (!lb.dlg.open) return;
+      event.preventDefault();
+      app.lb.zoom = C.clamp(app.lb.zoom * (event.deltaY < 0 ? 1.15 : 1 / 1.15), 1, 5);
+      if (app.lb.zoom === 1) { app.lb.panX = 0; app.lb.panY = 0; }
+      applyViewerTransform();
+    }, { passive: false });
+    lb.stage.addEventListener("pointerdown", (event) => {
+      if (app.lb.zoom <= 1 || event.button !== 0 || event.target !== lb.img) return;
+      app.lb.drag = { x: event.clientX, y: event.clientY, panX: app.lb.panX, panY: app.lb.panY };
+      lb.stage.setPointerCapture(event.pointerId);
+    });
+    lb.stage.addEventListener("pointermove", (event) => {
+      if (!app.lb.drag) return;
+      app.lb.panX = app.lb.drag.panX + event.clientX - app.lb.drag.x;
+      app.lb.panY = app.lb.drag.panY + event.clientY - app.lb.drag.y;
+      applyViewerTransform();
+    });
+    const stopPan = () => { app.lb.drag = null; };
+    lb.stage.addEventListener("pointerup", stopPan);
+    lb.stage.addEventListener("pointercancel", stopPan);
+    lb.img.addEventListener("dblclick", () => { app.lb.zoom = 1; app.lb.panX = 0; app.lb.panY = 0; applyViewerTransform(); });
     lb.dlg.addEventListener("cancel", (e) => { e.preventDefault(); closeLightbox(); });
     lb.dlg.addEventListener("close", onLightboxClosed);
     lb.dlg.addEventListener("click", (e) => { if (e.target === lb.dlg || e.target === lb.stage) closeLightbox(); });
@@ -1236,12 +1379,28 @@
   }
 
   async function setWallpaper(id) {
-    try {
-      await api(`/api/wallpapers/${id}/set-wallpaper`, { method: "POST" });
-      toast("Desktop wallpaper updated", "success");
-    } catch (err) {
-      toast(err.message, "error");
+    app.pendingWallpaperId = id;
+    const monitorSelect = $("wallpaper-monitor");
+    monitorSelect.replaceChildren(h("option", { value: "", text: "All displays" }));
+    if (app.mode === "desktop") {
+      try {
+        const response = await api("/api/desktop/monitors");
+        const monitors = Array.isArray(response) ? response : [];
+        for (const monitor of monitors) monitorSelect.append(h("option", { value: monitor.id, text: monitor.name || monitor.id }));
+      } catch (_) { /* other platforms and older servers use all displays */ }
     }
+    openDialog("dlg-wallpaper-options");
+  }
+
+  async function applyDesktopWallpaper() {
+    if (!app.pendingWallpaperId) return;
+    const query = new URLSearchParams({ fit: $("wallpaper-fit").value });
+    if ($("wallpaper-monitor").value) query.set("monitor", $("wallpaper-monitor").value);
+    try {
+      await api(`/api/wallpapers/${app.pendingWallpaperId}/set-wallpaper?${query}`, { method: "POST" });
+      dismissDialog($("dlg-wallpaper-options"));
+      toast("Desktop wallpaper updated", "success");
+    } catch (err) { toast(err.message, "error"); }
   }
 
   /* ═══════════════════════════ export, menu, dialogs ═══════════════════════════ */
@@ -1324,6 +1483,7 @@
 
   function bindUI() {
     bindLightbox();
+    $("wallpaper-apply").addEventListener("click", applyDesktopWallpaper);
     $("sidebar").addEventListener("keydown", (event) => {
       if (!$("sidebar").classList.contains("is-open")) return;
       if (event.key === "Escape") {
@@ -1371,6 +1531,7 @@
       else if (action === "export-csv") exportCatalog("csv");
       else if (action === "backup-favorites") downloadBlob(new Blob([JSON.stringify(C.favoritesBackup(app.favorites), null, 2)], { type: "application/json" }), "spotlight-favorites.json");
       else if (action === "restore-favorites") $("favorites-file").click();
+      else if (action === "create-collection") createCollection();
       else if (action === "shortcuts") openDialog("dlg-shortcuts");
       else if (action === "about") openDialog("dlg-about");
     });
@@ -1409,6 +1570,16 @@
 
     // Results bar
     $("sort").addEventListener("change", (e) => patchState({ sort: e.target.value }));
+    $("collection-filter").addEventListener("change", (e) => patchState({ collection: e.target.value }));
+    $("batch-toggle").addEventListener("click", () => { app.batchMode = !app.batchMode; if (!app.batchMode) app.selectedKeys.clear(); updateBatchControls(); render(); });
+    $("batch-favorite").addEventListener("click", () => {
+      let changed = false;
+      for (const key of app.selectedKeys) if (!app.favorites.has(key) && app.favorites.size < C.MAX_FAVORITES) { app.favorites.add(key); changed = true; }
+      if (changed) { app.favVersion++; store.set("favorites", [...app.favorites]); syncFavoriteButtons(); render(); }
+      toast(changed ? "Selected wallpapers added to favorites" : "All selected wallpapers were already favorites", "success");
+    });
+    $("batch-download").addEventListener("click", downloadSelectedZip);
+    $("batch-clear").addEventListener("click", () => { app.selectedKeys.clear(); updateBatchControls(); render(); });
     $("per-page").addEventListener("change", (e) => { patchState({ per: Number(e.target.value) }); persistPrefs(); });
     $("view-grid").addEventListener("click", () => { patchState({ view: "grid" }, true); persistPrefs(); });
     $("view-list").addEventListener("click", () => { patchState({ view: "list" }, true); persistPrefs(); });
@@ -1423,7 +1594,8 @@
       if (!chipEl) return;
       const key = chipEl.dataset.filter;
       const value = chipEl.dataset.value;
-      patchState({ [key]: key === "tag" && value === app.state.tag ? "" : value });
+      const toggleKeys = ["tag", "aspect", "color"];
+      patchState({ [key]: toggleKeys.includes(key) && value === app.state[key] ? "" : value });
     });
     $("active-filters").addEventListener("click", (e) => {
       const pill = e.target.closest("[data-clear]");
@@ -1439,7 +1611,10 @@
       if (!target) return;
       const item = app.catalog.byId.get(Number(target.closest(".card").dataset.id));
       if (!item) return;
-      if (target.dataset.act === "open") openLightbox(item, getFiltered());
+      if (target.dataset.act === "open") {
+        if (app.batchMode) toggleSelected(item.key);
+        else openLightbox(item, getFiltered());
+      } else if (target.dataset.act === "select") toggleSelected(item.key);
       else if (target.dataset.act === "fav") toggleFavorite(item);
       else if (target.dataset.act === "setwp") setWallpaper(item.id);
     });

@@ -37,6 +37,9 @@ def test_parser_defaults_and_exclusive_actions():
     args = parser.parse_args([])
     assert not (args.server or args.crawl or args.check) and args.mode == "quick" and args.source == "both"
     assert parser.parse_args(["--crawl", "--mode", "full", "--source", "peapix"]).mode == "full"
+    rotation = parser.parse_args(["--rotate-daemon", "--rotate-hours", "2", "--rotate-tag", "mountain"])
+    assert rotation.rotate_daemon and rotation.rotate_hours == 2 and rotation.rotate_tag == "mountain"
+    assert parser.parse_args(["--tray"]).tray
     with pytest.raises(SystemExit):
         parser.parse_args(["--server", "--crawl"])
     with pytest.raises(SystemExit):

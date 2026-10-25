@@ -19,13 +19,22 @@ The web UI itself has no build step.
 
 | Command | What |
 |---|---|
-| `pytest` | 200+ Python tests, **fully offline** |
-| `node --test tests/js/*.test.mjs` | unit tests of `static/js/core.js` (no dependencies) |
-| `ruff check .` | lint (also CI) |
-| `cd mobile && npm run verify` | the Expo app: `tsc --noEmit` + `eslint . --max-warnings 0` + Jest (see [MOBILE.md](MOBILE.md)) |
-| `make check` | all of the above |
+| `pytest` | Python tests, **fully offline** (fake source sites; no real archive writes) |
+| `node --test tests/js/*.test.mjs` | DOM-free core/service-worker tests (no dependencies) |
+| `ruff check .` | Python lint |
+| `npm ci && npm test` | root JavaScript tests and Playwright tooling |
+| `make browser` | hermetic Chromium flows (install Chromium first; synthetic catalog/images only) |
+| `cd mobile && npm ci && npm run verify` | Expo TypeScript + ESLint + Jest suite (see [MOBILE.md](MOBILE.md)) |
+| `python scripts/check_catalog.py && python scripts/build_site.py` | catalog health and safe static artifact |
+| `python scripts/roku_audit.py` | static audit of the channel and screensaver packages |
+| `make check` | Ruff + Python + JavaScript unit tests |
 
 On Windows run the three commands directly. `node --test tests/js/*.test.mjs` works in PowerShell with Node ≥ 21 (which expands the glob itself); with Node 20 name the file instead: `node --test tests/js/core.test.mjs`.
+
+GitHub Actions runs the Python/Ruff/Node/catalog/site/Roku checks, a hermetic Chromium suite,
+and mobile typecheck/lint/Jest in parallel. GitHub Pages deployment waits for every job. The
+mobile dependency audit is a separate release gate (`npm audit`), because the current Expo
+SDK toolchain has upstream findings with no safe automatic downgrade; see [REVIEW.md](REVIEW.md).
 
 The Python suite never touches the network or your data:
 
@@ -63,7 +72,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the modules and [FRONTEND.md](FRONTEN
 ## Releasing
 
 1. Update **`CHANGELOG.md`** (new `## [x.y.z] — date` section).
-2. Bump the version in all of: `src/__init__.py`, `index.html` (`app-version` meta **and** the three `?v=` query strings), `sw.js` (`VERSION`), the README badge. `tests/test_consistency.py` fails if one is missed.
+2. Bump the version in `src/__init__.py`, `index.html` (`app-version` meta and every asset `?v=`), `sw.js` (`VERSION`), the README badge, and the newest changelog heading. `tests/test_consistency.py` fails if one is missed.
 3. `make check`, then tag `vX.Y.Z`.
 4. If you changed the schema, add the migration and its test first ([DATA.md](DATA.md#migrations)).
 
@@ -127,8 +136,9 @@ Expo upgrades. Known outstanding findings are recorded in [REVIEW.md](REVIEW.md)
 
 ## Native release gates
 
-The 1.2 native pass adds resolved-manifest checks (`npm run verify:config`), profile/audit
-EAS hooks and `.github/workflows/mobile-native.yml` for Kotlin/Swift compilation. Keep those
-separate from JS/Hermes export. `npm run verify:release` intentionally remains blocked by
-inherited high-severity advisories; no automatic exception is granted. Use preview for device
-QA, production for shipping only after [NATIVE_RELEASE.md](NATIVE_RELEASE.md) is complete.
+The native app has resolved-manifest checks (`npm run verify:config`) and EAS profile/audit
+hooks. The current GitHub Actions workflow runs JS/config tests but does **not** compile Kotlin
+or Swift; compile on compatible Android/iOS toolchains and complete device QA separately.
+`npm run verify:release` remains blocked by inherited high-severity advisories; no automatic
+exception is granted. Use preview for device QA, production for shipping only after
+[NATIVE_RELEASE.md](NATIVE_RELEASE.md) is complete.

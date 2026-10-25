@@ -68,7 +68,7 @@ A generic static server serving the repository root does not inherit FastAPI's p
 HTML scraping is capped at 8 MiB of decompressed bytes; automatic CPU workers are capped at
 four (explicit concurrency settings can still exhaust constrained hosts).
 
-See [REVIEW.md](REVIEW.md#dependency-audit--2026-10-08) for current audit findings and unresolved
+See [REVIEW.md](REVIEW.md#mobile-dependency-advisories) for current audit findings and unresolved
 mobile advisories. Self-hosted Swagger UI attribution/version is recorded alongside its assets.
 
 ## Ownership and mobile limits

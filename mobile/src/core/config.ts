@@ -85,6 +85,17 @@ export function thumbUrl(filename: string, base = IMAGE_BASE): string {
   return imageUrl(filename, true, base);
 }
 
+/** 1440px WebP viewing rendition; never used for an explicit full-resolution download. */
+export function previewUrl(filename: string, base = IMAGE_BASE): string {
+  if (!validFavoriteKey(filename) || !isFetchableUrl(base)) return '';
+  const encoded = filename.split('/').map(encodeURIComponent).join('/').replace(/\.[^/.]+$/, '.webp');
+  const path = `images/previews/${encoded}`;
+  const root = new URL(base);
+  if (root.search || root.hash) return '';
+  const githubBlob = root.hostname === 'github.com' && /\/blob\//.test(root.pathname);
+  return `${base.replace(/\/+$/, '')}/${path}${githubBlob ? '?raw=true' : ''}`;
+}
+
 export const CACHE_POLICY = {
   /** expo-image policy for thumbnails: keep them on disk, they are tiny. */
   thumb: 'disk' as const,

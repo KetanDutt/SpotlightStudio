@@ -30,6 +30,7 @@ function CreateSettingsManager() as object
                 favoritesOnly: "0",
                 searchQuery: "",
                 ambientInterval: "30",
+                ambientSleepMinutes: "0",
 
                 ' Network
                 imageBase: "https://media.githubusercontent.com/media/KetanDutt/SpotlightStudio/main",

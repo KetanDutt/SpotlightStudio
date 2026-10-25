@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import io
+import json
 import time
 
 import aiohttp
@@ -119,6 +120,17 @@ def test_analyze_image_produces_hash_and_16x9_thumbnail():
     assert len(info.phash) == 64
     thumb = Image.open(io.BytesIO(info.thumb))
     assert thumb.size == downloader.THUMB_SIZE and thumb.format == "JPEG"
+    preview = Image.open(io.BytesIO(info.preview))
+    assert preview.format == "WEBP" and preview.size == (1280, 720)
+    assert info.aspect_ratio == "landscape"
+    assert len(json.loads(info.colors)) <= 5
+
+
+def test_aspect_ratio_buckets_match_desktop_mobile_orientations():
+    assert [downloader.aspect_category(w, h) for w, h in
+            ((1920, 1080), (1920, 1200), (3440, 1440), (1080, 1920))] == [
+                "landscape", "standard", "ultrawide", "portrait",
+            ]
 
 
 def test_thumbnail_centre_crops_other_aspect_ratios():
@@ -135,6 +147,13 @@ def test_analyze_png_and_garbage():
     assert info.fmt == "PNG" and storage.extension_for_format(info.fmt) == "png"
     with pytest.raises(Exception):  # noqa: B017 – any decode error is acceptable
         analyze_image(b"definitely not an image" * 100)
+
+
+def test_analyze_rejects_unsupported_formats_instead_of_mislabeling_original_bytes():
+    buf = io.BytesIO()
+    Image.new("RGB", (800, 450), "red").save(buf, "GIF")
+    with pytest.raises(ValueError, match="unsupported image format GIF"):
+        analyze_image(buf.getvalue())
 
 
 # ── Full pipeline ──────────────────────────────────────────────────────────
@@ -288,6 +307,7 @@ def test_failed_upgrade_preserves_old_files_metadata_and_counters(site, monkeypa
         (before,), _ = db.get_all_wallpapers()
         image = storage.image_path(before["filename"]).read_bytes()
         thumb = storage.thumb_path(before["filename"]).read_bytes()
+        preview = storage.preview_path(before["filename"]).read_bytes()
         stats = db.get_stats()
 
         def fail(*args, **kwargs):
@@ -302,9 +322,10 @@ def test_failed_upgrade_preserves_old_files_metadata_and_counters(site, monkeypa
         assert db.get_wallpaper(before["id"]) == before
         assert storage.image_path(before["filename"]).read_bytes() == image
         assert storage.thumb_path(before["filename"]).read_bytes() == thumb
+        assert storage.preview_path(before["filename"]).read_bytes() == preview
         assert db.get_stats() == stats
         assert not db.is_url_suppressed(low["image_url"])
-        assert len([p for p in settings.IMAGES_DIR.rglob("*") if p.is_file()]) == 2
+        assert len([p for p in settings.IMAGES_DIR.rglob("*") if p.is_file()]) == 3
 
     run(go)
 
