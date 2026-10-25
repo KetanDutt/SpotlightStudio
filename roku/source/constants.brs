@@ -118,6 +118,15 @@ function AmbientIntervalOptions() as object
     return gaa.__ssAmbientIntervals
 end function
 
+' Ambient safety sleep timer options in minutes (0 disables auto-dim).
+function AmbientSleepOptions() as object
+    gaa = GetGlobalAA()
+    if gaa.__ssAmbientSleepOptions = invalid
+        gaa.__ssAmbientSleepOptions = [0, 30, 60, 120]
+    end if
+    return gaa.__ssAmbientSleepOptions
+end function
+
 ' Automatic home-wallpaper / screensaver rotation intervals, in seconds.
 ' Pro-only feature; the shortest interval is deliberately 60s so the rotation
 ' engine cannot hammer the CDN.

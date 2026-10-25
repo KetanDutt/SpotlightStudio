@@ -80,10 +80,15 @@ A native `<dialog>` (focus trap, `Esc`, inert background for free).
 * **History-aware**: opening pushes `#w=<id>`; arrows replace it; **Back** closes the viewer; a deep link opens it on load; closing via `Esc` removes the hash.
 * **Image failure:** retain the thumbnail, show persistent connection/LFS advice and a
   retry button; stop the loading state and cancel obsolete detached loaders.
-* **Progressive**: the cached thumbnail is shown blurred instantly, the full image replaces it when loaded; the next/previous full images are preloaded.
+* **Bandwidth-aware**: the viewer uses the full-frame 1440px WebP preview by default (with the thumbnail as a compatibility fallback); full originals load only through the explicit Download or Set Wallpaper actions. Neighboring WebP previews may be prefetched.
+* Mouse wheel zoom and click-and-drag panning inspect image detail; double-click resets the view.
 * **Navigation crosses pages** — it walks the whole filtered list and keeps the gallery page in sync (applied when the viewer closes).
 * Swipe left/right on touch screens, fullscreen (`Enter`), favorite, copy permalink / direct image URL, download (with a readable file name like `kirstenbosch-botanical-garden-1920x1080.jpg`; for cross-origin GitHub URLs the link opens in a new tab because browsers ignore `download` there).
 * **Shuffle** picks from the *whole filtered result*, not only the visible page.
+
+## Discovery tools
+
+The sidebar classifies dimensions into Landscape, Ultrawide, Standard and Portrait; the dominant-color swatches filter against locally extracted palette colors. Batch mode selects across pages, applies favorites, and downloads up to 50 originals in a bounded ZIP. Named collections are private browser-local lists; favorites backups remain the portable cross-platform JSON schema (`spotlight-favorites`, version 1), shared by web and Expo mobile clients.
 
 ## Desktop crawler console
 

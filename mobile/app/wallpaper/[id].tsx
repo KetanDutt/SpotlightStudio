@@ -21,7 +21,7 @@ import { IconButton } from '../../src/components/ui/IconButton';
 import { Touchable } from '../../src/components/ui/Pressable';
 import { ErrorState, LoadingState, ProgressBar } from '../../src/components/ui/States';
 import { SetWallpaperSheet } from '../../src/components/wallpaper/SetWallpaperSheet';
-import { fullImageUrl, thumbnailUrl } from '../../src/services/media';
+import { previewImageUrl, thumbnailUrl } from '../../src/services/media';
 import { SOURCE_LABELS, fmtBytes, fmtDate, fmtInt, fmtWallpaperSize } from '../../src/core/utils';
 import { radius, spacing } from '../../src/theme/tokens';
 import { GlassBackdrop } from '../../src/components/ui/GlassBackdrop';
@@ -48,7 +48,9 @@ export default function WallpaperDetailScreen() {
   const [sheetOpen, setSheetOpen] = useState(false);
   const [imageLoading, setImageLoading] = useState(true);
   const [imageFailed, setImageFailed] = useState(false);
+  const [previewFailedKey, setPreviewFailedKey] = useState('');
   const [imageRetry, setImageRetry] = useState(0);
+  const previewFailed = previewFailedKey === item?.key;
 
   // Previous / next follow the "newest first" order of the library.
   const neighbours = useMemo(() => {
@@ -118,7 +120,7 @@ export default function WallpaperDetailScreen() {
       <View style={[styles.imageWrap, { height: imageHeight }]}>
         <Image
           key={`${item.key}:${imageRetry}`}
-          source={{ uri: fullImageUrl(item) }}
+          source={{ uri: previewFailed ? thumbnailUrl(item) : previewImageUrl(item) }}
           placeholder={{ uri: thumbnailUrl(item) }}
           placeholderContentFit="contain"
           contentFit="contain"
@@ -133,6 +135,10 @@ export default function WallpaperDetailScreen() {
             setImageFailed(false);
           }}
           onError={() => {
+            if (!previewFailed) {
+              setPreviewFailedKey(item.key);
+              return; // Existing catalog rows may not have generated previews yet.
+            }
             setImageLoading(false);
             setImageFailed(true);
           }}
@@ -153,7 +159,7 @@ export default function WallpaperDetailScreen() {
             <AppText variant="caption" tone="warn" align="center">
               The full-resolution image could not be loaded. Check your connection and image host; a Git LFS pointer is not an image.
             </AppText>
-            <Button title="Retry image" icon="refresh" inline onPress={() => { setImageFailed(false); setImageLoading(true); setImageRetry(value => value + 1); }} />
+            <Button title="Retry image" icon="refresh" inline onPress={() => { setImageFailed(false); setPreviewFailedKey(''); setImageLoading(true); setImageRetry(value => value + 1); }} />
           </View>
         ) : null}
       </View>

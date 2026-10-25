@@ -33,6 +33,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import io
+import json
 import logging
 import os
 import re
@@ -131,6 +132,9 @@ class ImageInfo:
     phash: str
     thumb: bytes
     fmt: str
+    preview: bytes
+    colors: str
+    aspect_ratio: str
 
 
 def render_thumbnail(img: Image.Image) -> bytes:
@@ -152,6 +156,45 @@ def render_thumbnail(img: Image.Image) -> bytes:
     return buffer.getvalue()
 
 
+def render_preview(img: Image.Image) -> bytes:
+    """Encode a full-frame, maximum-1440px WebP preview for routine web viewing."""
+    preview = img.copy()
+    preview.thumbnail((1440, 1440), _LANCZOS, reducing_gap=3.0)
+    buffer = io.BytesIO()
+    preview.save(buffer, "WEBP", quality=78, method=5)
+    preview.close()
+    return buffer.getvalue()
+
+
+def dominant_colors(img: Image.Image, limit: int = 5) -> str:
+    """Return a compact JSON array of the image's most frequent representative colors."""
+    small = img.copy()
+    small.thumbnail((160, 160), _LANCZOS)
+    quantized = small.quantize(colors=limit, method=Image.Quantize.FASTOCTREE)
+    palette = quantized.getpalette() or []
+    counts = sorted(quantized.getcolors(160 * 160) or [], reverse=True)
+    colors = []
+    for _count, index in counts[:limit]:
+        offset = index * 3
+        if offset + 2 < len(palette):
+            colors.append("#{:02x}{:02x}{:02x}".format(*palette[offset:offset + 3]))
+    quantized.close()
+    small.close()
+    return json.dumps(colors, separators=(",", ":"))
+
+
+def aspect_category(width: int, height: int) -> str:
+    """Classify common desktop/mobile proportions with tolerant ratio bands."""
+    ratio = width / max(1, height)
+    if ratio < 0.80:
+        return "portrait"
+    if ratio >= 21 / 9:
+        return "ultrawide"
+    if ratio >= 1.70:
+        return "landscape"
+    return "standard"
+
+
 def analyze_image(data: bytes) -> ImageInfo:
     """
     Decode ``data`` once and derive everything the pipeline needs.
@@ -165,7 +208,10 @@ def analyze_image(data: bytes) -> ImageInfo:
             raise ValueError(f"unsupported image dimensions {width}x{height}")
         rgb = im.convert("RGB")
     try:
-        return ImageInfo(width, height, dhash_hex(rgb), render_thumbnail(rgb), fmt)
+        return ImageInfo(
+            width, height, dhash_hex(rgb), render_thumbnail(rgb), fmt,
+            render_preview(rgb), dominant_colors(rgb), aspect_category(width, height),
+        )
     finally:
         rgb.close()
 
@@ -176,6 +222,16 @@ def regenerate_thumbnail(source_path: Path, dest_path: Path) -> None:
         rgb = im.convert("RGB")
     try:
         atomic_write_bytes(dest_path, render_thumbnail(rgb))
+    finally:
+        rgb.close()
+
+
+def regenerate_preview(source_path: Path) -> tuple[bytes, str]:
+    """Build the preview and color palette for an existing stored original."""
+    with Image.open(source_path) as im:
+        rgb = im.convert("RGB")
+    try:
+        return render_preview(rgb), dominant_colors(rgb)
     finally:
         rgb.close()
 
@@ -370,6 +426,8 @@ async def process_download(
             "date_spotted": date_spotted,
             "downloaded_at": utcnow_iso(),
             "quality": quality_label(info.width),
+            "colors": info.colors,
+            "aspect_ratio": info.aspect_ratio,
         }
 
         def commit_download() -> None:
@@ -378,6 +436,7 @@ async def process_download(
             try:
                 storage.write_image(filename, fetched.data)
                 storage.write_thumbnail(filename, info.thumb)
+                storage.write_preview(filename, info.preview)
                 with get_db(write=True) as conn:
                     if replaced:
                         delete_wallpaper(existing["phash"])

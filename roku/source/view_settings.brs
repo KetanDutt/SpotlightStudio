@@ -145,6 +145,16 @@ function BuildSettingsItems(state as object) as object
         kind: "cycle"
     })
 
+    sleepMinutes = sm.GetInt("ambientSleepMinutes", 0)
+    sleepLabel = "Off"
+    if sleepMinutes > 0 then sleepLabel = StrI(sleepMinutes).Trim() + " minutes"
+    items.Push({
+        title: "Ambient Sleep Timer",
+        desc: "Dim the screen after 30 minutes, 1 hour or 2 hours to reduce OLED burn-in",
+        value: sleepLabel,
+        kind: "cycle"
+    })
+
     items.Push({
         title: "Safe Area Guides",
         desc: "Broadcast action-safe (90%) and title-safe (80%) overlays",

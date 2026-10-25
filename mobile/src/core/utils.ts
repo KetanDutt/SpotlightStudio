@@ -68,6 +68,8 @@ export const DEFAULT_STATE: CatalogState = {
   source: '',
   quality: '',
   tag: '',
+  aspect: '',
+  color: '',
   sort: 'newest',
   view: 'grid',
   fav: false,
@@ -202,6 +204,24 @@ export function fmtRelative(iso: unknown, now = Date.now()): string {
 }
 
 /** Wallpaper resolution → quality bucket (identical boundaries to the web app). */
+export function aspectCategory(width: unknown, height: unknown): string {
+  const ratio = (Number(width) || 0) / Math.max(1, Number(height) || 0);
+  if (ratio < 0.8) return 'portrait';
+  if (ratio >= 21 / 9) return 'ultrawide';
+  if (ratio >= 1.7) return 'landscape';
+  return 'standard';
+}
+
+export function parseColors(value: unknown): string[] {
+  let colors: unknown = value;
+  if (typeof value === 'string') {
+    try { colors = JSON.parse(value); } catch { return []; }
+  }
+  return Array.isArray(colors)
+    ? [...new Set(colors.filter((color): color is string => typeof color === 'string' && /^#[0-9a-f]{6}$/i.test(color)).map(color => color.toLowerCase()))].slice(0, 5)
+    : [];
+}
+
 export function qualityClass(width: unknown): QualityClass {
   const w = Number(width) || 0;
   if (w >= 3840) return '4k';
@@ -262,6 +282,7 @@ export function normalizeCatalogRows(value: unknown): RawWallpaper[] {
       source_url: text(row.source_url), page_url: text(row.page_url), tags: text(row.tags),
       width: number(row.width), height: number(row.height), file_size: number(row.file_size),
       date_spotted: text(row.date_spotted), downloaded_at: text(row.downloaded_at), quality: text(row.quality),
+      colors: JSON.stringify(parseColors(row.colors)), aspect_ratio: text(row.aspect_ratio),
     });
   }
   return rows;
@@ -310,6 +331,9 @@ export function buildCatalog(rawItems: unknown): Catalog {
       title: '',
       generated: false,
       q: 'sd',
+      aspect: ['landscape', 'ultrawide', 'standard', 'portrait'].includes(raw.aspect_ratio ?? '')
+        ? raw.aspect_ratio : aspectCategory(raw.width, raw.height),
+      colors: parseColors(raw.colors),
       dateTs: 0,
       addedTs: 0,
       search: '',
@@ -421,6 +445,8 @@ export interface FilterInput {
   source?: string;
   quality?: string;
   tag?: string;
+  aspect?: string;
+  color?: string;
   fav?: boolean;
 }
 
@@ -433,6 +459,8 @@ export function applyFilters(catalog: Catalog, state: FilterInput, favorites?: S
     if (state.source && item.source !== state.source) continue;
     if (state.quality && item.q !== state.quality) continue;
     if (state.tag && !item.tags.includes(state.tag)) continue;
+    if (state.aspect && item.aspect !== state.aspect) continue;
+    if (state.color && !(item.colors ?? []).includes(state.color.toLowerCase())) continue;
     if (state.fav && !(favorites && favorites.has(item.key))) continue;
     if (terms.length && !terms.every((t) => item.search.includes(t))) continue;
     out.push(i);
@@ -454,6 +482,8 @@ export function filterKey(state: CatalogState, favVersion: number): string {
     state.source,
     state.quality,
     state.tag,
+    state.aspect,
+    state.color,
     state.sort,
     state.fav ? 1 : 0,
     state.fav ? favVersion : 0,
@@ -485,6 +515,8 @@ export function encodeState(state: Partial<CatalogState>): Record<string, string
   if (s.source) params.source = s.source;
   if (s.quality) params.quality = s.quality;
   if (s.tag) params.tag = s.tag;
+  if (['landscape', 'ultrawide', 'standard', 'portrait'].includes(s.aspect)) params.aspect = s.aspect;
+  if (/^#[0-9a-f]{6}$/i.test(s.color)) params.color = s.color.toLowerCase();
   if (s.sort !== DEFAULT_STATE.sort) params.sort = s.sort;
   if (s.view !== DEFAULT_STATE.view) params.view = s.view;
   if (s.fav) params.fav = '1';
@@ -506,6 +538,10 @@ export function decodeState(params: Record<string, string | string[] | undefined
   const quality = pick('quality');
   if (QUALITIES.includes(quality as QualityClass)) state.quality = quality;
   state.tag = pick('tag').slice(0, 60).toLowerCase();
+  const aspect = pick('aspect');
+  if (['landscape', 'ultrawide', 'standard', 'portrait'].includes(aspect)) state.aspect = aspect;
+  const color = pick('color');
+  if (/^#[0-9a-f]{6}$/i.test(color)) state.color = color.toLowerCase();
   const sort = pick('sort');
   if (Object.prototype.hasOwnProperty.call(SORTS, sort)) state.sort = sort as SortKey;
   const view = pick('view');

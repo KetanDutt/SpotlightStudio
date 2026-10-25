@@ -53,6 +53,114 @@ def _set_windows(path: Path) -> None:
         raise WallpaperError(f"Windows refused the wallpaper (error {ctypes.get_last_error()}).")
 
 
+def _set_windows_advanced(path: Path, fit: str = "Fill", monitor_id: str | None = None) -> None:
+    """Use IDesktopWallpaper for per-monitor targets and native fit modes."""
+    import ctypes
+    import uuid
+
+    class GUID(ctypes.Structure):
+        _fields_ = [("Data1", ctypes.c_uint32), ("Data2", ctypes.c_uint16),
+                    ("Data3", ctypes.c_uint16), ("Data4", ctypes.c_ubyte * 8)]
+
+        @classmethod
+        def parse(cls, value: str):
+            return cls.from_buffer_copy(uuid.UUID(value).bytes_le)
+
+    ole32 = ctypes.OleDLL("ole32")  # type: ignore[attr-defined]
+    ole32.CoInitialize.argtypes = [ctypes.c_void_p]
+    ole32.CoInitialize.restype = ctypes.c_long
+    ole32.CoUninitialize.argtypes = []
+    ole32.CoCreateInstance.argtypes = [ctypes.POINTER(GUID), ctypes.c_void_p, ctypes.c_uint32,
+                                       ctypes.POINTER(GUID), ctypes.POINTER(ctypes.c_void_p)]
+    ole32.CoCreateInstance.restype = ctypes.c_long
+    clsid = GUID.parse("C2CF3110-460E-4FC1-B9D0-8A1C0C9CC4BD")
+    iid = GUID.parse("B92B56A9-8B55-4E14-9A89-0199BBB6F93B")
+    modes = {"fill": 0, "fit": 1, "stretch": 2, "tile": 3, "center": 4, "span": 5}
+    mode = modes.get(fit.lower())
+    if mode is None:
+        raise WallpaperError("Fit mode must be Fill, Fit, Stretch, Tile, Center, or Span.")
+    initialized = ole32.CoInitialize(None) >= 0
+    pointer = ctypes.c_void_p()
+    try:
+        hr = ole32.CoCreateInstance(ctypes.byref(clsid), None, 23, ctypes.byref(iid), ctypes.byref(pointer))
+        if hr < 0 or not pointer.value:
+            raise WallpaperError(f"Could not access the Windows desktop wallpaper service (0x{hr & 0xffffffff:08X}).")
+        table = ctypes.cast(pointer, ctypes.POINTER(ctypes.POINTER(ctypes.c_void_p))).contents
+        call_position = ctypes.WINFUNCTYPE(ctypes.c_long, ctypes.c_void_p, ctypes.c_int)(table[10])
+        call_wallpaper = ctypes.WINFUNCTYPE(ctypes.c_long, ctypes.c_void_p, ctypes.c_wchar_p,
+                                            ctypes.c_wchar_p)(table[3])
+        hr = call_position(pointer, mode)
+        if hr < 0:
+            raise WallpaperError(f"Windows rejected the fit mode (0x{hr & 0xffffffff:08X}).")
+        hr = call_wallpaper(pointer, monitor_id, str(path))
+        if hr < 0:
+            raise WallpaperError(f"Windows could not set the wallpaper (0x{hr & 0xffffffff:08X}).")
+    finally:
+        if pointer.value:
+            table = ctypes.cast(pointer, ctypes.POINTER(ctypes.POINTER(ctypes.c_void_p))).contents
+            release = ctypes.WINFUNCTYPE(ctypes.c_ulong, ctypes.c_void_p)(table[2])
+            release(pointer)
+        if initialized:
+            ole32.CoUninitialize()
+
+
+def get_windows_monitors() -> list[dict[str, str]]:
+    """Return IDesktopWallpaper device-path IDs usable by the per-monitor setter."""
+    import ctypes
+    import uuid
+
+    class GUID(ctypes.Structure):
+        _fields_ = [("Data1", ctypes.c_uint32), ("Data2", ctypes.c_uint16),
+                    ("Data3", ctypes.c_uint16), ("Data4", ctypes.c_ubyte * 8)]
+
+        @classmethod
+        def parse(cls, value: str):
+            return cls.from_buffer_copy(uuid.UUID(value).bytes_le)
+
+    ole32 = ctypes.OleDLL("ole32")  # type: ignore[attr-defined]
+    ole32.CoInitialize.argtypes = [ctypes.c_void_p]
+    ole32.CoInitialize.restype = ctypes.c_long
+    ole32.CoUninitialize.argtypes = []
+    ole32.CoCreateInstance.argtypes = [ctypes.POINTER(GUID), ctypes.c_void_p, ctypes.c_uint32,
+                                       ctypes.POINTER(GUID), ctypes.POINTER(ctypes.c_void_p)]
+    ole32.CoCreateInstance.restype = ctypes.c_long
+    ole32.CoTaskMemFree.argtypes = [ctypes.c_void_p]
+    initialized = ole32.CoInitialize(None) >= 0
+    pointer = ctypes.c_void_p()
+    try:
+        clsid = GUID.parse("C2CF3110-460E-4FC1-B9D0-8A1C0C9CC4BD")
+        iid = GUID.parse("B92B56A9-8B55-4E14-9A89-0199BBB6F93B")
+        hr = ole32.CoCreateInstance(ctypes.byref(clsid), None, 23, ctypes.byref(iid), ctypes.byref(pointer))
+        if hr < 0 or not pointer.value:
+            raise WallpaperError(f"Could not enumerate Windows displays (0x{hr & 0xffffffff:08X}).")
+        table = ctypes.cast(pointer, ctypes.POINTER(ctypes.POINTER(ctypes.c_void_p))).contents
+        get_count = ctypes.WINFUNCTYPE(ctypes.c_long, ctypes.c_void_p, ctypes.POINTER(ctypes.c_uint))(table[6])
+        get_path = ctypes.WINFUNCTYPE(ctypes.c_long, ctypes.c_void_p, ctypes.c_uint,
+                                      ctypes.POINTER(ctypes.c_wchar_p))(table[5])
+        count = ctypes.c_uint()
+        hr = get_count(pointer, ctypes.byref(count))
+        if hr < 0:
+            raise WallpaperError(f"Windows could not read display count (0x{hr & 0xffffffff:08X}).")
+        monitors = []
+        for index in range(count.value):
+            path = ctypes.c_wchar_p()
+            hr = get_path(pointer, index, ctypes.byref(path))
+            if hr < 0:
+                continue
+            try:
+                device = path.value or ""
+                monitors.append({"id": device, "name": device.rsplit("#", 2)[-2] if "#" in device else device})
+            finally:
+                ole32.CoTaskMemFree(ctypes.cast(path, ctypes.c_void_p))
+        return monitors
+    finally:
+        if pointer.value:
+            table = ctypes.cast(pointer, ctypes.POINTER(ctypes.POINTER(ctypes.c_void_p))).contents
+            ctypes.WINFUNCTYPE(ctypes.c_ulong, ctypes.c_void_p)(table[2])(pointer)
+        if initialized:
+            ole32.CoUninitialize()
+
+
 def _run(cmd: list[str]) -> None:
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=20, check=False)
@@ -101,17 +209,24 @@ def _set_linux(path: Path) -> None:
     )
 
 
-def set_desktop_wallpaper(path: Path) -> None:
-    """Apply ``path`` as the desktop wallpaper of the current user."""
+def set_desktop_wallpaper(path: Path, *, fit: str = "Fill", monitor_id: str | None = None) -> None:
+    """Apply an image; Windows supports IDesktopWallpaper fit and monitor options."""
     path = Path(path).resolve()
     if not path.is_file():
         raise WallpaperError("The image file does not exist on this machine.")
     system = platform.system()
     if system == "Windows":
-        _set_windows(path)
+        if fit.lower() == "fill" and monitor_id is None:
+            _set_windows(path)
+        else:
+            _set_windows_advanced(path, fit, monitor_id)
     elif system == "Darwin":
+        if monitor_id is not None or fit.lower() != "fill":
+            raise UnsupportedPlatform("Fit and per-monitor options are currently supported on Windows only.")
         _set_macos(path)
     elif system == "Linux":
+        if monitor_id is not None or fit.lower() != "fill":
+            raise UnsupportedPlatform("Fit and per-monitor options are currently supported on Windows only.")
         _set_linux(path)
     else:
         raise UnsupportedPlatform(f"Setting the wallpaper is not supported on {system}.")

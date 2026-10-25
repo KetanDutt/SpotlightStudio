@@ -184,8 +184,11 @@ Most used tags: `?limit=50` (1–500), optional `source`.
 [{ "tag": "outdoors", "count": 5102 }, { "tag": "nature", "count": 4632 }]
 ```
 
-### `POST /api/wallpapers/{id}/set-wallpaper`
-Applies the image as the desktop background of the machine running the server — Windows (`SystemParametersInfoW`), macOS (AppleScript), GNOME/Cinnamon/MATE (`gsettings`), KDE (`plasma-apply-wallpaperimage`).
+### `GET /api/desktop/monitors`
+Lists Windows monitor device-path IDs that can be passed to the setter. Returns an empty array on non-Windows platforms.
+
+### `POST /api/wallpapers/{id}/set-wallpaper?fit=Fit&monitor=...`
+Applies the image as the desktop background of the machine running the server — Windows (`IDesktopWallpaper`, including per-monitor targets and Fill/Fit/Stretch/Tile/Center/Span), macOS (AppleScript), GNOME/Cinnamon/MATE (`gsettings`), KDE (`plasma-apply-wallpaperimage`). Omit `monitor` to assign the image to all displays. Non-default fit and per-monitor options are Windows-only.
 `200 {"success": true, "path": "…"}` · `404` unknown wallpaper or missing file · `409` the file is a Git-LFS pointer · `501` unsupported desktop · `400` the OS refused.
 
 ---
@@ -216,6 +219,7 @@ Streamed downloads of **every column** of every row (constant memory). The CSV s
 | `GET /api/library/check` | read-only consistency report: missing images/thumbnails, orphan files, Git-LFS pointers, invalid hashes, duplicate pairs (`ok: true` when clean) |
 | `POST /api/maintenance/dedupe` | sweep the library for near-duplicates → `{"removed": n}` |
 | `POST /api/maintenance/thumbnails` | rebuild missing thumbnails → `{"created": n}` |
+| `POST /api/maintenance/previews` | generate missing WebP previews and enrich palette/aspect metadata → `{"created": n}` |
 
 The two `POST` endpoints return `409` while the crawler is running.
 

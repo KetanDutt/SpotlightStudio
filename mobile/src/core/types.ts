@@ -29,6 +29,9 @@ export interface RawWallpaper {
   date_spotted?: string;
   downloaded_at?: string;
   quality?: string;
+  /** JSON array of representative `#rrggbb` palette swatches. */
+  colors?: string | string[];
+  aspect_ratio?: string;
 }
 
 /** A wallpaper enriched for rendering. `raw` is never mutated. */
@@ -43,6 +46,8 @@ export interface Wallpaper {
   /** True when the title had to be generated from tags (the source title was a hash). */
   generated: boolean;
   q: QualityClass;
+  aspect?: string;
+  colors?: string[];
   dateTs: number;
   addedTs: number;
   /** Folded search blob (title + tags + date + source). */
@@ -67,6 +72,8 @@ export interface CatalogState {
   source: string;
   quality: string;
   tag: string;
+  aspect: string;
+  color: string;
   sort: SortKey;
   /** `grid` or `list`. */
   view: ViewMode;

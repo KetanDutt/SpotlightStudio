@@ -1,9 +1,10 @@
 # Spotlight Studio — native app 1.2.0
 
 Expo SDK 57 / React Native client for the same Spotlight wallpaper catalog and Still Glass design.
-Browse/search offline, discover a UTC daily image, keep local favorites/history, back up favorites,
-export the catalog, save/share validated images and apply/rotate wallpapers on Android. iOS saves
-explicitly to Photos for manual application; it cannot directly set wallpaper.
+Browse/search offline, discover a UTC daily image, filter by aspect/palette, keep local favorites/history,
+back up favorites in the shared web/mobile JSON schema, export the catalog, and apply/rotate wallpapers
+on Android. Detail views use compact WebP previews when available; save/share actions fetch the original.
+iOS saves explicitly to Photos for manual application; it cannot directly set wallpaper.
 
 **Implementation and JS/config checks are complete; store release is still gated.**
 See [native release evidence](../docs/NATIVE_RELEASE.md) and the [full mobile guide](../docs/MOBILE.md).

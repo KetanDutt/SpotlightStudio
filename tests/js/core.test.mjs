@@ -249,6 +249,23 @@ test("catalog tolerates malformed rows and refuses traversal/duplicate keys", ()
   assert.deepEqual(catalog.items.map(item => item.id), [1, 5]);
 });
 
+test('orientation and dominant-color filters are derived safely and share in URLs', () => {
+  const rows = [
+    row(1, { width: 1920, height: 1080, colors: '["#112233"]', aspect_ratio: 'landscape' }),
+    row(2, { width: 1080, height: 1920, colors: '["#abcdef"]' }),
+    row(3, { width: 3440, height: 1440, colors: 'not-json' }),
+    row(4, { width: 1920, height: 1200, colors: '[]' }),
+  ];
+  const catalog = core.buildCatalog(rows);
+  assert.deepEqual(core.filterAndSort(catalog, { ...core.DEFAULT_STATE, aspect: 'portrait' }).map(item => item.id), [2]);
+  assert.deepEqual(core.filterAndSort(catalog, { ...core.DEFAULT_STATE, color: '#112233' }).map(item => item.id), [1]);
+  assert.deepEqual(core.filterAndSort(catalog, { ...core.DEFAULT_STATE, aspect: 'standard' }).map(item => item.id), [4]);
+  assert.deepEqual(core.filterAndSort(catalog, { ...core.DEFAULT_STATE, aspect: 'ultrawide' }).map(item => item.id), [3]);
+  const encoded = core.encodeState({ ...core.DEFAULT_STATE, aspect: 'ultrawide', color: '#aabbcc' });
+  assert.deepEqual(core.decodeState(encoded), { ...core.DEFAULT_STATE, aspect: 'ultrawide', color: '#aabbcc' });
+  assert.equal(core.decodeState('aspect=unknown&color=red').aspect, '');
+});
+
 test('daily wallpaper uses a UTC day and stable IDs, not order or metadata', () => {
   const rows = Array.from({ length: 100 }, (_, i) => row(i + 1));
   const catalog = core.buildCatalog(rows);
@@ -273,6 +290,13 @@ test('image paths reject encoded traversal and safely encode readable filenames'
   assert.equal(core.imageUrl({ local: true }, 'peapix/Mount Fuji.jpg', false), '/images/peapix/Mount%20Fuji.jpg');
   assert.equal(core.safeHttpUrl('https://username:password@example.com/x'), '');
   assert.equal(core.deriveImageBase({}, 'javascript:alert(1)'), core.DEFAULT_IMAGE_BASE);
+});
+
+test('preview URLs map originals to WebP while downloads retain their original extension', () => {
+  assert.equal(core.previewUrl({ local: true }, 'peapix/Mount Fuji.jpg'), '/images/previews/peapix/Mount%20Fuji.webp');
+  assert.equal(core.previewUrl({ local: false, base: 'https://github.com/KetanDutt/SpotlightStudio/blob/main' }, 'peapix/a.png'),
+    'https://github.com/KetanDutt/SpotlightStudio/blob/main/images/previews/peapix/a.webp?raw=true');
+  assert.equal(core.previewUrl({ local: true }, '../unsafe.jpg'), '');
 });
 
 test('unpaired UTF-16 paths and source prototype keys cannot break a gallery', () => {

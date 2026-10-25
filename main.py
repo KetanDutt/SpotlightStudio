@@ -345,6 +345,83 @@ def run_daily(set_as_wallpaper: bool = False) -> int:
         return 0
 
 
+def run_tray_mode(host: str, port: int) -> int:
+    """Start the local API and optional system tray without opening a main window."""
+    from src.tray import run_tray as run
+
+    server = None
+    if port_in_use(host, port):
+        if not is_spotlight_studio(host, port):
+            log.error("Port %d is used by another program.", port)
+            return 1
+    else:
+        server = ServerThread(host, port)
+        if not server.start():
+            log.error("The local API could not start.")
+            return 1
+    try:
+        return run(local_host(host), port, server)
+    except RuntimeError as exc:
+        if server is not None:
+            server.stop()
+        log.error("%s", exc)
+        return 2
+
+
+def run_rotation_daemon(hours: float, tag: str = "", source: str = "", favorites_file: str = "") -> int:
+    """Rotate the desktop background on a quiet daemon thread until interrupted."""
+    import random
+
+    from src import storage
+    from src.config import settings
+    from src.database import get_all_wallpapers, init_db
+    from src.wallpaper import WallpaperError, set_desktop_wallpaper
+
+    init_db()
+    favorite_keys: set[str] | None = None
+    if favorites_file:
+        try:
+            payload = json.loads(Path(favorites_file).read_text(encoding="utf-8"))
+            if not isinstance(payload, dict):
+                raise ValueError("Expected a Spotlight Studio favorites backup object.")
+            if payload.get("format") != "spotlight-favorites" or payload.get("version") != 1:
+                raise ValueError("Expected a Spotlight Studio favorites backup (version 1).")
+            keys = payload.get("favorites")
+            if not isinstance(keys, list) or not all(isinstance(key, str) for key in keys):
+                raise ValueError("The favorites backup must contain a list of filenames.")
+            for key in keys:
+                storage.image_path(key)  # reject path traversal and unsafe absolute paths
+            favorite_keys = set(keys)
+        except (OSError, ValueError, TypeError) as exc:
+            log.error("Could not read favorites backup: %s", exc)
+            return 2
+    interval = max(0.25, hours) * 3600
+    previous = ""
+    log.info("Desktop rotation started: every %.2f hours%s%s.", hours,
+             f", tag={tag}" if tag else "", f", favorites={favorites_file}" if favorites_file else "")
+    try:
+        while True:
+            rows, _total = get_all_wallpapers(page=1, per_page=100000, source=source, tag=tag)
+            if favorite_keys is not None:
+                rows = [row for row in rows if row["filename"] in favorite_keys]
+            rows = [row for row in rows if row["filename"] != previous and
+                    (settings.IMAGES_DIR / row["filename"]).is_file()]
+            if not rows:
+                log.warning("No wallpaper matches the configured rotation source/tag/favorites.")
+            else:
+                row = random.choice(rows)
+                try:
+                    set_desktop_wallpaper(settings.IMAGES_DIR / row["filename"])
+                    previous = row["filename"]
+                    log.info("Rotated desktop wallpaper to %s (%s).", row["title"], row["filename"])
+                except WallpaperError as exc:
+                    log.error("Wallpaper rotation failed: %s", exc)
+            time.sleep(interval)
+    except KeyboardInterrupt:
+        log.info("Desktop rotation stopped.")
+        return 0
+
+
 def run_set_wallpaper(wallpaper_id: int) -> int:
     from src.config import settings
     from src.database import get_wallpaper, init_db
@@ -396,12 +473,23 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Set the desktop background to today's daily spotlight wallpaper and exit.")
     action.add_argument("--set-wallpaper", type=int, metavar="ID",
                         help="Set the desktop background to wallpaper ID and exit.")
+    action.add_argument("--rotate-daemon", action="store_true",
+                        help="Run a background desktop wallpaper rotation daemon until stopped.")
+    action.add_argument("--tray", action="store_true",
+                        help="Run the system tray companion without opening the full window.")
     action.add_argument("--version", action="store_true", help="Print the version and exit.")
     parser.add_argument("--host", default=settings.HOST, help=f"Interface (default: {settings.HOST})")
     parser.add_argument("--port", type=int, default=settings.PORT,
                         help=f"Port (default: {settings.PORT})")
     parser.add_argument("--source", choices=["both", "peapix", "win10spotlight"], default="both",
                         help="Source(s) for --crawl (default: both).")
+    parser.add_argument("--rotate-hours", type=float, default=6,
+                        help="Wallpaper rotation interval in hours (minimum 15 minutes).")
+    parser.add_argument("--rotate-tag", default="", help="Limit rotation to a catalog tag.")
+    parser.add_argument("--rotate-source", choices=["", "peapix", "win10spotlight"], default="",
+                        help="Limit rotation to one source.")
+    parser.add_argument("--rotate-favorites", default="", metavar="JSON",
+                        help="Limit rotation to filenames in a portable favorites backup JSON.")
     parser.add_argument("--mode", choices=["quick", "full", "repair"], default="quick",
                         help="Mode for --crawl: quick = newest pages, full = every page, "
                              "repair = back-fill titles/tags (default: quick).")
@@ -427,6 +515,13 @@ def main(argv: list[str] | None = None) -> int:
         return run_daily(set_as_wallpaper=args.set_daily)
     if args.set_wallpaper is not None:
         return run_set_wallpaper(args.set_wallpaper)
+    if args.tray:
+        return run_tray_mode(args.host, args.port)
+    if args.rotate_daemon:
+        if args.rotate_hours < 0.25:
+            build_parser().error("--rotate-hours must be at least 0.25 (15 minutes)")
+        return run_rotation_daemon(args.rotate_hours, args.rotate_tag.strip().lower(),
+                                   args.rotate_source, args.rotate_favorites)
     if args.check or args.sync_catalog or args.crawl:
         from src.database import close_connection
         from src.downloader import shutdown_cpu_pool

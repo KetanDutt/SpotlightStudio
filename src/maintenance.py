@@ -26,7 +26,7 @@ from src.database import (
     merge_wallpaper_metadata,
     reset_runtime_state,
 )
-from src.downloader import get_cpu_pool, regenerate_thumbnail
+from src.downloader import get_cpu_pool, regenerate_preview, regenerate_thumbnail
 from src.hashing import (
     DEFAULT_MAX_DISTANCE,
     chunk_keys,
@@ -205,6 +205,44 @@ def deduplicate_downloaded_wallpapers(max_distance: int = DEFAULT_MAX_DISTANCE) 
 # ══════════════════════════════════════════════════════════════════════════
 # Thumbnails
 # ══════════════════════════════════════════════════════════════════════════
+
+
+def create_missing_previews() -> int:
+    """Generate absent WebP previews and backfill palette/aspect metadata."""
+    with get_db() as conn:
+        rows = [dict(row) for row in conn.execute(
+            "SELECT id, filename, width, height, colors, aspect_ratio FROM wallpapers"
+        )]
+    created = 0
+    for row in rows:
+        try:
+            full = storage.image_path(row["filename"])
+            target = storage.preview_path(row["filename"])
+        except ValueError:
+            continue
+        if not full.is_file() or is_lfs_pointer(full):
+            continue
+        try:
+            needs_preview = not target.is_file()
+            needs_palette = not row["colors"] or row["colors"] == "[]"
+            if not needs_preview and not needs_palette and row["aspect_ratio"]:
+                continue
+            preview, colors = regenerate_preview(full)
+            if needs_preview:
+                storage.write_preview(row["filename"], preview)
+            else:
+                colors = row["colors"]
+            ratio = row["width"] / max(1, row["height"])
+            aspect = "portrait" if ratio < 0.8 else "ultrawide" if ratio >= 21 / 9 else "landscape" if ratio >= 1.7 else "standard"
+            with get_db(write=True) as conn:
+                conn.execute("UPDATE wallpapers SET colors=?, aspect_ratio=? WHERE id=?",
+                             (colors, aspect, row["id"]))
+            created += 1
+        except (OSError, ValueError) as exc:
+            log.warning("Could not generate preview for %s: %s", row["filename"], exc)
+    if created:
+        export_catalog_json()
+    return created
 
 
 def create_missing_thumbnails() -> int:

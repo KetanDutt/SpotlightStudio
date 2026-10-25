@@ -32,6 +32,15 @@ export interface FilterSheetProps {
 export function FilterSheet({ visible, onClose, catalog, state, onChange, onReset, tags, resultCount }: FilterSheetProps) {
   const sourceCounts = catalog?.sourceCounts ?? {};
   const qualityCounts = catalog?.qualityCounts ?? {};
+  const orientations = [
+    { key: 'landscape', label: 'Landscape' }, { key: 'ultrawide', label: 'Ultrawide' },
+    { key: 'standard', label: 'Standard' }, { key: 'portrait', label: 'Portrait' },
+  ];
+  const colorCounts = new Map<string, number>();
+  for (const item of catalog?.items ?? []) for (const color of (item.colors ?? []).slice(0, 3)) {
+    colorCounts.set(color, (colorCounts.get(color) ?? 0) + 1);
+  }
+  const colors = [...colorCounts].sort((a, b) => b[1] - a[1]).slice(0, 8);
 
   return (
     <Sheet
@@ -76,6 +85,26 @@ export function FilterSheet({ visible, onClose, catalog, state, onChange, onRese
             ))}
           </View>
         </Section>
+
+        <Section title="Orientation">
+          <View style={styles.chips}>
+            <Chip label="Any" selected={!state.aspect} onPress={() => onChange({ aspect: '' })} />
+            {orientations.map(({ key, label }) => (
+              <Chip key={key} label={label} selected={state.aspect === key}
+                onPress={() => onChange({ aspect: state.aspect === key ? '' : key })} />
+            ))}
+          </View>
+        </Section>
+
+        {colors.length ? <Section title="Dominant color">
+          <View style={styles.chips}>
+            <Chip label="Any" selected={!state.color} onPress={() => onChange({ color: '' })} />
+            {colors.map(([color, count]) => (
+              <Chip key={color} label={color} count={count} selected={state.color === color}
+                onPress={() => onChange({ color: state.color === color ? '' : color })} />
+            ))}
+          </View>
+        </Section> : null}
 
         <Section title="Sort by">
           <View style={styles.chips}>

@@ -45,7 +45,11 @@
 ## What’s new in 2.6 — Roku TV, daily automation and polish
 
 - **Roku TV channel:** A dedicated 10-foot living room experience built on a 60 fps double-buffered 2D canvas with home-screen theme switcher, ambient screensavers, trial mode, and in-app purchase store architecture.
-- **Daily automation & CLI:** `python main.py --daily` prints today's deterministic pick and `--set-daily` immediately applies it to your desktop background across Windows, macOS, and Linux.
+- **Daily automation & CLI:** `python main.py --daily` prints today's deterministic pick and `--set-daily` immediately applies it to your desktop background across Windows, macOS, and Linux. `--rotate-daemon --rotate-hours 6` rotates local backgrounds; `--rotate-tag mountains` and `--rotate-favorites backup.json` scope the pool.
+- **Smaller, richer media:** New downloads generate a thumbnail, a 1440px WebP preview, and palette/aspect metadata. Browsing uses previews; full-resolution downloads remain explicit. Run `POST /api/maintenance/previews` after `git lfs pull` to backfill existing files.
+- **Discovery and organization:** Filter by orientation and dominant color, pan/zoom the viewer, multi-select wallpapers for favorites or ZIP downloads, and create named local collections.
+- **Windows integration:** Choose Fill/Fit/Stretch/Tile/Center/Span and assign wallpapers per display from the desktop viewer. `GET /api/desktop/monitors` lists target IDs.
+- **System tray (optional):** Install `requirements-desktop.txt`, then run `python main.py --tray` for quick Next/Daily wallpaper actions and crawler controls without keeping the window open. The tray tooltip shows crawler progress.
 - **Enhanced API:** `/api/wallpapers/daily` and `/api/wallpapers/daily/image` endpoints for scheduled background rotations and script integration.
 - **Expanded keyboard controls:** `T` to cycle theme (dark, light, system) and `W` to apply the current wallpaper in desktop mode.
 - **Obsidian Liquid Glass branding:** Unified master asset generator producing 4x supersampled adaptive icons and splash screens across web, mobile, and television.
@@ -109,6 +113,8 @@ python main.py                         # desktop window
 python main.py --server [--host 0.0.0.0 --port 8765]
 python main.py --daily                 # print today's daily spotlight wallpaper JSON
 python main.py --set-daily             # set today's daily spotlight as desktop wallpaper
+python main.py --rotate-daemon --rotate-hours 6 --rotate-tag mountains
+python main.py --tray                  # optional system tray companion
 python main.py --set-wallpaper 42      # set specific wallpaper ID as desktop wallpaper
 python main.py --crawl --mode quick    # one-shot update without UI (cron / Task Scheduler)
 python main.py --crawl --mode full --source peapix

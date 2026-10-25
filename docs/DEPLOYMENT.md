@@ -19,8 +19,7 @@ The allow-listed build in `dist/site/` contains: `index.html`, `static/`, `sw.js
 
 1. Push the repository to GitHub (images must be pushed through **Git LFS**: `git lfs install` first).
 2. **Settings → Pages → Build and deployment**: select **GitHub Actions**.
-3. Run `.github/workflows/pages.yml` manually, or push a site/catalog change to `main`.
-   The workflow runs `python scripts/build_site.py` and publishes only `dist/site/`.
+3. Push to `main` or dispatch `.github/workflows/ci.yml`. The consolidated workflow runs Python/JavaScript checks, validates the catalog, compiles the site, then deploys `dist/site/` to GitHub Pages.
 4. After successful deployment the site is live at `https://<user>.github.io/<repository>/`.
 
 **Do not publish the repository root.** Generic static hosts do not apply the FastAPI
@@ -33,12 +32,12 @@ The build intentionally excludes local images: the static UI uses GitHub LFS URL
 GitHub Pages cannot serve Git-LFS objects (it would deliver the 130-byte pointer files). The static UI therefore loads every image through
 
 ```
-https://github.com/<owner>/<repo>/blob/main/images/<thumbs/>…?raw=true
+https://github.com/<owner>/<repo>/blob/main/images/{thumbs,previews}/…?raw=true
 ```
 
 which GitHub redirects to the real LFS object. The `<owner>/<repo>` part is **derived from the Pages URL** (`<owner>.github.io/<repo>/`), so forks work without code changes. Other hosting (custom domain, other branch) → add `<meta name="image-base" content="https://github.com/<owner>/<repo>/blob/<branch>">` to `index.html` (and extend `img-src` of the CSP, see [CONFIGURATION.md](CONFIGURATION.md#front-end-static-showcase-options)).
 
-Be aware that **LFS storage and bandwidth are quota-limited** on GitHub (the free plan is small; large libraries need a paid data pack). Thumbnails (~4 KB) are cheap; every *full-resolution* view or download costs 1–2 MB of bandwidth.
+Be aware that **LFS storage and bandwidth are quota-limited** on GitHub. Gallery cards use thumbnails; the detail viewer uses a generated 1440px WebP preview when available, while explicit download / desktop wallpaper actions fetch the original. Generate previews for a fully hydrated local library with `POST /api/maintenance/previews` after `git lfs pull`; new crawler downloads produce them automatically.
 
 ### Updating the published data
 
@@ -129,7 +128,7 @@ Run a *full* crawl (`--mode full`) occasionally, and *repair* (`--mode repair`) 
 
 1. Back up `data/wallpapers.db`.
 2. Pull the new version; `pip install -r requirements.txt` (the launchers do this automatically). `imagehash`, NumPy and SciPy are no longer needed and can be uninstalled.
-3. Start the app: the database is upgraded to schema v3 automatically (v2 normalization plus hash-chunk indexes; wallpaper rows/files are not deleted by these migrations).
+3. Start the app: the database is upgraded to schema v4 automatically (v2 normalization, hash-chunk indexes, and palette/aspect metadata columns; existing wallpaper rows/files are preserved).
 4. Recommended once: **Repair metadata** to back-fill the missing Peapix titles/tags and the hash-like Windows10Spotlight titles.
 
 Behavioural changes to be aware of:

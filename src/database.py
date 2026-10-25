@@ -62,7 +62,7 @@ from src.utils import (
 
 log = logging.getLogger("database")
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 #: Columns published in the static catalog / ``/api/catalog`` (everything except ``phash``).
 CATALOG_FIELDS: tuple[str, ...] = (
@@ -79,6 +79,8 @@ CATALOG_FIELDS: tuple[str, ...] = (
     "date_spotted",
     "downloaded_at",
     "quality",
+    "colors",
+    "aspect_ratio",
 )
 
 #: Sort keys accepted by :func:`get_all_wallpapers`.  User input never reaches the
@@ -204,7 +206,9 @@ CREATE TABLE IF NOT EXISTS wallpapers (
     tags          TEXT    NOT NULL DEFAULT '',
     date_spotted  TEXT    NOT NULL DEFAULT '',
     downloaded_at TEXT    NOT NULL,
-    quality       TEXT    NOT NULL DEFAULT 'UHD'
+    quality       TEXT    NOT NULL DEFAULT 'UHD',
+    colors        TEXT    NOT NULL DEFAULT '[]',
+    aspect_ratio  TEXT    NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS scrape_queue (
@@ -322,7 +326,13 @@ def _migrate_to_v3(conn: sqlite3.Connection) -> None:
                      f"ON wallpapers({expression})")
 
 
-_MIGRATIONS = {2: _migrate_to_v2, 3: _migrate_to_v3}
+def _migrate_to_v4(conn: sqlite3.Connection) -> None:
+    """Persist presentation metadata derived locally during image analysis."""
+    _add_column(conn, "wallpapers", "colors", "TEXT NOT NULL DEFAULT '[]'")
+    _add_column(conn, "wallpapers", "aspect_ratio", "TEXT NOT NULL DEFAULT ''")
+
+
+_MIGRATIONS = {2: _migrate_to_v2, 3: _migrate_to_v3, 4: _migrate_to_v4}
 
 
 def init_db() -> None:
@@ -440,7 +450,7 @@ def upsert_wallpaper(data: dict[str, Any]) -> bool:
     record["tags"] = normalize_tags(record.get("tags"))
     record["quality"] = canonical_quality(record.get("quality"), int(record.get("width") or 0))
     for key, default in (("title", ""), ("page_url", ""), ("width", 0), ("height", 0),
-                         ("file_size", 0)):
+                         ("file_size", 0), ("colors", "[]"), ("aspect_ratio", "")):
         record.setdefault(key, default)
 
     with get_db(write=True) as conn:
@@ -451,10 +461,12 @@ def upsert_wallpaper(data: dict[str, Any]) -> bool:
             """
             INSERT INTO wallpapers
                 (phash, filename, title, source, source_url, page_url,
-                 width, height, file_size, tags, date_spotted, downloaded_at, quality)
+                 width, height, file_size, tags, date_spotted, downloaded_at, quality,
+                 colors, aspect_ratio)
             VALUES
                 (:phash, :filename, :title, :source, :source_url, :page_url,
-                 :width, :height, :file_size, :tags, :date_spotted, :downloaded_at, :quality)
+                 :width, :height, :file_size, :tags, :date_spotted, :downloaded_at, :quality,
+                 :colors, :aspect_ratio)
             ON CONFLICT(phash) DO UPDATE SET
                 filename      = excluded.filename,
                 source_url    = excluded.source_url,
@@ -462,6 +474,8 @@ def upsert_wallpaper(data: dict[str, Any]) -> bool:
                 height        = excluded.height,
                 file_size     = excluded.file_size,
                 quality       = excluded.quality,
+                colors        = excluded.colors,
+                aspect_ratio  = excluded.aspect_ratio,
                 downloaded_at = excluded.downloaded_at
             """,
             record,
