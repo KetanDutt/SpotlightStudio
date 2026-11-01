@@ -63,12 +63,11 @@ code, kbd { font-family: var(--font-mono); }
 
 /* Desktop-only elements stay hidden unless a local FastAPI backend is active. */
 .desktop-only { display: none !important; }
-.is-desktop .desktop-only { display: revert !important; }
 .is-desktop a.menu-item.desktop-only { display: flex !important; }
-.is-desktop .btn.desktop-only { display: inline-flex !important; }
 .is-desktop .banner.desktop-only:not([hidden]) { display: flex !important; }
-.is-desktop #crawler.desktop-only { display: flex !important; }
-.is-desktop #progress.desktop-only { display: block !important; }
+.is-desktop:not(.is-read-only) .btn.desktop-only:not([hidden]) { display: inline-flex !important; }
+.is-desktop:not(.is-read-only) #crawler.desktop-only { display: flex !important; }
+.is-desktop:not(.is-read-only) #progress.desktop-only { display: block !important; }
 
 /* ── 2. App shell & docked instrument topbar ─────────────────────────────── */
 
