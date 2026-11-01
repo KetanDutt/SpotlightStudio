@@ -1050,10 +1050,42 @@
         : "Check your connection and try again. The thumbnail may still be available.";
       $("lb-error").hidden = false;
     };
+
+    if (app.imageOpts.local && !app.health?.lfs_pointers_detected) {
+      lb.img.onload = lb.img.onerror = null;
+      lb.img.classList.add("is-preview");
+      lb.img.src = imgUrl(item, true);
+      const loader = app.lb.loader = new Image();
+      loader.decoding = "async";
+      loader.onload = () => {
+        if (token !== app.lb.token) return;
+        app.lb.loader = null;
+        const finish = () => {
+          if (token !== app.lb.token) return;
+          lb.img.onload = null;
+          lb.img.classList.remove("is-preview", "is-failed");
+          $("lb-error").hidden = true;
+          lb.stage.classList.remove("is-loading");
+          preloadNeighbours();
+        };
+        lb.img.onload = finish;
+        lb.img.src = full;
+        if (lb.img.complete && lb.img.naturalWidth > 0) finish();
+      };
+      loader.onerror = () => {
+        if (token !== app.lb.token) return;
+        app.lb.loader = null;
+        lb.img.classList.add("is-failed");
+        showFailure();
+      };
+      loader.src = full;
+      return;
+    }
+
     lb.img.src = imgUrl(item, true);
     lb.img.onload = () => {
       if (token !== app.lb.token) return;
-      if (!app.lb.loader) lb.stage.classList.remove("is-loading");
+      lb.stage.classList.remove("is-loading");
       preloadNeighbours();
     };
     lb.img.onerror = () => {
@@ -1067,34 +1099,15 @@
       showFailure();
     };
     lb.webp.srcset = C.previewUrl(app.imageOpts, item.raw.filename);
-
-    if (app.imageOpts.local && !app.health?.lfs_pointers_detected) {
-      lb.img.classList.add("is-preview");
-      const loader = app.lb.loader = new Image();
-      loader.decoding = "async";
-      loader.onload = () => {
-        if (token !== app.lb.token) return;
-        app.lb.loader = null;
-        lb.webp.removeAttribute("srcset");
-        lb.img.classList.remove("is-preview", "is-failed");
-        lb.img.src = full;
-        $("lb-error").hidden = true;
-        lb.stage.classList.remove("is-loading");
-      };
-      loader.onerror = () => {
-        if (token !== app.lb.token) return;
-        app.lb.loader = null;
-        showFailure();
-      };
-      loader.src = full;
-    }
   }
 
   function preloadNeighbours() {
     for (const delta of [1, -1]) {
       const next = app.lb.list[app.lb.index + delta];
-      // Previews are small and preserve the original's complete frame.
-      if (next) new Image().src = C.previewUrl(app.imageOpts, next.raw.filename);
+      if (!next) continue;
+      new Image().src = app.imageOpts.local
+        ? imgUrl(next, true)
+        : C.previewUrl(app.imageOpts, next.raw.filename);
     }
   }
 
