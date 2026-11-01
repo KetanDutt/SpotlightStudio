@@ -130,10 +130,10 @@
     const svg = document.createElementNS(SVG_NS, "svg");
     svg.setAttribute("class", "icon");
     svg.setAttribute("viewBox", "0 0 24 24");
-    svg.setAttribute("width", String(size || 18));
-    svg.setAttribute("height", String(size || 18));
+    svg.setAttribute("width", String(size || 16));
+    svg.setAttribute("height", String(size || 16));
     svg.setAttribute("fill", "none");
-    svg.setAttribute("stroke-width", "2");
+    svg.setAttribute("stroke-width", "1.75");
     svg.setAttribute("stroke-linecap", "round");
     svg.setAttribute("stroke-linejoin", "round");
     svg.setAttribute("aria-hidden", "true");
@@ -143,7 +143,7 @@
 
   function setIcon(el, name, size) {
     el.dataset.icon = name;
-    el.replaceChildren(icon(name, size || Number(el.dataset.size) || 18));
+    el.replaceChildren(icon(name, size || Number(el.dataset.size) || 16));
   }
 
   function hydrateIcons(root) {
@@ -310,7 +310,7 @@
     buildSelects();
     $("version-label").textContent = VERSION ? `Spotlight Studio v${VERSION}` : "Spotlight Studio";
     $("foot-version").textContent = VERSION ? `v${VERSION}` : "";
-    $("brand-sub").textContent = app.mode === "desktop" ? "Desktop app" : "Wallpaper gallery";
+    $("brand-sub").textContent = app.mode === "desktop" ? "Desktop studio" : "Wallpaper archive";
 
     if (app.mode === "desktop") {
       cleanupServiceWorkers();
@@ -382,7 +382,7 @@
     const theme = resolveTheme(pref);
     document.documentElement.setAttribute("data-theme", theme);
     const meta = document.querySelector('meta[name="theme-color"]');
-    if (meta) meta.setAttribute("content", theme === "light" ? "#f5f5f1" : "#151918");
+    if (meta) meta.setAttribute("content", theme === "light" ? "#f6f5f2" : "#121316");
     setIcon($("theme-icon"), THEME_ICON[pref]);
     $("btn-theme").title = `Theme: ${pref}`;
     $("btn-theme").setAttribute("aria-label", `Theme: ${pref} (click to change)`);
@@ -573,6 +573,8 @@
     if (signature !== app.dailySig) {
       app.dailySig = signature;
       const item = app.dailyItem = C.dailyWallpaper(app.catalog);
+      $("daily-date").textContent = `${day} UTC`;
+      $("daily-date").setAttribute("datetime", day);
       $("daily-title").textContent = item.title;
       $("daily-meta").textContent = [SOURCE_LABELS[item.source] || item.source,
         C.QUALITY_LABELS[item.q], `${item.raw.width} × ${item.raw.height}`].join(" · ");
@@ -611,7 +613,7 @@
   function cardSubtitle(item) {
     const w = item.raw;
     const parts = [SOURCE_SHORT[item.source] || item.source, w.date_spotted ? C.fmtDate(w.date_spotted) : ""];
-    if (app.state.view === "list") parts.push(`${w.width}×${w.height}`, C.fmtBytes(w.file_size));
+    if (app.state.view === "list") parts.push(`${w.width} × ${w.height}`, C.fmtBytes(w.file_size));
     return parts.filter(Boolean).join(" · ");
   }
 
@@ -650,7 +652,8 @@
           h("span", { class: "card-sub", text: cardSubtitle(item) }))),
       badges,
       app.batchMode ? h("button", { class: "card-select", type: "button", dataset: { act: "select" },
-        "aria-pressed": app.selectedKeys.has(item.key) ? "true" : "false", "aria-label": app.selectedKeys.has(item.key) ? "Deselect wallpaper" : "Select wallpaper" }, "✓") : null,
+        "aria-pressed": app.selectedKeys.has(item.key) ? "true" : "false", "aria-label": app.selectedKeys.has(item.key) ? "Deselect wallpaper" : "Select wallpaper" },
+        h("span", { dataset: { icon: "check", size: 14 } })) : null,
       h("button", {
         class: "card-fav", type: "button", dataset: { act: "fav" }, "aria-pressed": isFav ? "true" : "false",
         "aria-label": isFav ? "Remove from favorites" : "Add to favorites", title: "Favorite",
@@ -858,9 +861,10 @@
   }
 
   function updateBatchControls() {
+    $("batch-tools").hidden = !app.batchMode;
     $("batch-tools").classList.toggle("is-active", app.batchMode);
     $("batch-toggle").setAttribute("aria-pressed", String(app.batchMode));
-    $("batch-toggle").textContent = app.batchMode ? "Exit select mode" : "Select wallpapers";
+    $("batch-toggle").replaceChildren(icon("check", 15), h("span", { text: app.batchMode ? "Done" : "Select" }));
     $("batch-count").textContent = `${app.selectedKeys.size} selected`;
     $("batch-favorite").disabled = app.selectedKeys.size === 0;
     $("batch-download").disabled = app.selectedKeys.size === 0;
@@ -994,7 +998,16 @@
       ["File size", C.fmtBytes(w.file_size)],
     ];
     if (item.addedTs) meta.push(["Added", C.fmtRelative(new Date(item.addedTs).toISOString())]);
-    $("lb-meta").replaceChildren(...meta.map(([k, v]) => h("div", {}, h("dt", { text: k }), h("dd", { text: v }))));
+    const metaNodes = meta.map(([k, v]) => h("div", {}, h("dt", { text: k }), h("dd", { text: v })));
+    if (item.colors && item.colors.length) {
+      const swatches = h("span", { class: "lb-swatches" }, ...item.colors.slice(0, 5).map((c) => {
+        const s = h("i", { class: "lb-swatch", title: c });
+        s.style.setProperty("--swatch", c);
+        return s;
+      }));
+      metaNodes.push(h("div", {}, h("dt", { text: "Palette" }), h("dd", {}, swatches)));
+    }
+    $("lb-meta").replaceChildren(...metaNodes);
 
     $("lb-tags").replaceChildren(...item.tags.map((t) => chip(`#${t}`, null, null, { lbTag: t })));
 
@@ -1018,19 +1031,31 @@
     $("lb-next").disabled = app.lb.index >= app.lb.list.length - 1;
     syncFavoriteButtons();
 
-    // The viewer uses a compact WebP rendition by default. Full originals are
-    // fetched only when the user explicitly downloads or sets the wallpaper.
+    // Static web uses compact WebP previews so browsing stays lightweight; local
+    // desktop/server mode upgrades to the local original when real files are present.
     if (app.lb.loader) {
       app.lb.loader.onload = app.lb.loader.onerror = null;
       app.lb.loader.removeAttribute("src");
+      app.lb.loader = null;
     }
     $("lb-error").hidden = true;
     lb.stage.classList.add("is-loading");
     lb.img.classList.remove("is-failed", "is-preview");
     lb.img.alt = item.title;
     lb.webp.removeAttribute("srcset");
+    const showFailure = () => {
+      lb.stage.classList.remove("is-loading");
+      $("lb-error-text").textContent = app.health?.lfs_pointers_detected
+        ? "Local images are Git LFS pointers. Run git lfs install && git lfs pull, then retry."
+        : "Check your connection and try again. The thumbnail may still be available.";
+      $("lb-error").hidden = false;
+    };
     lb.img.src = imgUrl(item, true);
-    lb.img.onload = () => { if (token === app.lb.token) { lb.stage.classList.remove("is-loading"); preloadNeighbours(); } };
+    lb.img.onload = () => {
+      if (token !== app.lb.token) return;
+      if (!app.lb.loader) lb.stage.classList.remove("is-loading");
+      preloadNeighbours();
+    };
     lb.img.onerror = () => {
       if (token !== app.lb.token) return;
       if (lb.webp.hasAttribute("srcset")) {
@@ -1038,14 +1063,31 @@
         lb.img.src = imgUrl(item, true);
         return;
       }
-      lb.stage.classList.remove("is-loading");
       lb.img.classList.add("is-failed");
-      $("lb-error-text").textContent = app.health?.lfs_pointers_detected
-        ? "Local images are Git LFS pointers. Run git lfs install && git lfs pull, then retry."
-        : "The preview is unavailable. The original remains available through Download full resolution.";
-      $("lb-error").hidden = false;
+      showFailure();
     };
     lb.webp.srcset = C.previewUrl(app.imageOpts, item.raw.filename);
+
+    if (app.imageOpts.local && !app.health?.lfs_pointers_detected) {
+      lb.img.classList.add("is-preview");
+      const loader = app.lb.loader = new Image();
+      loader.decoding = "async";
+      loader.onload = () => {
+        if (token !== app.lb.token) return;
+        app.lb.loader = null;
+        lb.webp.removeAttribute("srcset");
+        lb.img.classList.remove("is-preview", "is-failed");
+        lb.img.src = full;
+        $("lb-error").hidden = true;
+        lb.stage.classList.remove("is-loading");
+      };
+      loader.onerror = () => {
+        if (token !== app.lb.token) return;
+        app.lb.loader = null;
+        showFailure();
+      };
+      loader.src = full;
+    }
   }
 
   function preloadNeighbours() {
@@ -1234,9 +1276,9 @@
   /* ═══════════════════════════ desktop: crawler console ═══════════════════════════ */
 
   const MODE_HINTS = {
-    quick: "Scans the newest pages only – takes seconds.",
+    quick: "Scans recent pages only.",
     full: "Scans every gallery page and resumes any backlog.",
-    repair: "Fills in missing titles and tags of stored wallpapers.",
+    repair: "Fills in missing titles and tags on stored items.",
   };
 
   async function api(path, options) {
@@ -1292,10 +1334,11 @@
     if (!s) return;
     app.status = s;
     const state = s.engine_status;
+    const stateLabel = state ? state.charAt(0).toUpperCase() + state.slice(1) : "Stopped";
     const pill = $("status-pill");
     pill.className = `status-pill is-${state}`;
     $("status-text").textContent = state === "running" && s.active_source !== "both"
-      ? `Running · ${SOURCE_LABELS[s.active_source] || s.active_source}` : state;
+      ? `Running · ${SOURCE_LABELS[s.active_source] || s.active_source}` : stateLabel;
     $("crawler-phase").textContent = s.phase || (state === "running" ? "Working…" : "Idle");
 
     const run = s.run || {};

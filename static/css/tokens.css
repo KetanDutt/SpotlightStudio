@@ -1,210 +1,179 @@
-/* ═══════════════════════════════════════════════════════════════════════════
-   Spotlight Studio — "Liquid Glass" design tokens
-   Semantic tokens shared in purpose with mobile/src/theme/tokens.ts.
+/*
+ * Spotlight Studio – design tokens ("Archival Graphite & Sunlit Ochre")
+ *
+ * All UI chrome uses a color-neutral darkroom graphite ramp (dark) or warm
+ * archival mat-board ramp (light) so landscape photography is judged without
+ * color cast. A single sunlit-ochre / burnished-umber accent marks active
+ * selection and primary actions. Every text and accent token meets WCAG AA
+ * (>= 4.5:1) against both --bg and --bg-elev in both themes.
+ */
 
-   An original, Apple-inspired material language: translucent surfaces, soft
-   ambient depth, strong type hierarchy, calm motion. Four material strengths
-   (primary / secondary / tinted / floating) keep glass purposeful instead of
-   decorative. Text is always opaque; blur is structural, never per card.
-
-   Token map:
-     1 Type            5 Glass materials   9 Motion
-     2 Neutral base    6 Surfaces & strokes 10 Layers
-     3 Ink             7 Shadows & edges    11 Layout metrics
-     4 Accent & states 8 Radii & spacing    12 Semantic context
-   ═══════════════════════════════════════════════════════════════════════════ */
 :root {
   color-scheme: dark;
 
-  /* ── 1. Type ──────────────────────────────────────────────────────────── */
-  --font: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", Inter, system-ui, sans-serif;
-  --mono: ui-monospace, "SF Mono", Menlo, monospace;
-  --type-caption: .75rem;
-  --type-body: .875rem;
-  --type-subhead: 1.0625rem;
-  --type-heading: clamp(2rem, 3.2vw, 2.85rem);
-  --track-tight: -.015em;
-  --track-heading: -.04em;
-  --track-label: .14em;
+  /* Neutral Darkroom Graphite ramp */
+  --bg:            #121316;
+  --bg-elev:       #191b1f;
+  --bg-inset:      #0d0e10;
+  --photo-well:    #15171b;
+  --photo-frame:   rgba(255, 255, 255, .07);
 
-  /* ── 2. Neutral base ──────────────────────────────────────────────────── */
-  --bg: #141a17;
-  --bg-elev: #202824;
-  --bg-inset: #101512;
+  /* Crisp opaque/near-opaque surfaces (no decorative glass sheen) */
+  --glass-bg:               #191b1f;
+  --glass-bg-strong:        #16181c;
+  --glass-bg-soft:          #1e2126;
+  --glass-highlight:        transparent;
+  --glass-highlight-strong: transparent;
+  --blur-sm:                8px;
+  --blur-md:                12px;
+  --blur-lg:                16px;
 
-  /* ── 3. Ink (always opaque for contrast) ──────────────────────────────── */
-  --text: #eef2ef;
-  --text-2: #bac4be;
-  --text-3: #98a69d;
+  /* Interactive surface steps */
+  --surface:        rgba(255, 255, 255, .035);
+  --surface-hover:  rgba(255, 255, 255, .065);
+  --surface-active: rgba(255, 255, 255, .095);
 
-  /* ── 4. Accent & semantic states ──────────────────────────────────────── */
-  --accent: #b5d5c5;
-  --accent-ink: #203e31;
-  --accent-fill: rgba(181, 213, 197, .12);
-  --accent-edge: rgba(181, 213, 197, .34);
-  --accent-grad: linear-gradient(180deg, #c6dece, #b5d5c5);
-  --ok: #accdbb;
-  --ok-fill: rgba(172, 205, 187, .13);
-  --ok-edge: rgba(172, 205, 187, .38);
-  --warn: #dbbf8a;
-  --warn-fill: rgba(219, 191, 138, .14);
-  --warn-edge: rgba(219, 191, 138, .4);
-  --danger: #edaaa7;
-  --danger-fill: rgba(237, 170, 167, .13);
-  --danger-edge: rgba(237, 170, 167, .4);
-  --favorite: #edaaa7;
-  --selection: rgba(181, 213, 197, .32);
-  --focus-ring: rgba(181, 213, 197, .65);
+  /* Quiet hairline borders (8% resting, 15% emphasized) */
+  --border:         rgba(255, 255, 255, .08);
+  --border-strong:  rgba(255, 255, 255, .15);
 
-  /* ── 5. Glass materials (strength increases downward) ───────────────────
-     primary   major navigation, structural headers   (most transparent)
-     secondary cards, panels, quiet controls         (lightest)
-     tinted    selected / emphasized states          (accent wash)
-     floating  menus, dialogs, toasts, viewer panel  (strongest fill)      */
-  --glass-primary: rgba(30, 40, 35, .64);
-  --glass-secondary: rgba(38, 49, 43, .48);
-  --glass-tinted: var(--accent-fill);
-  --glass-float: rgba(39, 49, 43, .92);
-  --glass-strong: rgba(30, 39, 34, .96);
-  --glass-highlight: rgba(255, 255, 255, .09);
-  --glass-edge: rgba(255, 255, 255, .12);
-  /* Backwards-compatible aliases. */
-  --glass: var(--glass-primary);
-  --glass-tint: var(--glass-tinted);
-  --blur-sm: 10px;
-  --blur-md: 20px;
-  --blur-lg: 28px;
-  --blur-xl: 40px;
-  --blur: blur(var(--blur-md)) saturate(150%);
-  --blur-strong: blur(var(--blur-lg)) saturate(160%);
+  /* Three opaque ink roles (16.4:1, 9.0:1, 6.8:1 on --bg; >= 6.3:1 on --bg-elev) */
+  --text:           #f0f1f3;
+  --text-2:         #b0b5be;
+  --text-3:         #979da8;
 
-  /* ── 6. Surfaces & strokes ────────────────────────────────────────────── */
-  --fill: rgba(222, 236, 227, .045);
-  --fill-hover: rgba(222, 236, 227, .09);
-  --stroke: rgba(232, 242, 234, .08);
-  --stroke-2: rgba(232, 242, 234, .16);
+  /* Sunlit Ochre accent (9.38:1 on --bg, 8.71:1 on --bg-elev; ink 9.21:1 on accent) */
+  --accent:         #e2b05e;
+  --accent-hover:   #eac078;
+  --accent-soft:    rgba(226, 176, 94, .12);
+  --accent-border:  rgba(226, 176, 94, .34);
+  --accent-ink:     #1c1406;
+  --accent-grad:    #e2b05e;
 
-  /* ── 7. Shadows & edges (soft ambient depth, never harsh) ─────────────── */
-  --shadow-1: 0 1px 2px rgba(0, 0, 0, .2), 0 10px 28px -14px rgba(0, 0, 0, .35);
-  --shadow-2: 0 2px 6px rgba(0, 0, 0, .14), 0 24px 56px -20px rgba(0, 0, 0, .5);
-  --shadow-3: 0 4px 10px rgba(0, 0, 0, .14), 0 32px 80px -24px rgba(0, 0, 0, .55);
-  --highlight: inset 0 1px 0 var(--glass-highlight);
+  /* Semantic status (all >= 6.6:1 on --bg-elev) */
+  --ok:             #6fc993;
+  --ok-soft:        rgba(111, 201, 147, .12);
+  --warn:           #e5b567;
+  --warn-soft:      rgba(229, 181, 103, .12);
+  --danger:         #f08078;
+  --danger-soft:    rgba(240, 128, 120, .12);
 
-  /* ── 8. Radii & spacing ───────────────────────────────────────────────── */
-  --r-sm: 8px;
-  --r-md: 12px;
-  --r-lg: 18px;
-  --r-xl: 26px;
-  --r-pill: 999px;
-  --space-1: 4px;
-  --space-2: 8px;
-  --space-3: 12px;
-  --space-4: 16px;
-  --space-5: 20px;
-  --space-6: 24px;
-  --space-8: 32px;
-  --space-10: 40px;
-  --space-12: 48px;
+  /* Overlays & loading placeholders */
+  --scrim:          rgba(7, 8, 10, .68);
+  --lb-bg:          #090a0c;
+  --skeleton-a:     rgba(255, 255, 255, .03);
+  --skeleton-b:     rgba(255, 255, 255, .065);
 
-  /* ── 9. Motion (shared values with the native client) ───────────────────
-     fast = micro-interactions · normal = standard transitions · slow = large
-     structural transitions. Easing: ease (settle), ease-spring (subtle
-     overshoot for interactive elements), ease-in / ease-out (structural).  */
-  --duration-fast: 150ms;
-  --duration-normal: 260ms;
-  --duration-slow: 380ms;
-  --ease: cubic-bezier(.22, 1, .36, 1);
-  --ease-spring: cubic-bezier(.22, 1.2, .36, 1);
-  --ease-in: cubic-bezier(.4, 0, 1, 1);
-  --ease-out: cubic-bezier(0, 0, .2, 1);
+  /* Subtle elevation (surface step + hairline carries primary depth) */
+  --shadow-xs:      0 1px 2px rgba(0, 0, 0, .24);
+  --shadow-sm:      0 2px 8px rgba(0, 0, 0, .28);
+  --shadow-md:      0 8px 24px rgba(0, 0, 0, .38);
+  --shadow-lg:      0 20px 48px rgba(0, 0, 0, .56);
+  --focus-ring:     0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
 
-  /* ── 10. Layers (spatial hierarchy) ───────────────────────────────────── */
-  --z-content: 1;
-  --z-navigation: 50;
-  --z-fab: 60;
-  --z-popover: 80;
-  --z-scrim: 90;
-  --z-sheet: 100;
-  --z-toast: 400;
+  /* Disciplined nested-radius scale */
+  --radius-xs:      4px;
+  --radius-sm:      6px;
+  --radius-md:      10px;
+  --radius-lg:      14px;
+  --radius-xl:      16px;
+  --radius-pill:    999px;
 
-  /* ── 11. Layout metrics ───────────────────────────────────────────────── */
-  --topbar-h: 76px;
-  --sidebar-w: 232px;
+  /* Strict 4px spacing scale */
+  --space-1:        4px;
+  --space-2:        8px;
+  --space-3:        12px;
+  --space-4:        16px;
+  --space-5:        20px;
+  --space-6:        24px;
+  --space-8:        32px;
+  --space-10:       40px;
 
-  /* ── 12. Semantic context ─────────────────────────────────────────────── */
-  --scrim: rgba(9, 15, 12, .45);
-  --lb-backdrop: rgba(10, 15, 12, .78);
-  --image-surface: #283c33;
-  --image-ink: #fff;
-  --image-control: rgba(15, 22, 18, .62);
-  --image-favorite: #ffd3ce;
-  --source-a: #739b8b;
-  --source-b: #aaa392;
-  --ambient-a: rgba(162, 184, 167, .11);
-  --ambient-b: rgba(193, 178, 149, .075);
-  --ambient-c: rgba(148, 170, 196, .075);
+  /* Typography */
+  --font-sans:      Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+                    "Helvetica Neue", Arial, sans-serif;
+  --font-display:   var(--font-sans);
+  --font-mono:      ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas,
+                    "Liberation Mono", monospace;
+  --track-display:  -0.022em;
+  --track-tight:    -0.012em;
+  --track-label:    0em;
+
+  /* Motion: calm optical deceleration, zero spring overshoot */
+  --ease-out:       cubic-bezier(.2, 0, 0, 1);
+  --ease-in-out:    cubic-bezier(.4, 0, .2, 1);
+  --ease-spring:    cubic-bezier(.2, 0, 0, 1);
+  --duration-fast:   140ms;
+  --duration-normal: 200ms;
+  --duration-slow:   280ms;
+
+  /* Layout */
+  --topbar-h:       60px;
+  --sidebar-w:      256px;
+  --content-max:    1680px;
 }
+
+/* ─────────────────────────── Light ("Archival Matte Board") ─────────────────────────── */
 
 :root[data-theme="light"] {
   color-scheme: light;
 
-  /* Neutral base */
-  --bg: #f3f5f0;
-  --bg-elev: #fcfdf9;
-  --bg-inset: #e9ede6;
+  --bg:            #f6f5f2;
+  --bg-elev:       #ffffff;
+  --bg-inset:      #eceae4;
+  --photo-well:    #e7e5de;
+  --photo-frame:   rgba(22, 23, 26, .08);
 
-  /* Ink */
-  --text: #252f29;
-  --text-2: #58675d;
-  --text-3: #5f6d63;
+  --glass-bg:               #ffffff;
+  --glass-bg-strong:        #faf9f6;
+  --glass-bg-soft:          #f1efe9;
+  --glass-highlight:        transparent;
+  --glass-highlight-strong: transparent;
 
-  /* Accent & semantic states */
-  --accent: #3c6250;
-  --accent-ink: #fff;
-  --accent-fill: rgba(60, 98, 80, .09);
-  --accent-edge: rgba(60, 98, 80, .28);
-  --accent-grad: linear-gradient(180deg, #4a7360, #3c6250);
-  --ok: #426a51;
-  --ok-fill: rgba(66, 106, 81, .1);
-  --ok-edge: rgba(66, 106, 81, .32);
-  --warn: #886524;
-  --warn-fill: rgba(136, 101, 36, .1);
-  --warn-edge: rgba(136, 101, 36, .34);
-  --danger: #a04742;
-  --danger-fill: rgba(160, 71, 66, .09);
-  --danger-edge: rgba(160, 71, 66, .32);
-  --favorite: #a04742;
-  --selection: rgba(60, 98, 80, .22);
-  --focus-ring: rgba(60, 98, 80, .55);
+  --surface:        rgba(22, 23, 26, .035);
+  --surface-hover:  rgba(22, 23, 26, .065);
+  --surface-active: rgba(22, 23, 26, .095);
 
-  /* Glass materials */
-  --glass-primary: rgba(252, 253, 249, .72);
-  --glass-secondary: rgba(250, 252, 247, .55);
-  --glass-tinted: var(--accent-fill);
-  --glass-float: rgba(252, 253, 250, .93);
-  --glass-strong: rgba(250, 251, 248, .97);
-  --glass-highlight: rgba(255, 255, 255, .95);
-  --glass-edge: rgba(35, 57, 44, .1);
+  --border:         rgba(22, 23, 26, .09);
+  --border-strong:  rgba(22, 23, 26, .16);
 
-  /* Surfaces & strokes */
-  --fill: rgba(34, 57, 43, .04);
-  --fill-hover: rgba(34, 57, 43, .075);
-  --stroke: rgba(35, 57, 44, .08);
-  --stroke-2: rgba(35, 57, 44, .16);
+  /* Ink (16.4:1, 7.78:1, 5.62:1 on --bg; 17.9:1, 8.48:1, 6.12:1 on --bg-elev) */
+  --text:           #16171a;
+  --text-2:         #494d55;
+  --text-3:         #5d626c;
 
-  /* Shadows & edges */
-  --shadow-1: 0 1px 2px rgba(36, 57, 44, .08), 0 10px 28px -16px rgba(36, 57, 44, .16);
-  --shadow-2: 0 2px 6px rgba(36, 57, 44, .08), 0 24px 56px -20px rgba(36, 57, 44, .22);
-  --shadow-3: 0 4px 10px rgba(36, 57, 44, .1), 0 32px 80px -24px rgba(36, 57, 44, .26);
+  /* Burnished Umber accent (5.91:1 on --bg, 6.45:1 on --bg-elev; ink 6.45:1 on accent) */
+  --accent:         #86530d;
+  --accent-hover:   #6f440a;
+  --accent-soft:    rgba(134, 83, 13, .085);
+  --accent-border:  rgba(134, 83, 13, .26);
+  --accent-ink:     #ffffff;
+  --accent-grad:    #86530d;
 
-  /* Semantic context */
-  --scrim: rgba(36, 47, 39, .3);
-  --lb-backdrop: rgba(243, 245, 239, .82);
-  --image-surface: #d8e2d6;
-  --image-ink: #fff;
-  --image-control: rgba(19, 30, 23, .62);
-  --image-favorite: #ffd3ce;
-  --ambient-a: rgba(159, 183, 158, .13);
-  --ambient-b: rgba(211, 197, 173, .09);
-  --ambient-c: rgba(170, 190, 210, .09);
+  --ok:             #1f6f43;
+  --ok-soft:        rgba(31, 111, 67, .09);
+  --warn:           #8a560c;
+  --warn-soft:      rgba(138, 86, 12, .09);
+  --danger:         #b42c25;
+  --danger-soft:    rgba(180, 44, 37, .09);
+
+  --scrim:          rgba(16, 17, 20, .48);
+  --lb-bg:          #0d0e11;
+  --skeleton-a:     rgba(22, 23, 26, .04);
+  --skeleton-b:     rgba(22, 23, 26, .08);
+
+  --shadow-xs:      0 1px 2px rgba(22, 23, 26, .05);
+  --shadow-sm:      0 2px 8px rgba(22, 23, 26, .07);
+  --shadow-md:      0 8px 24px rgba(22, 23, 26, .10);
+  --shadow-lg:      0 20px 48px rgba(22, 23, 26, .18);
+}
+
+/* ─────────────────────────── System high contrast ─────────────────────────── */
+
+@media (forced-colors: active) {
+  :root {
+    --border:        CanvasText;
+    --border-strong: CanvasText;
+    --focus-ring:    0 0 0 3px Highlight;
+  }
 }

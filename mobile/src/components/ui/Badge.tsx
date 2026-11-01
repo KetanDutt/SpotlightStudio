@@ -29,7 +29,7 @@ export function Badge({ label, tone = 'neutral', icon, gradient }: BadgeProps) {
   const spec = tones[gradient ? 'accent' : tone];
 
   return (
-    <View style={[styles.base, { backgroundColor: spec.bg }]}>
+    <View style={[styles.base, { backgroundColor: spec.bg, borderColor: colors.stroke }]}>
       {icon ? <Ionicons name={icon} size={11} color={colors.text} style={styles.icon} /> : null}
       <AppText variant="caption" tone={gradient ? 'accent' : spec.fg} style={styles.label}>
         {label}
@@ -43,14 +43,14 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: spacing.sm,
-    paddingVertical: 3,
-    borderRadius: radius.pill,
+    paddingVertical: 2,
+    borderRadius: radius.sm,
+    borderWidth: StyleSheet.hairlineWidth,
   },
   icon: {
-    marginEnd: 3,
+    marginEnd: 4,
   },
   label: {
     fontWeight: '600',
-    letterSpacing: 0.2,
   },
 });

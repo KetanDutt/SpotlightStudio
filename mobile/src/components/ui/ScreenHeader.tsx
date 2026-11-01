@@ -4,10 +4,9 @@
 import React from 'react';
 import { StyleSheet, View, useWindowDimensions } from 'react-native';
 
-import { radius, spacing } from '../../theme/tokens';
+import { spacing } from '../../theme/tokens';
 import { useColors } from '../../theme/ThemeProvider';
 import { AppText } from './AppText';
-import { GlassBackdrop } from './GlassBackdrop';
 
 export interface ScreenHeaderProps {
   title: string;
@@ -41,22 +40,18 @@ export function ScreenHeader({ title, subtitle, actions, children }: ScreenHeade
     </View>
   );
 
-  return <View style={[styles.wrap, { borderColor: colors.stroke }]}><GlassBackdrop />{content}</View>;
+  return <View style={[styles.wrap, { borderColor: colors.stroke, backgroundColor: colors.surface }]}>{content}</View>;
 }
 
 const styles = StyleSheet.create({
   wrap: {
-    overflow: 'hidden',
-    marginHorizontal: spacing.md,
-    marginTop: spacing.sm,
     marginBottom: spacing.md,
-    borderRadius: radius.xl,
-    borderWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: StyleSheet.hairlineWidth,
   },
   content: {
     paddingHorizontal: spacing.lg,
-    paddingTop: spacing.lg,
-    paddingBottom: spacing.lg,
+    paddingTop: spacing.md,
+    paddingBottom: spacing.md,
     gap: spacing.md,
   },
   row: {

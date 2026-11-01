@@ -17,7 +17,7 @@ import { SetWallpaperSheet } from '../../src/components/wallpaper/SetWallpaperSh
 import { thumbnailUrl } from '../../src/services/media';
 import type { HistoryAction, Wallpaper } from '../../src/core/types';
 import { fmtRelative } from '../../src/core/utils';
-import { navigation, radius, spacing } from '../../src/theme/tokens';
+import { TOUCH_TARGET, navigation, radius, spacing } from '../../src/theme/tokens';
 import { useColors } from '../../src/theme/ThemeProvider';
 import { useCatalog } from '../../src/providers/CatalogProvider';
 import { usePreferences } from '../../src/providers/PreferencesProvider';
@@ -144,7 +144,7 @@ export default function HistoryScreen() {
                   }}
                   style={styles.heart}
                 >
-                  <Ionicons name={favorite ? 'heart' : 'heart-outline'} size={19} color={favorite ? colors.danger : colors.textMuted} />
+                  <Ionicons name={favorite ? 'heart' : 'heart-outline'} size={19} color={favorite ? colors.accent : colors.textMuted} />
                 </Touchable>
               </Touchable>
             );
@@ -161,7 +161,7 @@ const styles = StyleSheet.create({
   fill: { flex: 1 },
   list: {
     padding: spacing.lg,
-    gap: spacing.md,
+    gap: spacing.sm,
     paddingBottom: spacing.xxxl * 2,
   },
   row: {
@@ -169,11 +169,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: spacing.md,
     padding: spacing.sm,
-    borderRadius: radius.lg,
+    borderRadius: radius.md,
     borderWidth: StyleSheet.hairlineWidth,
   },
-  thumb: { width: 78, height: 54, borderRadius: radius.md },
+  thumb: { width: 84, height: 54, borderRadius: radius.sm },
   text: { flex: 1, gap: 3 },
   metaRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
-  heart: { width: 34, height: 34, alignItems: 'center', justifyContent: 'center' },
+  heart: { width: TOUCH_TARGET, height: TOUCH_TARGET, alignItems: 'center', justifyContent: 'center' },
 });

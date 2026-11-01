@@ -149,8 +149,8 @@ function Section({ title, subtitle, children }: { title: string; subtitle?: stri
   return (
     <View style={styles.section}>
       <View style={styles.sectionHeader}>
-        <AppText variant="caption" tone="faint" style={styles.sectionTitle}>
-          {title.toUpperCase()}
+        <AppText variant="caption" tone="muted" style={styles.sectionTitle}>
+          {title}
         </AppText>
         {subtitle ? (
           <AppText variant="caption" tone="faint">
@@ -176,12 +176,12 @@ export function FavoritesToggle({ value, count, onToggle }: { value: boolean; co
       style={[
         styles.favToggle,
         value
-          ? { backgroundColor: colors.dangerFill, borderColor: colors.strokeStrong }
+          ? { backgroundColor: colors.accentFill, borderColor: colors.accent }
           : { backgroundColor: colors.fill, borderColor: colors.stroke },
       ]}
     >
-      <Ionicons name={value ? 'heart' : 'heart-outline'} size={16} color={value ? colors.danger : colors.textMuted} />
-      <AppText variant="label" tone={value ? 'danger' : 'muted'}>
+      <Ionicons name={value ? 'heart' : 'heart-outline'} size={16} color={value ? colors.accent : colors.textMuted} />
+      <AppText variant="label" tone={value ? 'accent' : 'muted'}>
         {count > 0 ? `Favourites · ${count}` : 'Favourites'}
       </AppText>
     </Touchable>
@@ -202,7 +202,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   sectionTitle: {
-    letterSpacing: 0.8,
+    fontWeight: '600',
   },
   chips: {
     flexDirection: 'row',
@@ -220,7 +220,7 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     paddingHorizontal: spacing.md,
     height: 36,
-    borderRadius: radius.pill,
+    borderRadius: radius.sm,
     borderWidth: StyleSheet.hairlineWidth,
   },
 });

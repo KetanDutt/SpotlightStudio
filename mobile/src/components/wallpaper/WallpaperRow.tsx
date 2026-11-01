@@ -75,7 +75,7 @@ export const WallpaperRow = memo(function WallpaperRow({ item, thumb, favorite, 
           onPress={() => onToggleFavorite(item)}
           style={styles.heart}
         >
-          <Ionicons name={favorite ? 'heart' : 'heart-outline'} size={20} color={favorite ? colors.danger : colors.textMuted} />
+          <Ionicons name={favorite ? 'heart' : 'heart-outline'} size={20} color={favorite ? colors.accent : colors.textMuted} />
         </Touchable>
       ) : null}
     </Touchable>
@@ -87,14 +87,14 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.md,
-    padding: spacing.sm,
-    borderRadius: radius.lg,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.xs,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   thumbWrap: {
-    width: 92,
-    height: 62,
-    borderRadius: radius.md,
+    width: 96,
+    height: 60,
+    borderRadius: radius.sm,
     overflow: 'hidden',
   },
   spinnerCenter: {

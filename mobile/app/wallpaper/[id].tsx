@@ -189,7 +189,7 @@ export default function WallpaperDetailScreen() {
             accessibilityLabel={favorite ? 'Remove from favourites' : 'Add to favourites'}
             onPress={toggleFav}
             active={favorite}
-            color={favorite ? colors.danger : undefined}
+            color={favorite ? colors.imageFavorite : undefined}
             translucent
           />
         </View>
@@ -204,14 +204,14 @@ export default function WallpaperDetailScreen() {
             <Badge label={item.q.toUpperCase()} gradient />
             <Badge label={SOURCE_LABELS[item.source] ?? item.source} tone="neutral" icon="globe-outline" />
             {item.generated ? <Badge label="Auto title" tone="neutral" icon="sparkles-outline" /> : null}
-            {favorite ? <Badge label="Favourite" tone="danger" icon="heart" /> : null}
+            {favorite ? <Badge label="Saved" tone="accent" icon="heart" /> : null}
           </View>
 
           <AppText variant="title" numberOfLines={3}>
             {item.title}
           </AppText>
 
-          <View style={styles.metaGrid}>
+          <View style={[styles.metaGrid, { borderColor: colors.stroke }]}>
             <Meta icon="resize-outline" label="Resolution" value={fmtWallpaperSize(item.raw.width, item.raw.height)} />
             <Meta icon="document-outline" label="File size" value={fmtBytes(item.raw.file_size)} />
             <Meta icon="calendar-outline" label="Spotted" value={item.raw.date_spotted ? fmtDate(item.raw.date_spotted) : '—'} />
@@ -356,7 +356,10 @@ const styles = StyleSheet.create({
   metaGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: spacing.lg,
+    gap: spacing.md,
+    paddingVertical: spacing.md,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: StyleSheet.hairlineWidth,
   },
   meta: {
     flexDirection: 'row',
