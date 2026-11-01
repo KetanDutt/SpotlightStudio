@@ -75,7 +75,7 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     minHeight: TOUCH_TARGET,
     paddingHorizontal: spacing.md,
-    borderRadius: radius.pill,
+    borderRadius: radius.sm,
     borderWidth: StyleSheet.hairlineWidth,
   },
   input: {

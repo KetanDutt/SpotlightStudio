@@ -1,9 +1,10 @@
 /**
- * Design tokens – the mobile twin of `static/css/app.css` ("Liquid Glass").
+ * Design tokens – the mobile twin of `static/css/tokens.css` ("Archival Graphite & Sunlit Ochre").
  *
- * The palette, semantic materials and motion vocabulary are shared with the
- * web app so the two clients look like one product.  Values live here only; components
- * read them through `useTheme()`.
+ * Neutral darkroom graphite (dark) and warm archival mat-board (light) surfaces keep UI chrome
+ * free of color cast so landscape photography carries the color. A single sunlit-ochre /
+ * burnished-umber accent marks active selection and primary actions. Every text and accent
+ * token meets WCAG AA (>= 4.5:1) against bg, surface, and surfaceAlt in both themes.
  */
 
 export type ThemeName = 'dark' | 'light';
@@ -23,9 +24,9 @@ export interface Palette {
   surface: string;
   /** Slightly stronger surface for pressed / selected states. */
   surfaceAlt: string;
-  /** Translucent glass fill used with `<BlurView>`. */
+  /** Structural surface fill used with restrained blur on iOS. */
   glass: string;
-  /** Nearly opaque glass fill for sheets and bars with little content behind them. */
+  /** Nearly opaque surface fill for sheets and bars. */
   glassStrong: string;
   /** Low-contrast fill for chips and inputs. */
   fill: string;
@@ -43,7 +44,7 @@ export interface Palette {
   scrim: string;
   /** Backdrop of the full-screen viewer. */
   viewer: string;
-  /** Accent gradient: [from, via, to]. */
+  /** Solid accent tuple (preserved for compatibility). */
   gradient: [string, string, string];
   shadow: string;
   /** True when the palette is dark (used to pick status-bar styles, blur tints…). */
@@ -51,44 +52,78 @@ export interface Palette {
 }
 
 export const DARK: Palette = {
-  bg: '#141a17', surface: '#202824', surfaceAlt: '#2a342e',
-  glass: 'rgba(30,40,35,0.68)', glassStrong: 'rgba(30,39,34,0.96)',
-  glassSecondary: 'rgba(38,49,43,0.48)', glassFloating: 'rgba(39,49,43,0.92)',
-  fill: 'rgba(222,236,227,0.045)', fillHover: 'rgba(222,236,227,0.085)',
-  stroke: 'rgba(232,242,234,0.08)', strokeStrong: 'rgba(232,242,234,0.15)',
-  text: '#eef2ef', textMuted: '#bac4be', textFaint: '#98a69d',
-  accent: '#b5d5c5', onAccent: '#203e31', accentFill: 'rgba(181,213,197,0.12)',
-  ok: '#accdbb', warn: '#dbbf8a', danger: '#edaaa7',
-  dangerFill: 'rgba(237,170,167,0.10)', warnFill: 'rgba(219,191,138,0.10)',
-  scrim: 'rgba(9,15,12,0.42)', viewer: 'rgba(15,21,18,0.96)',
-  gradient: ['#c3ddcf', '#bad8c9', '#b5d5c5'], shadow: '#09110c',
-  imageControl: 'rgba(19,30,23,0.78)', imageText: '#ffffff', imageFavorite: '#ffd3ce',
+  bg: '#121316',
+  surface: '#191b1f',
+  surfaceAlt: '#22252a',
+  glass: 'rgba(25,27,31,0.92)',
+  glassStrong: 'rgba(22,24,28,0.97)',
+  glassSecondary: '#191b1f',
+  glassFloating: 'rgba(25,27,31,0.96)',
+  fill: 'rgba(255,255,255,0.035)',
+  fillHover: 'rgba(255,255,255,0.065)',
+  stroke: 'rgba(255,255,255,0.08)',
+  strokeStrong: 'rgba(255,255,255,0.15)',
+  text: '#f0f1f3',
+  textMuted: '#b0b5be',
+  textFaint: '#979da8',
+  accent: '#e2b05e',
+  onAccent: '#1c1406',
+  accentFill: 'rgba(226,176,94,0.13)',
+  ok: '#6fc993',
+  warn: '#e5b567',
+  danger: '#f08078',
+  dangerFill: 'rgba(240,128,120,0.12)',
+  warnFill: 'rgba(229,181,103,0.12)',
+  scrim: 'rgba(7,8,10,0.68)',
+  viewer: 'rgba(9,10,12,0.98)',
+  gradient: ['#e2b05e', '#e2b05e', '#e2b05e'],
+  shadow: '#000000',
+  imageControl: 'rgba(13,14,16,0.82)',
+  imageText: '#f0f1f3',
+  imageFavorite: '#e2b05e',
   dark: true,
 };
 
 export const LIGHT: Palette = {
-  bg: '#f3f5f0', surface: '#fcfdf9', surfaceAlt: '#e9ede6',
-  glass: 'rgba(252,253,249,0.78)', glassStrong: 'rgba(250,251,248,0.97)',
-  glassSecondary: 'rgba(250,252,247,0.55)', glassFloating: 'rgba(252,253,250,0.93)',
-  fill: 'rgba(34,57,43,0.035)', fillHover: 'rgba(34,57,43,0.065)',
-  stroke: 'rgba(35,57,44,0.07)', strokeStrong: 'rgba(35,57,44,0.14)',
-  text: '#252f29', textMuted: '#58675d', textFaint: '#5f6d63',
-  accent: '#3c6250', onAccent: '#ffffff', accentFill: 'rgba(60,98,80,0.08)',
-  ok: '#426a51', warn: '#886524', danger: '#a04742',
-  dangerFill: 'rgba(160,71,66,0.07)', warnFill: 'rgba(136,101,36,0.07)',
-  scrim: 'rgba(36,47,39,0.24)', viewer: 'rgba(241,245,239,0.97)',
-  gradient: ['#476f5b', '#416954', '#3c6250'], shadow: '#24392c',
-  imageControl: 'rgba(19,30,23,0.78)', imageText: '#ffffff', imageFavorite: '#ffd3ce',
+  bg: '#f6f5f2',
+  surface: '#ffffff',
+  surfaceAlt: '#eceae4',
+  glass: 'rgba(255,255,255,0.94)',
+  glassStrong: 'rgba(250,249,246,0.98)',
+  glassSecondary: '#ffffff',
+  glassFloating: 'rgba(255,255,255,0.97)',
+  fill: 'rgba(22,23,26,0.035)',
+  fillHover: 'rgba(22,23,26,0.065)',
+  stroke: 'rgba(22,23,26,0.09)',
+  strokeStrong: 'rgba(22,23,26,0.16)',
+  text: '#16171a',
+  textMuted: '#494d55',
+  textFaint: '#5d626c',
+  accent: '#86530d',
+  onAccent: '#ffffff',
+  accentFill: 'rgba(134,83,13,0.09)',
+  ok: '#1f6f43',
+  warn: '#8a560c',
+  danger: '#b42c25',
+  dangerFill: 'rgba(180,44,37,0.09)',
+  warnFill: 'rgba(138,86,12,0.09)',
+  scrim: 'rgba(16,17,20,0.48)',
+  viewer: 'rgba(13,14,17,0.98)',
+  gradient: ['#86530d', '#86530d', '#86530d'],
+  shadow: '#16171a',
+  imageControl: 'rgba(13,14,16,0.82)',
+  imageText: '#f0f1f3',
+  imageFavorite: '#e2b05e',
   dark: false,
 };
 
 export const PALETTES: Record<ThemeName, Palette> = { dark: DARK, light: LIGHT };
 
 export const radius = {
-  sm: 8,
-  md: 12,
-  lg: 18,
-  xl: 26,
+  sm: 6,
+  md: 10,
+  lg: 14,
+  xl: 16,
   pill: 999,
 } as const;
 
@@ -99,18 +134,18 @@ export const spacing = {
   md: 12,
   lg: 16,
   xl: 20,
-  xxl: 28,
-  xxxl: 40,
+  xxl: 24,
+  xxxl: 32,
 } as const;
 
 export const fontSize = {
-  xxs: 10,
+  xxs: 11,
   xs: 12,
   sm: 13,
   md: 15,
-  lg: 17.5,
-  xl: 28,
-  xxl: 34,
+  lg: 17,
+  xl: 22,
+  xxl: 28,
 } as const;
 
 export const weight = {
@@ -120,7 +155,7 @@ export const weight = {
   bold: '700',
 } as const;
 
-/** Minimum touch target (Apple HIG / Material both ask for ~44 dp). */
+/** Minimum touch target (Apple HIG / Material both ask for >= 44 dp). */
 export const TOUCH_TARGET = 44;
 
 export const durations = {
@@ -129,7 +164,7 @@ export const durations = {
   slow: 380,
 } as const;
 
-/** BlurView intensity units, not CSS pixels; use only on structural surfaces. */
-export const material = { secondary: 12, primary: 28, floating: 40, tinted: 20 } as const;
+/** BlurView intensity units, kept subtle and used only on structural bars. */
+export const material = { secondary: 8, primary: 16, floating: 24, tinted: 12 } as const;
 export const depth = { navigation: 10, overlay: 20, toast: 30 } as const;
-export const navigation = { height: 64, inset: 12, contentInset: 100 } as const;
+export const navigation = { height: 60, inset: 12, contentInset: 92 } as const;

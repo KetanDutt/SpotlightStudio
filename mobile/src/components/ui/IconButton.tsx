@@ -51,10 +51,10 @@ export function IconButton({
         {
           width: size,
           height: size,
-          borderRadius: radius.pill,
-          backgroundColor: translucent ? colors.imageControl : active ? colors.accentFill : 'transparent',
-          borderWidth: translucent ? StyleSheet.hairlineWidth : 0,
-          borderColor: colors.stroke,
+          borderRadius: radius.sm,
+          backgroundColor: translucent ? colors.imageControl : active ? colors.accentFill : colors.fill,
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: active ? colors.accent : colors.stroke,
           opacity: disabled ? 0.4 : 1,
         },
       ]}

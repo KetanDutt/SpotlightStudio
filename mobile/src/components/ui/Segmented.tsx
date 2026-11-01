@@ -60,10 +60,10 @@ export function Segmented<T extends string>({ options, value, onChange, accessib
 const styles = StyleSheet.create({
   wrap: {
     flexDirection: 'row',
-    borderRadius: radius.pill,
+    borderRadius: 8,
     borderWidth: StyleSheet.hairlineWidth,
-    padding: 3,
-    gap: 3,
+    padding: 2,
+    gap: 2,
   },
   segment: {
     flex: 1,
@@ -71,8 +71,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingVertical: spacing.sm,
     paddingHorizontal: spacing.md,
-    borderRadius: radius.pill,
+    borderRadius: radius.sm,
     borderWidth: StyleSheet.hairlineWidth,
-    minHeight: 44,
+    minHeight: 40,
   },
 });

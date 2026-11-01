@@ -28,16 +28,16 @@ export default function TabsLayout() {
           bottom: Math.max(insets.bottom, navigation.inset),
           height: navigation.height,
           paddingTop: spacing.sm, paddingBottom: spacing.sm,
-          borderRadius: radius.xl, overflow: 'hidden',
+          borderRadius: radius.lg, overflow: 'hidden',
           borderWidth: StyleSheet.hairlineWidth,
           borderColor: colors.strokeStrong, borderTopColor: colors.strokeStrong,
           backgroundColor: 'transparent',
           elevation: 0,
         },
         tabBarActiveBackgroundColor: colors.accentFill,
-        tabBarItemStyle: { borderRadius: radius.lg, overflow: 'hidden', marginHorizontal: spacing.xs },
+        tabBarItemStyle: { borderRadius: radius.sm, overflow: 'hidden', marginHorizontal: spacing.xs },
         tabBarBackground: () => <GlassBackdrop />,
-        tabBarLabelStyle: { fontSize: fontSize.xxs, fontWeight: '600' },
+        tabBarLabelStyle: { fontSize: fontSize.xxs, fontWeight: '500' },
       }}
     >
       <Tabs.Screen

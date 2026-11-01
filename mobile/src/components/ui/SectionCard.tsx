@@ -16,11 +16,11 @@ export function SectionCard({ title, footer, children, style }: { title?: string
   return (
     <View style={[styles.section, style]}>
       {title ? (
-        <AppText variant="caption" tone="faint" style={styles.sectionTitle}>
-          {title.toUpperCase()}
+        <AppText variant="caption" tone="muted" style={styles.sectionTitle}>
+          {title}
         </AppText>
       ) : null}
-      <View style={[styles.card, { backgroundColor: colors.glassSecondary, borderColor: colors.stroke }]}>{children}</View>
+      <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.stroke }]}>{children}</View>
       {footer ? (
         <AppText variant="caption" tone="faint" style={styles.footer}>
           {footer}
@@ -160,7 +160,7 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   sectionTitle: {
-    letterSpacing: 0.8,
+    fontWeight: '600',
     paddingHorizontal: spacing.xs,
   },
   card: {
@@ -176,8 +176,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: spacing.md,
     paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.lg,
-    minHeight: 64,
+    paddingVertical: spacing.md,
+    minHeight: 56,
   },
   iconWrap: {
     width: 32,

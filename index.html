@@ -7,7 +7,7 @@
   <meta name="description" content="Browse, search and download thousands of Windows Spotlight wallpapers in 4K and Full HD. A fast, installable gallery with favorites, tags and shareable links." />
   <meta name="app-version" content="2.8.1" />
   <meta name="color-scheme" content="dark light" />
-  <meta name="theme-color" content="#151918" />
+  <meta name="theme-color" content="#121316" />
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob: https://github.com https://*.githubusercontent.com; font-src 'self'; connect-src 'self'; manifest-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-title" content="Spotlight Studio" />
@@ -32,240 +32,254 @@
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to wallpapers</a>
-  <div class="ambient" aria-hidden="true"></div>
 
   <div class="app">
     <!-- ═════════════ Top bar ═════════════ -->
     <header class="topbar" id="topbar">
-      <a class="brand" href="./" aria-label="Spotlight Studio – home">
-        <span class="brand-mark" aria-hidden="true">
-          <svg viewBox="0 0 32 32" width="32" height="32" fill="none"><rect x="1" y="1" width="30" height="30" rx="10" fill="currentColor" fill-opacity=".1"/><rect x="7.5" y="7.5" width="17" height="17" rx="4" stroke="currentColor" stroke-width="1.5"/><circle cx="19.5" cy="12.5" r="2" fill="currentColor"/><path d="m8 22 5-6 4 4 3-3 4 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        </span>
-        <span class="brand-text">
-          <strong>Spotlight Studio</strong>
-          <small id="brand-sub">Wallpaper gallery</small>
-        </span>
-      </a>
+      <div class="topbar-inner">
+        <a class="brand" href="./" aria-label="Spotlight Studio – home">
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 32 32" width="28" height="28" fill="none">
+              <rect x="1" y="1" width="30" height="30" rx="7" fill="var(--bg-inset)" stroke="var(--border-strong)" stroke-width="1"/>
+              <circle cx="21" cy="11" r="3.5" fill="var(--accent)"/>
+              <path d="M2 25.5 10.5 16.5l5.5 4.5 5.5-5.5L30 23.5V28a3 3 0 0 1-3 3H5a3 3 0 0 1-3-3v-2.5Z" fill="var(--surface-active)"/>
+              <path d="M2.5 25 10.5 16.5l5.5 4.5 5.5-5.5 8 7.5" stroke="var(--text-2)" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </span>
+          <span class="brand-text">
+            <strong>Spotlight Studio</strong>
+            <small id="brand-sub">Wallpaper archive</small>
+          </span>
+        </a>
 
-      <div class="search" role="search">
-        <span class="search-icon" data-icon="search" aria-hidden="true"></span>
-        <input id="search" class="search-input" type="search" inputmode="search" autocomplete="off" spellcheck="false"
-               placeholder="Search titles, places, tags…" aria-label="Search wallpapers" />
-        <button id="search-clear" class="search-clear" type="button" aria-label="Clear search" hidden><span data-icon="x"></span></button>
-        <kbd class="kbd search-kbd" aria-hidden="true">/</kbd>
-      </div>
+        <div class="search" role="search">
+          <span class="search-icon" data-icon="search" aria-hidden="true"></span>
+          <input id="search" class="search-input" type="search" inputmode="search" autocomplete="off" spellcheck="false"
+                 placeholder="Search titles, locations, or tags" aria-label="Search wallpapers" />
+          <button id="search-clear" class="search-clear" type="button" aria-label="Clear search" hidden><span data-icon="x"></span></button>
+          <kbd class="kbd search-kbd" aria-hidden="true">/</kbd>
+        </div>
 
-      <div class="topbar-actions">
-        <button id="btn-shuffle" class="btn" type="button" title="Random wallpaper (R)">
-          <span data-icon="shuffle"></span><span class="btn-label">Shuffle</span>
-        </button>
-        <button id="btn-favs" class="btn" type="button" aria-pressed="false" title="Show only favorites (F)">
-          <span data-icon="heart"></span><span class="btn-label">Favorites</span><span class="count-pill" id="fav-count">0</span>
-        </button>
-        <button id="btn-theme" class="btn btn-icon" type="button" title="Theme: auto" aria-label="Change theme"><span data-icon="monitor" id="theme-icon"></span></button>
-        <div class="menu-wrap">
-          <button id="btn-menu" class="btn btn-icon" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="menu" aria-label="More options"><span data-icon="more"></span></button>
-          <div id="menu" class="menu" role="menu" hidden>
-            <button class="menu-item" role="menuitem" type="button" data-action="export-json"><span data-icon="download"></span>Export catalog (JSON)</button>
-            <button class="menu-item" role="menuitem" type="button" data-action="export-csv"><span data-icon="download"></span>Export catalog (CSV)</button>
-            <button class="menu-item" role="menuitem" type="button" data-action="backup-favorites"><span data-icon="heart"></span>Back up favorites</button>
-            <button class="menu-item" role="menuitem" type="button" data-action="restore-favorites"><span data-icon="refresh"></span>Restore favorites</button>
-            <button class="menu-item" role="menuitem" type="button" data-action="create-collection"><span data-icon="image"></span>Create collection from favorites</button>
-            <a class="menu-item desktop-only" role="menuitem" href="/api/docs" target="_blank" rel="noopener"><span data-icon="external"></span>API documentation</a>
-            <hr class="menu-sep" />
-            <button class="menu-item" role="menuitem" type="button" data-action="shortcuts"><span data-icon="keyboard"></span>Keyboard shortcuts</button>
-            <button class="menu-item" role="menuitem" type="button" data-action="about"><span data-icon="info"></span>About Spotlight Studio</button>
+        <div class="topbar-actions">
+          <button id="btn-shuffle" class="btn" type="button" title="Random wallpaper (R)" aria-label="Random wallpaper">
+            <span data-icon="shuffle"></span><span class="btn-label">Random</span>
+          </button>
+          <button id="btn-favs" class="btn" type="button" aria-pressed="false" title="Show saved favorites (F)">
+            <span data-icon="heart"></span><span class="btn-label">Favorites</span><span class="count-pill" id="fav-count" hidden>0</span>
+          </button>
+          <button id="btn-theme" class="btn btn-icon" type="button" title="Theme: auto" aria-label="Change theme"><span data-icon="monitor" id="theme-icon"></span></button>
+          <div class="menu-wrap">
+            <button id="btn-menu" class="btn btn-icon" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="menu" aria-label="More options"><span data-icon="more"></span></button>
+            <div id="menu" class="menu" role="menu" hidden>
+              <button class="menu-item" role="menuitem" type="button" data-action="export-json"><span data-icon="download"></span>Export catalog (JSON)</button>
+              <button class="menu-item" role="menuitem" type="button" data-action="export-csv"><span data-icon="download"></span>Export catalog (CSV)</button>
+              <button class="menu-item" role="menuitem" type="button" data-action="backup-favorites"><span data-icon="heart"></span>Back up favorites</button>
+              <button class="menu-item" role="menuitem" type="button" data-action="restore-favorites"><span data-icon="refresh"></span>Restore favorites</button>
+              <button class="menu-item" role="menuitem" type="button" data-action="create-collection"><span data-icon="image"></span>New collection from selection</button>
+              <a class="menu-item desktop-only" role="menuitem" href="/api/docs" target="_blank" rel="noopener"><span data-icon="external"></span>API reference</a>
+              <hr class="menu-sep" />
+              <button class="menu-item" role="menuitem" type="button" data-action="shortcuts"><span data-icon="keyboard"></span>Keyboard shortcuts</button>
+              <button class="menu-item" role="menuitem" type="button" data-action="about"><span data-icon="info"></span>About Spotlight Studio</button>
+            </div>
           </div>
         </div>
+      </div>
+      <div class="progress desktop-only" id="progress" role="progressbar" aria-label="Crawler progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+        <div class="progress-bar" id="progress-bar"></div>
       </div>
     </header>
 
-    <div class="progress desktop-only" id="progress" role="progressbar" aria-label="Crawler progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
-      <div class="progress-bar" id="progress-bar"></div>
-    </div>
+    <div class="workspace">
+      <div class="banner desktop-only" id="lfs-banner" role="alert" hidden>
+        <span data-icon="alert"></span>
+        <span><strong>Local images are Git LFS pointers.</strong> Run <code>git lfs install &amp;&amp; git lfs pull</code> and restart to load originals.</span>
+        <button class="btn btn-ghost btn-sm" type="button" id="lfs-dismiss">Dismiss</button>
+      </div>
 
-    <div class="banner desktop-only" id="lfs-banner" role="alert" hidden>
-      <span data-icon="alert"></span>
-      <span><strong>Images are Git LFS pointers.</strong> This clone was made without the real image files. Run <code>git lfs install &amp;&amp; git lfs pull</code> and restart.</span>
-      <button class="btn btn-ghost btn-sm" type="button" id="lfs-dismiss">Dismiss</button>
-    </div>
+      <input type="file" id="favorites-file" accept="application/json,.json" aria-label="Restore favorites backup" hidden />
+      <div class="banner" id="offline-banner" role="status" hidden>
+        <span data-icon="info"></span>
+        <span><strong>Offline mode.</strong> Cached search and favorites remain available; uncached images require a connection.</span>
+      </div>
+      <div class="banner read-only-notice" role="status">
+        <span data-icon="info"></span>
+        <span><strong>Read-only server.</strong> Browse, search, and save favorites locally; crawler controls are disabled.</span>
+      </div>
 
-    <input type="file" id="favorites-file" accept="application/json,.json" aria-label="Restore favorites backup" hidden />
-    <div class="banner" id="offline-banner" role="status" hidden>
-      <span data-icon="info"></span>
-      <span><strong>You’re offline.</strong> Saved catalog search and favorites still work. Uncached images need a connection.</span>
-    </div>
-    <div class="banner read-only-notice" role="status">
-      <span data-icon="info"></span>
-      <span><strong>Read-only gallery.</strong> Browse and save favorites freely. Server controls are disabled.</span>
-    </div>
-
-    <div class="layout">
-      <!-- ═════════════ Sidebar ═════════════ -->
-      <aside class="sidebar" id="sidebar" aria-label="Filters and library">
-        <div class="sidebar-head">
-          <h2>Filters</h2>
-          <button class="btn btn-icon btn-ghost sidebar-close" id="sidebar-close" type="button" aria-label="Close filters"><span data-icon="x"></span></button>
-        </div>
-
-        <!-- Crawler (desktop app / server mode only) -->
-        <section class="panel desktop-only" id="crawler" aria-labelledby="crawler-title">
-          <div class="panel-title" id="crawler-title"><span>Crawler</span>
-            <span class="status-pill is-stopped" id="status-pill"><i class="dot"></i><span id="status-text">Stopped</span></span>
+      <div class="layout">
+        <!-- ═════════════ Sidebar ═════════════ -->
+        <aside class="sidebar" id="sidebar" aria-label="Filters and library">
+          <div class="sidebar-head">
+            <h2>Filters &amp; archive</h2>
+            <button class="btn btn-icon btn-ghost sidebar-close" id="sidebar-close" type="button" aria-label="Close filters"><span data-icon="x"></span></button>
           </div>
-          <p class="crawler-phase" id="crawler-phase" aria-live="polite">Idle</p>
-          <dl class="stat-grid" id="crawler-stats">
-            <div><dt>New</dt><dd id="st-new">0</dd></div>
-            <div><dt>Dupes</dt><dd id="st-dupes">0</dd></div>
-            <div><dt>Errors</dt><dd id="st-errors">0</dd></div>
-            <div><dt>Speed</dt><dd id="st-speed">–</dd></div>
-            <div><dt>Queue</dt><dd id="st-queue">0</dd></div>
-            <div><dt>Pages left</dt><dd id="st-pages">0</dd></div>
-          </dl>
-          <div class="field-row">
-            <label class="field"><span>Source</span>
-              <select id="crawl-source" class="select">
-                <option value="both">Both sites</option>
-                <option value="peapix">Peapix only</option>
-                <option value="win10spotlight">Windows 10 Spotlight only</option>
-              </select>
+
+          <!-- Crawler (desktop app / server mode only) -->
+          <section class="panel panel-box desktop-only" id="crawler" aria-labelledby="crawler-title">
+            <div class="panel-title" id="crawler-title">
+              <span>Crawler</span>
+              <span class="status-pill is-stopped" id="status-pill"><i class="dot"></i><span id="status-text">Stopped</span></span>
+            </div>
+            <p class="crawler-phase" id="crawler-phase" aria-live="polite">Idle</p>
+            <dl class="stat-grid" id="crawler-stats">
+              <div><dt>New</dt><dd id="st-new">0</dd></div>
+              <div><dt>Duplicates</dt><dd id="st-dupes">0</dd></div>
+              <div><dt>Errors</dt><dd id="st-errors">0</dd></div>
+              <div><dt>Rate</dt><dd id="st-speed">–</dd></div>
+              <div><dt>Queue</dt><dd id="st-queue">0</dd></div>
+              <div><dt>Pages left</dt><dd id="st-pages">0</dd></div>
+            </dl>
+            <div class="field-row">
+              <label class="field"><span>Source</span>
+                <select id="crawl-source" class="select">
+                  <option value="both">Both sources</option>
+                  <option value="peapix">Peapix (4K)</option>
+                  <option value="win10spotlight">Windows 10 Spotlight</option>
+                </select>
+              </label>
+              <label class="field"><span>Mode</span>
+                <select id="crawl-mode" class="select">
+                  <option value="quick">Quick update</option>
+                  <option value="full">Full crawl</option>
+                  <option value="repair">Repair metadata</option>
+                </select>
+              </label>
+            </div>
+            <p class="hint" id="crawl-mode-hint">Scans recent pages only.</p>
+            <div class="btn-row">
+              <button id="btn-start" class="btn btn-primary" type="button"><span data-icon="play"></span><span id="btn-start-label">Start</span></button>
+              <button id="btn-pause" class="btn" type="button"><span data-icon="pause"></span>Pause</button>
+              <button id="btn-stop" class="btn btn-stop" type="button"><span data-icon="stop"></span>Stop</button>
+            </div>
+            <p class="hint" id="last-run" hidden></p>
+          </section>
+
+          <!-- Library overview -->
+          <section class="panel" id="library" aria-labelledby="library-title">
+            <div class="panel-title" id="library-title"><span>Archive</span><span class="panel-meta" id="lib-updated"></span></div>
+            <div class="lib-total"><strong id="lib-total">–</strong><span>photographs</span></div>
+            <div class="lib-bars" id="lib-bars"></div>
+          </section>
+
+          <section class="panel" aria-labelledby="source-title">
+            <div class="panel-title" id="source-title"><span>Source</span></div>
+            <div class="chips" id="source-chips" role="group" aria-label="Filter by source"></div>
+          </section>
+
+          <section class="panel" aria-labelledby="quality-title">
+            <div class="panel-title" id="quality-title"><span>Resolution</span></div>
+            <div class="chips" id="quality-chips" role="group" aria-label="Filter by resolution"></div>
+          </section>
+
+          <section class="panel" aria-labelledby="aspect-title">
+            <div class="panel-title" id="aspect-title"><span>Orientation</span></div>
+            <div class="chips" id="aspect-chips" role="group" aria-label="Filter by orientation"></div>
+          </section>
+
+          <section class="panel" aria-labelledby="color-title">
+            <div class="panel-title" id="color-title"><span>Dominant color</span></div>
+            <div class="chips color-chips" id="color-chips" role="group" aria-label="Filter by dominant color"></div>
+          </section>
+
+          <section class="panel" aria-labelledby="collections-title">
+            <div class="panel-title" id="collections-title"><span>Collections</span></div>
+            <label class="field"><span class="sr-only">Collection</span><select id="collection-filter" class="select" aria-label="Filter by collection"><option value="">All wallpapers</option></select></label>
+          </section>
+
+          <section class="panel" aria-labelledby="tags-title">
+            <div class="panel-title" id="tags-title"><span>Popular tags</span>
+              <button class="link-btn" type="button" id="tags-more" hidden>More</button></div>
+            <div class="chips chips-wrap" id="tag-chips" role="group" aria-label="Filter by tag"></div>
+          </section>
+
+          <section class="panel" aria-labelledby="view-title">
+            <div class="panel-title" id="view-title"><span>Page size</span></div>
+            <label class="field"><span class="sr-only">Wallpapers per page</span>
+              <select id="per-page" class="select" aria-label="Wallpapers per page"></select>
             </label>
-            <label class="field"><span>Mode</span>
-              <select id="crawl-mode" class="select">
-                <option value="quick">Quick update</option>
-                <option value="full">Full crawl</option>
-                <option value="repair">Repair metadata</option>
-              </select>
-            </label>
-          </div>
-          <p class="hint" id="crawl-mode-hint">Scans the newest pages only – takes seconds.</p>
-          <div class="btn-row">
-            <button id="btn-start" class="btn btn-ok" type="button"><span data-icon="play" data-fill="1"></span><span id="btn-start-label">Start</span></button>
-            <button id="btn-pause" class="btn btn-warn" type="button"><span data-icon="pause" data-fill="1"></span>Pause</button>
-            <button id="btn-stop" class="btn btn-danger" type="button"><span data-icon="stop" data-fill="1"></span>Stop</button>
-          </div>
-          <p class="hint" id="last-run" hidden></p>
-        </section>
+          </section>
 
-        <!-- Library overview -->
-        <section class="panel" id="library" aria-labelledby="library-title">
-          <div class="panel-title" id="library-title"><span>Library</span><span class="panel-meta" id="lib-updated"></span></div>
-          <div class="lib-total"><strong id="lib-total">–</strong><span>wallpapers</span></div>
-          <div class="lib-bars" id="lib-bars"></div>
-        </section>
+          <button class="btn btn-block" type="button" id="btn-reset"><span data-icon="refresh"></span>Reset filters</button>
+          <p class="sidebar-foot"><span id="version-label">Spotlight Studio</span></p>
+        </aside>
+        <div class="scrim" id="scrim" hidden></div>
 
-        <section class="panel" aria-labelledby="source-title">
-          <div class="panel-title" id="source-title"><span>Source</span></div>
-          <div class="chips" id="source-chips" role="group" aria-label="Filter by source"></div>
-        </section>
-
-        <section class="panel" aria-labelledby="quality-title">
-          <div class="panel-title" id="quality-title"><span>Resolution</span></div>
-          <div class="chips" id="quality-chips" role="group" aria-label="Filter by resolution"></div>
-        </section>
-
-        <section class="panel" aria-labelledby="aspect-title">
-          <div class="panel-title" id="aspect-title"><span>Orientation</span></div>
-          <div class="chips" id="aspect-chips" role="group" aria-label="Filter by orientation"></div>
-        </section>
-
-        <section class="panel" aria-labelledby="color-title">
-          <div class="panel-title" id="color-title"><span>Dominant color</span></div>
-          <div class="chips color-chips" id="color-chips" role="group" aria-label="Filter by dominant color"></div>
-        </section>
-
-        <section class="panel" aria-labelledby="collections-title">
-          <div class="panel-title" id="collections-title"><span>My collections</span></div>
-          <label class="field"><span>Show collection</span><select id="collection-filter" class="select"><option value="">All wallpapers</option></select></label>
-        </section>
-
-        <section class="panel" aria-labelledby="tags-title">
-          <div class="panel-title" id="tags-title"><span>Popular tags</span>
-            <button class="link-btn" type="button" id="tags-more" hidden>More</button></div>
-          <div class="chips chips-wrap" id="tag-chips" role="group" aria-label="Filter by tag"></div>
-        </section>
-
-        <section class="panel" aria-labelledby="view-title">
-          <div class="panel-title" id="view-title"><span>Display</span></div>
-          <label class="field"><span>Wallpapers per page</span>
-            <select id="per-page" class="select"></select>
-          </label>
-        </section>
-
-        <button class="btn btn-block" type="button" id="btn-reset"><span data-icon="refresh"></span>Reset all filters</button>
-        <p class="sidebar-foot"><span id="version-label">Spotlight Studio</span></p>
-      </aside>
-      <div class="scrim" id="scrim" hidden></div>
-
-      <!-- ═════════════ Gallery ═════════════ -->
-      <main id="main" tabindex="-1">
-        <div class="results-bar" id="results-bar">
-          <button class="btn filters-toggle" type="button" id="filters-toggle" aria-label="Filters" aria-controls="sidebar" aria-expanded="false"><span data-icon="filter"></span><span class="filters-label">Filters</span><span class="count-pill" id="filters-count" hidden>0</span></button>
-          <div class="results-info">
-            <p class="collection-eyebrow">A world worth discovering</p>
-            <h1 class="results-title" id="results-title">Wallpapers</h1>
-            <p class="results-sub" id="results-sub" aria-live="polite">Loading…</p>
-          </div>
-          <div class="results-tools">
-            <label class="field field-inline"><span class="sr-only">Sort by</span>
-              <select id="sort" class="select" aria-label="Sort by"></select>
-            </label>
-            <div class="seg" role="group" aria-label="Layout">
-              <button class="seg-btn is-active" type="button" id="view-grid" aria-pressed="true" title="Grid view"><span data-icon="grid"></span><span class="sr-only">Grid</span></button>
-              <button class="seg-btn" type="button" id="view-list" aria-pressed="false" title="List view"><span data-icon="list"></span><span class="sr-only">List</span></button>
+        <!-- ═════════════ Gallery ═════════════ -->
+        <main id="main" tabindex="-1">
+          <div class="results-bar" id="results-bar">
+            <button class="btn filters-toggle" type="button" id="filters-toggle" aria-label="Filters" aria-controls="sidebar" aria-expanded="false"><span data-icon="filter"></span><span class="filters-label">Filters</span><span class="count-pill" id="filters-count" hidden>0</span></button>
+            <div class="results-info">
+              <h1 class="results-title" id="results-title">All wallpapers</h1>
+              <p class="results-sub" id="results-sub" aria-live="polite">Loading…</p>
+            </div>
+            <div class="results-tools">
+              <button class="btn btn-sm" type="button" id="batch-toggle" aria-pressed="false"><span data-icon="check"></span><span>Select</span></button>
+              <label class="field field-inline"><span class="sr-only">Sort by</span>
+                <select id="sort" class="select select-compact" aria-label="Sort by"></select>
+              </label>
+              <div class="seg" role="group" aria-label="Layout">
+                <button class="seg-btn is-active" type="button" id="view-grid" aria-pressed="true" title="Grid view"><span data-icon="grid"></span><span class="sr-only">Grid</span></button>
+                <button class="seg-btn" type="button" id="view-list" aria-pressed="false" title="List view"><span data-icon="list"></span><span class="sr-only">List</span></button>
+              </div>
             </div>
           </div>
-        </div>
-        <div class="active-filters" id="active-filters"></div>
-        <div class="batch-tools" id="batch-tools">
-          <button class="btn btn-sm" type="button" id="batch-toggle" aria-pressed="false">Select wallpapers</button>
-          <span id="batch-count" class="hint">0 selected</span>
-          <button class="btn btn-sm" type="button" id="batch-favorite" disabled>♥ Add to favorites</button>
-          <button class="btn btn-sm btn-primary" type="button" id="batch-download" disabled>Download ZIP</button>
-          <button class="btn btn-sm btn-ghost" type="button" id="batch-clear">Clear</button>
-        </div>
 
-        <section class="daily-spotlight" id="daily-spotlight" aria-labelledby="daily-label" hidden>
-          <button class="daily-photo" id="daily-photo" type="button" aria-labelledby="daily-label daily-title"></button>
-          <div class="daily-info">
-            <p class="collection-eyebrow" id="daily-label">Daily spotlight</p>
-            <h2 id="daily-title"></h2>
-            <p class="daily-meta" id="daily-meta"></p>
-            <p class="hint">A fresh perspective each UTC day. The same pick on devices using the same catalog.</p>
-            <div class="daily-actions">
-              <button class="btn" id="daily-open" type="button"><span data-icon="image"></span>Explore wallpaper</button>
-              <button class="btn btn-icon" id="daily-fav" type="button" aria-pressed="false" aria-label="Add daily wallpaper to favorites"><span data-icon="heart"></span></button>
+          <div class="active-filters" id="active-filters"></div>
+
+          <div class="batch-tools" id="batch-tools" hidden>
+            <span id="batch-count" class="batch-count">0 selected</span>
+            <div class="batch-actions">
+              <button class="btn btn-sm" type="button" id="batch-favorite" disabled><span data-icon="heart"></span><span>Save to favorites</span></button>
+              <button class="btn btn-sm btn-primary" type="button" id="batch-download" disabled><span data-icon="download"></span><span>Download ZIP</span></button>
+              <button class="btn btn-sm btn-ghost" type="button" id="batch-clear">Clear</button>
             </div>
           </div>
-        </section>
 
-        <div class="skeleton-grid" id="state-loading" aria-hidden="true"></div>
+          <section class="daily-spotlight" id="daily-spotlight" aria-labelledby="daily-label" hidden>
+            <button class="daily-photo" id="daily-photo" type="button" aria-labelledby="daily-label daily-title"></button>
+            <div class="daily-info">
+              <div class="daily-head">
+                <span class="daily-kicker" id="daily-label">Daily spotlight</span>
+                <time class="daily-date" id="daily-date"></time>
+              </div>
+              <h2 id="daily-title"></h2>
+              <p class="daily-meta" id="daily-meta"></p>
+              <p class="daily-note">Shared UTC selection across web, desktop, mobile, and TV.</p>
+              <div class="daily-actions">
+                <button class="btn btn-primary" id="daily-open" type="button"><span data-icon="fullscreen"></span>Inspect frame</button>
+                <button class="btn btn-icon" id="daily-fav" type="button" aria-pressed="false" aria-label="Add daily wallpaper to favorites"><span data-icon="heart"></span></button>
+              </div>
+            </div>
+          </section>
 
-        <div class="state" id="state-empty" hidden>
-          <div class="state-icon" data-icon="image" data-size="34"></div>
-          <h2 id="empty-title">No wallpapers found</h2>
-          <p id="empty-text">Try different search terms or clear a filter.</p>
-          <button class="btn btn-primary" type="button" id="empty-reset"><span data-icon="refresh"></span>Reset filters</button>
-          <button class="btn btn-ok desktop-only" type="button" id="empty-start" hidden><span data-icon="play" data-fill="1"></span>Start downloading</button>
-        </div>
+          <div class="skeleton-grid" id="state-loading" aria-hidden="true"></div>
 
-        <div class="state" id="state-error" hidden role="alert">
-          <div class="state-icon is-danger" data-icon="alert" data-size="34"></div>
-          <h2>The catalog could not be loaded</h2>
-          <p id="error-text">Check your connection and try again.</p>
-          <button class="btn btn-primary" type="button" id="error-retry"><span data-icon="refresh"></span>Retry</button>
-        </div>
+          <div class="state" id="state-empty" hidden>
+            <div class="state-icon" data-icon="image" data-size="28"></div>
+            <h2 id="empty-title">No wallpapers found</h2>
+            <p id="empty-text">Try different search terms or clear a filter.</p>
+            <button class="btn btn-primary" type="button" id="empty-reset"><span data-icon="refresh"></span>Reset filters</button>
+            <button class="btn desktop-only" type="button" id="empty-start" hidden><span data-icon="play"></span>Start crawler</button>
+          </div>
 
-        <section class="grid" id="gallery" aria-label="Wallpapers" hidden></section>
-        <nav class="pagination" id="pagination" aria-label="Pagination"></nav>
-      </main>
+          <div class="state" id="state-error" hidden role="alert">
+            <div class="state-icon is-danger" data-icon="alert" data-size="28"></div>
+            <h2>Catalog unavailable</h2>
+            <p id="error-text">Check your connection and try again.</p>
+            <button class="btn btn-primary" type="button" id="error-retry"><span data-icon="refresh"></span>Retry</button>
+          </div>
+
+          <section class="grid" id="gallery" aria-label="Wallpapers" hidden></section>
+          <nav class="pagination" id="pagination" aria-label="Pagination"></nav>
+        </main>
+      </div>
+
+      <footer class="site-foot">
+        <span>Spotlight Studio <span id="foot-version"></span></span>
+        <span class="sep" aria-hidden="true">·</span>
+        <span>Independent archive — photographs remain the property of their respective copyright holders.</span>
+      </footer>
     </div>
-
-    <footer class="site-foot">
-      <span>Spotlight Studio <span id="foot-version"></span></span>
-      <span class="sep" aria-hidden="true">·</span>
-      <span>Unofficial archive – wallpapers belong to their respective owners.</span>
-    </footer>
   </div>
 
   <button class="fab" id="to-top" type="button" aria-label="Back to top" hidden><span data-icon="chevron-up"></span></button>
@@ -279,13 +293,13 @@
         <button class="lb-btn" type="button" id="lb-close" title="Close (Esc)" aria-label="Close"><span data-icon="x"></span></button>
       </div>
     </div>
-    <button class="lb-nav lb-prev" type="button" id="lb-prev" title="Previous (←)" aria-label="Previous wallpaper"><span data-icon="chevron-left" data-size="26"></span></button>
-    <button class="lb-nav lb-next" type="button" id="lb-next" title="Next (→)" aria-label="Next wallpaper"><span data-icon="chevron-right" data-size="26"></span></button>
+    <button class="lb-nav lb-prev" type="button" id="lb-prev" title="Previous (←)" aria-label="Previous wallpaper"><span data-icon="chevron-left" data-size="22"></span></button>
+    <button class="lb-nav lb-next" type="button" id="lb-next" title="Next (→)" aria-label="Next wallpaper"><span data-icon="chevron-right" data-size="22"></span></button>
     <figure class="lb-stage" id="lb-stage">
       <picture class="lb-picture"><source id="lb-webp" type="image/webp" /><img id="lb-img" class="lb-img" alt="" decoding="async" draggable="false" /></picture>
       <div class="lb-spinner" id="lb-spinner" aria-hidden="true"></div>
       <div class="lb-error" id="lb-error" role="status" hidden>
-        <span data-icon="alert" data-size="26"></span>
+        <span data-icon="alert" data-size="24"></span>
         <strong>Full-resolution image unavailable</strong>
         <p id="lb-error-text">Check your connection and try again. The thumbnail may still be available.</p>
         <button class="btn" id="lb-retry" type="button"><span data-icon="refresh"></span>Retry image</button>
@@ -302,7 +316,7 @@
       <dl class="lb-meta" id="lb-meta"></dl>
       <div class="chips chips-wrap" id="lb-tags"></div>
       <div class="lb-actions">
-        <a class="btn btn-primary" id="lb-download" href="#" download rel="noopener"><span data-icon="download"></span>Download full resolution</a>
+        <a class="btn btn-primary" id="lb-download" href="#" download rel="noopener"><span data-icon="download"></span>Download original</a>
         <button class="btn desktop-only" type="button" id="lb-setwp"><span data-icon="monitor"></span>Set as wallpaper</button>
         <a class="btn" id="lb-source" href="#" target="_blank" rel="noopener noreferrer"><span data-icon="external"></span>Source page</a>
         <button class="btn" type="button" id="lb-share"><span data-icon="share"></span>Share</button>
@@ -319,8 +333,8 @@
       <label class="field"><span>Fit mode</span><select class="select" id="wallpaper-fit">
         <option>Fill</option><option>Fit</option><option>Stretch</option><option>Tile</option><option>Center</option><option>Span</option>
       </select></label>
-      <label class="field"><span>Display (Windows)</span><select class="select" id="wallpaper-monitor"><option value="">All displays</option></select></label>
-      <p class="hint">Per-display targets and fit modes are supported on Windows 10/11. Other platforms use their system default.</p>
+      <label class="field"><span>Target display (Windows)</span><select class="select" id="wallpaper-monitor"><option value="">All displays</option></select></label>
+      <p class="hint">Per-display targets and fit modes apply on Windows 10 and 11. macOS and Linux use system defaults.</p>
       <button class="btn btn-primary" id="wallpaper-apply" type="button">Apply wallpaper</button>
     </div>
   </dialog>
@@ -332,15 +346,15 @@
     <dl class="shortcuts">
       <div><dt><kbd class="kbd">/</kbd></dt><dd>Focus search</dd></div>
       <div><dt><kbd class="kbd">R</kbd></dt><dd>Open a random wallpaper</dd></div>
-      <div><dt><kbd class="kbd">F</kbd></dt><dd>Favorite (in viewer) / toggle favorites view</dd></div>
-      <div><dt><kbd class="kbd">T</kbd></dt><dd>Cycle theme (dark / light / system)</dd></div>
-      <div><dt><kbd class="kbd">W</kbd></dt><dd>Set as desktop wallpaper (viewer, desktop mode)</dd></div>
-      <div><dt><kbd class="kbd">←</kbd> <kbd class="kbd">→</kbd></dt><dd>Previous / next wallpaper (viewer) or page</dd></div>
-      <div><dt><kbd class="kbd">C</kbd></dt><dd>Copy link to the current wallpaper</dd></div>
-      <div><dt><kbd class="kbd">D</kbd></dt><dd>Download the current wallpaper</dd></div>
-      <div><dt><kbd class="kbd">Enter</kbd></dt><dd>Fullscreen (in viewer)</dd></div>
-      <div><dt><kbd class="kbd">Esc</kbd></dt><dd>Close dialog / leave search</dd></div>
-      <div><dt><kbd class="kbd">?</kbd></dt><dd>Show this help</dd></div>
+      <div><dt><kbd class="kbd">F</kbd></dt><dd>Toggle favorite or favorites filter</dd></div>
+      <div><dt><kbd class="kbd">T</kbd></dt><dd>Cycle theme (dark, light, system)</dd></div>
+      <div><dt><kbd class="kbd">W</kbd></dt><dd>Set as desktop wallpaper (viewer)</dd></div>
+      <div><dt><kbd class="kbd">←</kbd> <kbd class="kbd">→</kbd></dt><dd>Previous or next wallpaper / page</dd></div>
+      <div><dt><kbd class="kbd">C</kbd></dt><dd>Copy link to current wallpaper</dd></div>
+      <div><dt><kbd class="kbd">D</kbd></dt><dd>Download current wallpaper</dd></div>
+      <div><dt><kbd class="kbd">Enter</kbd></dt><dd>Toggle fullscreen in viewer</dd></div>
+      <div><dt><kbd class="kbd">Esc</kbd></dt><dd>Close dialog or clear search</dd></div>
+      <div><dt><kbd class="kbd">?</kbd></dt><dd>Show keyboard shortcuts</dd></div>
     </dl>
   </dialog>
 
@@ -348,22 +362,22 @@
     <div class="modal-head"><h2 id="dlg-about-title">About Spotlight Studio</h2>
       <button class="btn btn-icon btn-ghost" type="button" data-close aria-label="Close"><span data-icon="x"></span></button></div>
     <div class="about-body">
-      <p>An archive and gallery of <strong>Windows Spotlight</strong> wallpapers, collected from Peapix and Windows10Spotlight, de-duplicated by perceptual hash and kept in the best available resolution.</p>
+      <p>A curated archive of <strong>Windows Spotlight</strong> photography collected from Peapix and Windows10Spotlight, perceptually de-duplicated and preserved in the highest available resolution.</p>
       <dl class="about-list">
         <div><dt>Author</dt><dd>Ketan Dutt</dd></div>
-        <div><dt>Copyright</dt><dd>&copy; 2026 Ketan Dutt. All rights reserved.</dd></div>
+        <div><dt>Copyright</dt><dd>&copy; 2026 Ketan Dutt</dd></div>
         <div><dt>Version</dt><dd id="about-version">–</dd></div>
         <div><dt>Mode</dt><dd id="about-mode">–</dd></div>
-        <div><dt>Wallpapers</dt><dd id="about-count">–</dd></div>
-        <div><dt>Last update</dt><dd id="about-updated">–</dd></div>
+        <div><dt>Catalog</dt><dd id="about-count">–</dd></div>
+        <div><dt>Updated</dt><dd id="about-updated">–</dd></div>
       </dl>
-      <p class="hint"><strong>Credits &amp; Attribution:</strong> Created &amp; designed by Ketan Dutt. Wallpapers collected from Windows Spotlight via Peapix and Windows10Spotlight. All images remain the property of their respective original photographers and copyright holders.</p>
-      <p class="hint"><strong>Disclaimer:</strong> Spotlight Studio is an independent, unofficial project. It is not affiliated with, authorized, maintained, sponsored, or endorsed by Microsoft Corporation, Peapix, or Windows10Spotlight. Microsoft, Windows, and Windows Spotlight are trademarks of Microsoft Corporation.</p>
+      <p class="hint"><strong>Attribution:</strong> Created by Ketan Dutt. Photographs are sourced from Windows Spotlight via Peapix and Windows10Spotlight and remain the property of their respective photographers and copyright holders.</p>
+      <p class="hint"><strong>Disclaimer:</strong> Independent project, not affiliated with or endorsed by Microsoft Corporation, Peapix, or Windows10Spotlight.</p>
     </div>
   </dialog>
 
   <div class="toasts" id="toasts" role="status" aria-live="polite"></div>
 
-  <noscript><div class="noscript">Spotlight Studio needs JavaScript to browse the wallpaper catalog.</div></noscript>
+  <noscript><div class="noscript">Spotlight Studio requires JavaScript to browse the wallpaper catalog.</div></noscript>
 </body>
 </html>

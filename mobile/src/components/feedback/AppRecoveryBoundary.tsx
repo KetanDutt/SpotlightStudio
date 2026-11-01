@@ -31,11 +31,11 @@ export class AppRecoveryBoundary extends React.Component<{ children: React.React
 }
 
 const styles = StyleSheet.create({
-  viewport: { flex: 1, backgroundColor: '#151918' },
+  viewport: { flex: 1, backgroundColor: '#121316' },
   screen: { flexGrow: 1, justifyContent: 'center', alignItems: 'center', padding: 32, gap: 20 },
-  title: { color: '#e9ede8', fontSize: 26, fontWeight: '600', textAlign: 'center' },
-  body: { color: '#d1d9d3', fontSize: 16, textAlign: 'center', lineHeight: 24 },
-  note: { color: '#a4b1a8', fontSize: 14, textAlign: 'center', lineHeight: 22 },
-  button: { backgroundColor: '#9ac7ab', borderRadius: 16, minHeight: 48, justifyContent: 'center', paddingHorizontal: 24, paddingVertical: 12 },
-  buttonText: { color: '#10251b', fontSize: 16, fontWeight: '600' },
+  title: { color: '#f0f1f3', fontSize: 24, fontWeight: '600', textAlign: 'center' },
+  body: { color: '#b0b5be', fontSize: 15, textAlign: 'center', lineHeight: 22 },
+  note: { color: '#979da8', fontSize: 13, textAlign: 'center', lineHeight: 20 },
+  button: { backgroundColor: '#e2b05e', borderRadius: 10, minHeight: 48, justifyContent: 'center', paddingHorizontal: 24, paddingVertical: 12 },
+  buttonText: { color: '#1c1406', fontSize: 15, fontWeight: '600' },
 });

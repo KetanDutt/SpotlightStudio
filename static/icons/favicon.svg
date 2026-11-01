@@ -1,43 +1,20 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#121e30"/>
-      <stop offset="50%" stop-color="#09101c"/>
-      <stop offset="100%" stop-color="#05070e"/>
-    </linearGradient>
-    <radialGradient id="sunGlow" cx="68%" cy="33%" r="35%">
-      <stop offset="0%" stop-color="#00e5ff" stop-opacity="0.45"/>
-      <stop offset="100%" stop-color="#00e5ff" stop-opacity="0"/>
-    </radialGradient>
-    <linearGradient id="sun" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#ffffff"/>
-      <stop offset="100%" stop-color="#cbf1ff"/>
-    </linearGradient>
-    <linearGradient id="mountBack" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#16384c"/>
-      <stop offset="100%" stop-color="#0d2130"/>
-    </linearGradient>
-    <linearGradient id="mountFore" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#0a1a27"/>
-      <stop offset="100%" stop-color="#050d14"/>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#191b1f"/>
+      <stop offset="100%" stop-color="#101114"/>
     </linearGradient>
     <clipPath id="squircle">
-      <rect width="512" height="512" rx="116"/>
+      <rect width="512" height="512" rx="108"/>
     </clipPath>
   </defs>
   <g clip-path="url(#squircle)">
     <rect width="512" height="512" fill="url(#bg)"/>
-    <circle cx="344" cy="168" r="140" fill="url(#sunGlow)"/>
-    <circle cx="344" cy="168" r="56" fill="url(#sun)"/>
-    <!-- Back mountain -->
-    <path d="M0 420 L130 260 L220 340 L320 230 L512 420 L512 512 L0 512 Z" fill="url(#mountBack)"/>
-    <path d="M0 420 L130 260 L220 340 L320 230 L512 420" fill="none" stroke="#00d2ff" stroke-width="2.5" stroke-opacity="0.6"/>
-    <!-- Fore mountain -->
-    <path d="M0 460 L180 320 L275 395 L405 295 L512 390 L512 512 L0 512 Z" fill="url(#mountFore)"/>
-    <path d="M0 460 L180 320 L275 395 L405 295 L512 390" fill="none" stroke="#00e5ff" stroke-width="2.5" stroke-opacity="0.8"/>
-    <!-- Top specular glass sheen -->
-    <path d="M0 0 L512 0 L512 160 L0 280 Z" fill="#ffffff" fill-opacity="0.07"/>
-    <!-- Glass rim border -->
-    <rect width="510" height="510" x="1" y="1" rx="115" fill="none" stroke="#00d2ff" stroke-width="2" stroke-opacity="0.35"/>
+    <circle cx="340" cy="172" r="58" fill="#e2b05e"/>
+    <path d="M0 416 L132 264 L224 338 L322 236 L512 414 L512 512 L0 512 Z" fill="#262930"/>
+    <path d="M0 416 L132 264 L224 338 L322 236 L512 414" fill="none" stroke="#e2b05e" stroke-width="2.5" stroke-opacity="0.32"/>
+    <path d="M0 456 L182 322 L276 392 L404 298 L512 388 L512 512 L0 512 Z" fill="#14161a"/>
+    <path d="M0 456 L182 322 L276 392 L404 298 L512 388" fill="none" stroke="#f0f1f3" stroke-width="2" stroke-opacity="0.16"/>
+    <rect width="508" height="508" x="2" y="2" rx="106" fill="none" stroke="#ffffff" stroke-width="3" stroke-opacity="0.12"/>
   </g>
 </svg>

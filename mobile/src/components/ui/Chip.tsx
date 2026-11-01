@@ -39,12 +39,12 @@ export function Chip({ label, selected, count, icon, onPress, onRemove, disabled
         styles.base,
         {
           height,
-          borderRadius: radius.pill,
+          borderRadius: radius.sm,
           paddingStart: icon ? spacing.sm : spacing.md,
           paddingEnd: spacing.md,
         },
         selected
-          ? { backgroundColor: colors.accentFill, borderColor: colors.strokeStrong, borderWidth: StyleSheet.hairlineWidth }
+          ? { backgroundColor: colors.accentFill, borderColor: colors.accent, borderWidth: StyleSheet.hairlineWidth }
           : { backgroundColor: colors.fill, borderColor: colors.stroke, borderWidth: StyleSheet.hairlineWidth },
         disabled ? { opacity: 0.5 } : null,
       ]}

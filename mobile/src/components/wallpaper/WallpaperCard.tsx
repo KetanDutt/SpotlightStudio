@@ -35,9 +35,9 @@ export const WallpaperCard = memo(function WallpaperCard({ item, thumb, width, f
         accessibilityHint="Opens the wallpaper with actions"
         onPress={() => onPress(item)}
         onLongPress={onLongPress ? () => onLongPress(item) : undefined}
-        style={styles.card}
+        style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.stroke }]}
       >
-        <View style={[styles.photo, { height, backgroundColor: colors.fill }]}>
+        <View style={[styles.photo, { height, backgroundColor: colors.surfaceAlt, borderBottomColor: colors.stroke }]}>
           <Image source={{ uri: thumb }} contentFit="cover" transition={reduceMotion ? 0 : durations.normal}
             cachePolicy="disk" recyclingKey={item.key} style={StyleSheet.absoluteFill} accessibilityIgnoresInvertColors
             onLoadStart={() => setLoading(true)} onLoad={() => setLoading(false)} onError={() => setLoading(false)} />
@@ -47,13 +47,15 @@ export const WallpaperCard = memo(function WallpaperCard({ item, thumb, width, f
             </View>
           ) : null}
           {showBadge ? <View style={[styles.badge, { backgroundColor: colors.imageControl }]}>
-            <AppText variant="caption" style={{ color: colors.imageText }}>{QUALITY_LABELS[item.q]?.split(' ')[0] ?? item.q.toUpperCase()}</AppText>
+            <AppText variant="mono" style={{ color: item.q === '4k' ? colors.imageFavorite : colors.imageText, fontWeight: '600' }}>
+              {QUALITY_LABELS[item.q]?.split(' ')[0] ?? item.q.toUpperCase()}
+            </AppText>
           </View> : null}
         </View>
         <View style={styles.footer}>
           <AppText variant="label" numberOfLines={2}>{item.title}</AppText>
           <AppText variant="caption" tone="faint" numberOfLines={1}>
-            {item.source === 'peapix' ? 'Peapix' : 'Windows Spotlight'}
+            {item.source === 'peapix' ? 'Peapix' : 'Windows Spotlight'} · {item.raw.width} × {item.raw.height}
           </AppText>
         </View>
       </Touchable>
@@ -63,18 +65,18 @@ export const WallpaperCard = memo(function WallpaperCard({ item, thumb, width, f
         accessibilityState={{ selected: favorite }}
         onPress={() => onToggleFavorite(item)}
         style={[styles.heart, { backgroundColor: colors.imageControl }]}
-      ><Ionicons name={favorite ? 'heart' : 'heart-outline'} size={18} color={favorite ? colors.imageFavorite : colors.imageText} /></Touchable> : null}
+      ><Ionicons name={favorite ? 'heart' : 'heart-outline'} size={17} color={favorite ? colors.imageFavorite : colors.imageText} /></Touchable> : null}
     </View>
   );
 });
 const styles = StyleSheet.create({
-  card: { borderRadius: radius.md },
-  photo: { borderRadius: radius.md, overflow: 'hidden' },
+  card: { borderRadius: radius.md, borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden' },
+  photo: { overflow: 'hidden', borderBottomWidth: StyleSheet.hairlineWidth },
   spinnerCenter: { alignItems: 'center', justifyContent: 'center' },
-  badge: { position: 'absolute', bottom: spacing.sm, start: spacing.sm,
-    paddingHorizontal: spacing.sm, paddingVertical: 2, borderRadius: radius.sm },
+  badge: { position: 'absolute', top: spacing.sm, start: spacing.sm,
+    paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
   heart: { position: 'absolute', top: spacing.xs, end: spacing.xs,
-    width: TOUCH_TARGET, height: TOUCH_TARGET, borderRadius: radius.pill,
+    width: TOUCH_TARGET, height: TOUCH_TARGET, borderRadius: radius.sm,
     alignItems: 'center', justifyContent: 'center' },
-  footer: { paddingTop: spacing.sm, gap: spacing.xs, minHeight: 58 },
+  footer: { paddingHorizontal: 10, paddingVertical: spacing.sm, gap: 2, minHeight: 56 },
 });
