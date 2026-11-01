@@ -979,7 +979,7 @@
     lb.stage.classList.toggle("is-zoomed", state.zoom > 1);
   }
 
-  function showLightboxItem(item) {
+  function showLightboxItem(item, opts) {
     app.lb.zoom = 1; app.lb.panX = 0; app.lb.panY = 0; applyViewerTransform();
     const w = item.raw;
     const token = ++app.lb.token;
@@ -1052,6 +1052,9 @@
     };
 
     if (app.imageOpts.local && !app.health?.lfs_pointers_detected) {
+      const targetUrl = opts && opts.retry
+        ? `${full}${full.includes("?") ? "&" : "?"}retry=${Date.now()}`
+        : full;
       lb.img.onload = lb.img.onerror = null;
       lb.img.classList.add("is-preview");
       lb.img.src = imgUrl(item, true);
@@ -1069,7 +1072,7 @@
           preloadNeighbours();
         };
         lb.img.onload = finish;
-        lb.img.src = full;
+        lb.img.src = targetUrl;
         if (lb.img.complete && lb.img.naturalWidth > 0) finish();
       };
       loader.onerror = () => {
@@ -1078,7 +1081,7 @@
         lb.img.classList.add("is-failed");
         showFailure();
       };
-      loader.src = full;
+      loader.src = targetUrl;
       return;
     }
 
@@ -1253,7 +1256,7 @@
     $("lb-next").addEventListener("click", () => stepLightbox(1));
     $("lb-fullscreen").addEventListener("click", toggleFullscreen);
     $("lb-share").addEventListener("click", shareWallpaper);
-    $("lb-retry").addEventListener("click", () => app.lb.item && showLightboxItem(app.lb.item));
+    $("lb-retry").addEventListener("click", () => app.lb.item && showLightboxItem(app.lb.item, { retry: true }));
     $("lb-fav").addEventListener("click", () => toggleFavorite(app.lb.item));
     $("lb-copy").addEventListener("click", () => app.lb.item && copyText(permalink(app.lb.item), "Link copied to clipboard"));
     $("lb-copy-image").addEventListener("click", () => {

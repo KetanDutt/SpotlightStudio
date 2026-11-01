@@ -4,6 +4,7 @@ module.exports = defineConfig({
   testMatch: '*.spec.cjs',
   fullyParallel: false,
   workers: 1,
+  reporter: process.env.GITHUB_ACTIONS ? [['github'], ['list']] : 'list',
   use: {
     baseURL: 'http://127.0.0.1:8877',
     viewport: { width: 1440, height: 1000 },
