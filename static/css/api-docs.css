@@ -167,3 +167,32 @@ html, body {
 .swagger-ui .btn.execute:hover {
   background: var(--accent-hover);
 }
+
+/* Shared liquid materials for the API reference, without obscuring schema text. */
+body {
+  background: radial-gradient(ellipse at 75% 0%, var(--ambient), transparent 48%), var(--bg);
+  background-attachment: fixed;
+}
+.reference-header {
+  background: var(--glass-bg-strong);
+  -webkit-backdrop-filter: blur(var(--blur-lg)) saturate(140%);
+  backdrop-filter: blur(var(--blur-lg)) saturate(140%);
+  box-shadow: var(--shadow-xs);
+}
+.swagger-ui .scheme-container, .swagger-ui .opblock, .swagger-ui section.models {
+  background: var(--glass-bg);
+  box-shadow: inset 0 1px 0 var(--glass-highlight), var(--shadow-xs);
+}
+.swagger-ui .opblock .opblock-section-header { background: var(--glass-bg-strong); }
+.swagger-ui .btn, .reference-back, .reference-schema {
+  transition: background-color var(--duration-fast), border-color var(--duration-fast), transform var(--duration-fast) var(--ease-spring);
+}
+.swagger-ui .btn:hover, .reference-back:hover, .reference-schema:hover { transform: translateY(-1px); }
+.swagger-ui .btn:focus-visible, .reference-back:focus-visible, .reference-schema:focus-visible,
+.swagger-ui input:focus-visible, .swagger-ui select:focus-visible, .swagger-ui textarea:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 2px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .swagger-ui .btn, .reference-back, .reference-schema { transition: none; }
+  .swagger-ui .btn:hover, .reference-back:hover, .reference-schema:hover { transform: none; }
+}

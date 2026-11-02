@@ -14,7 +14,7 @@
 const VERSION = "2.8.1";
 const SCOPE_KEY = encodeURIComponent(new URL(self.registration.scope).pathname);
 const SHELL_PREFIX = `spotlight-shell-${SCOPE_KEY}-`;
-const SHELL_CACHE = `${SHELL_PREFIX}${VERSION}`;
+const SHELL_CACHE = `${SHELL_PREFIX}${VERSION}-glass1`;
 const DATA_CACHE = `spotlight-data-${SCOPE_KEY}-v1`; // survives app updates, isolated from other galleries
 
 const SHELL = [

@@ -305,3 +305,31 @@ test('unpaired UTF-16 paths and source prototype keys cannot break a gallery', (
   assert.equal(core.buildCatalog([row(1, { source: '__proto__' })]).sourceCounts.__proto__, 1);
   assert.equal(core.imageUrl({ local: true }, 'a/😀.jpg', false), '/images/a/%F0%9F%98%80.jpg');
 });
+
+test('collection storage is normalized and handles prototype names safely', () => {
+  for (const value of [null, [], 'bad', 4]) assert.deepEqual(Object.keys(core.normalizeCollections(value)), []);
+  const value = JSON.parse('{"__proto__":["peapix/a.jpg","peapix/a.jpg"],"broken":3,"constructor":["../bad","ok.jpg"]}');
+  const normalized = core.normalizeCollections(value);
+  assert.equal(Object.getPrototypeOf(normalized), null);
+  assert.deepEqual(normalized.__proto__, ['peapix/a.jpg']);
+  assert.deepEqual(normalized.constructor, ['ok.jpg']);
+  assert.equal(Object.hasOwn(normalized, 'broken'), false);
+});
+
+test('ZIP response reading enforces limits without trusting headers', async () => {
+  const response = new Response(new ReadableStream({ start(controller) {
+    controller.enqueue(new Uint8Array([1, 2])); controller.enqueue(new Uint8Array([3, 4])); controller.close();
+  } }));
+  assert.deepEqual([...await core.readBoundedResponse(response, 4)], [1, 2, 3, 4]);
+  const oversized = new Response(new Uint8Array(6));
+  await assert.rejects(core.readBoundedResponse(oversized, 5), /safety limit/);
+  const declared = new Response('x', { headers: { 'content-length': '100' } });
+  await assert.rejects(core.readBoundedResponse(declared, 10), /safety limit/);
+});
+
+test('ZIP names remain unique across title collisions and case', () => {
+  const used = new Set();
+  assert.equal(core.uniqueFilename('lake.jpg', used), 'lake.jpg');
+  assert.equal(core.uniqueFilename('Lake.jpg', used), 'Lake-2.jpg');
+  assert.equal(core.uniqueFilename('lake-2.jpg', used), 'lake-2-2.jpg');
+});

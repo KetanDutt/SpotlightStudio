@@ -30,6 +30,15 @@
 | 📺 **Roku TV channel** | pure 2D canvas (`roScreen`) gallery with Ambient Mode, a deterministic Daily Spotlight, six Liquid Glass palettes, search and Roku Pay Pro — plus a separate standalone screensaver app ([details](docs/roku/README.md)) |
 | 🔒 **Locked down** | strict CSP, Host/Origin checks on the local API, no XSS from scraped titles, CSV-injection-safe exports, DB and logs are never served |
 
+## Recent improvements
+
+- The web viewer’s fullscreen action fills the display (cropping when aspect ratios differ) and includes an on-screen exit control.
+- Web and mobile share refreshed light/dark glass materials, accessible motion settings and polished shared controls; the API reference follows the same visual language.
+- Browser-local collections can be deleted without affecting favorites or images. Collection storage is validated and changes synchronize across tabs.
+- Batch ZIP exports reject streams exceeding the 100 MiB input limit, avoid duplicate filenames and prevent overlapping exports. Cross-origin downloads still depend on the image host allowing CORS; exports can require substantially more than 100 MiB of working memory.
+
+For verification results and outstanding release gates, see [the project audit](docs/PROJECT_AUDIT.md). Passing automated tests does not replace native-device, Windows or Roku hardware testing.
+
 ## What’s new in 2.8.1 — project hardening
 
 - **Broader release-blocking CI:** Python/JavaScript tests, static-site and catalog checks, Roku static audit, hermetic Chromium browser flows, and mobile TypeScript/ESLint/Jest checks. GitHub Pages deploys only after all platform jobs pass; failed browser runs retain Playwright traces for seven days.

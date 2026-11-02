@@ -1,5 +1,5 @@
 /**
- * Design tokens – the mobile twin of `static/css/tokens.css` ("Archival Graphite & Sunlit Ochre").
+ * Design tokens – the mobile twin of the web Liquid Glass material system.
  *
  * Neutral darkroom graphite (dark) and warm archival mat-board (light) surfaces keep UI chrome
  * free of color cast so landscape photography carries the color. A single sunlit-ochre /
@@ -55,10 +55,10 @@ export const DARK: Palette = {
   bg: '#121316',
   surface: '#191b1f',
   surfaceAlt: '#22252a',
-  glass: 'rgba(25,27,31,0.92)',
-  glassStrong: 'rgba(22,24,28,0.97)',
-  glassSecondary: '#191b1f',
-  glassFloating: 'rgba(25,27,31,0.96)',
+  glass: 'rgba(31,34,40,0.78)',
+  glassStrong: 'rgba(24,27,32,0.92)',
+  glassSecondary: 'rgba(39,42,48,0.72)',
+  glassFloating: 'rgba(24,27,32,0.90)',
   fill: 'rgba(255,255,255,0.035)',
   fillHover: 'rgba(255,255,255,0.065)',
   stroke: 'rgba(255,255,255,0.08)',
@@ -88,10 +88,10 @@ export const LIGHT: Palette = {
   bg: '#f6f5f2',
   surface: '#ffffff',
   surfaceAlt: '#eceae4',
-  glass: 'rgba(255,255,255,0.94)',
-  glassStrong: 'rgba(250,249,246,0.98)',
-  glassSecondary: '#ffffff',
-  glassFloating: 'rgba(255,255,255,0.97)',
+  glass: 'rgba(255,255,255,0.76)',
+  glassStrong: 'rgba(250,250,248,0.94)',
+  glassSecondary: 'rgba(255,255,255,0.78)',
+  glassFloating: 'rgba(250,250,248,0.92)',
   fill: 'rgba(22,23,26,0.035)',
   fillHover: 'rgba(22,23,26,0.065)',
   stroke: 'rgba(22,23,26,0.09)',
@@ -120,10 +120,10 @@ export const LIGHT: Palette = {
 export const PALETTES: Record<ThemeName, Palette> = { dark: DARK, light: LIGHT };
 
 export const radius = {
-  sm: 6,
-  md: 10,
-  lg: 14,
-  xl: 16,
+  sm: 9,
+  md: 14,
+  lg: 20,
+  xl: 24,
   pill: 999,
 } as const;
 
@@ -165,6 +165,6 @@ export const durations = {
 } as const;
 
 /** BlurView intensity units, kept subtle and used only on structural bars. */
-export const material = { secondary: 8, primary: 16, floating: 24, tinted: 12 } as const;
+export const material = { secondary: 12, primary: 24, floating: 32, tinted: 16 } as const;
 export const depth = { navigation: 10, overlay: 20, toast: 30 } as const;
 export const navigation = { height: 60, inset: 12, contentInset: 92 } as const;

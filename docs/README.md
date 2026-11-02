@@ -15,7 +15,7 @@
 | Deployment, updates and backups | [DEPLOYMENT.md](DEPLOYMENT.md) |
 | Threat model | [SECURITY.md](SECURITY.md) |
 | Troubleshooting | [TROUBLESHOOTING.md](TROUBLESHOOTING.md) |
-| Findings, audit results and remaining risks | [REVIEW.md](REVIEW.md) |
+| Findings, audit results and remaining risks | [REVIEW.md](REVIEW.md) · [PROJECT_AUDIT.md](PROJECT_AUDIT.md) |
 | Release / rollback checklist | [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md) |
 | Suggested future improvements | [ROADMAP.md](ROADMAP.md) |
 

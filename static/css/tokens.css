@@ -177,3 +177,27 @@
     --focus-ring:    0 0 0 3px Highlight;
   }
 }
+
+/* Liquid materials: neutral enough to let the photographs remain the focus. */
+:root {
+  --glass-bg: rgba(31, 34, 40, .78);
+  --glass-bg-strong: rgba(24, 27, 32, .92);
+  --glass-bg-soft: rgba(39, 42, 48, .55);
+  --glass-highlight: rgba(255, 255, 255, .07);
+  --glass-highlight-strong: rgba(255, 255, 255, .12);
+  --ambient: rgba(152, 166, 184, .09);
+  --radius-sm: 9px;
+  --radius-md: 14px;
+  --radius-lg: 20px;
+  --radius-xl: 24px;
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", Inter, system-ui, sans-serif;
+  --ease-spring: cubic-bezier(.2, .8, .2, 1);
+}
+:root[data-theme="light"] {
+  --glass-bg: rgba(255, 255, 255, .76);
+  --glass-bg-strong: rgba(250, 250, 248, .94);
+  --glass-bg-soft: rgba(255, 255, 255, .55);
+  --glass-highlight: rgba(255, 255, 255, .65);
+  --glass-highlight-strong: rgba(255, 255, 255, .85);
+  --ambient: rgba(149, 162, 177, .12);
+}

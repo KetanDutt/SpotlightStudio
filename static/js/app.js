@@ -163,9 +163,10 @@
     catalogVersion: 0,
     state: Object.assign({}, C.DEFAULT_STATE),
     favorites: new Set(C.normalizeFavorites(store.get("favorites", []))),
-    collections: store.get("collections", {}),
+    collections: C.normalizeCollections(store.get("collections", {})),
     selectedKeys: new Set(),
     batchMode: false,
+    batchDownloading: false,
     pendingWallpaperId: null,
     favVersion: 0,
     cache: { key: "", list: [] },
@@ -532,6 +533,7 @@
     collectionSelect.replaceChildren(h("option", { value: "", text: "All wallpapers" }),
       ...Object.keys(app.collections).sort().map((name) => h("option", { value: name, text: `${name} (${app.collections[name].length})` })));
     collectionSelect.value = selectedCollection;
+    $("collection-delete").hidden = !Object.hasOwn(app.collections, selectedCollection);
 
     const limit = app.tagsExpanded ? 48 : 14;
     const tags = C.topTags(cat, limit + 1, list).filter((t) => t[0] !== s.tag);
@@ -867,7 +869,7 @@
     $("batch-toggle").replaceChildren(icon("check", 15), h("span", { text: app.batchMode ? "Done" : "Select" }));
     $("batch-count").textContent = `${app.selectedKeys.size} selected`;
     $("batch-favorite").disabled = app.selectedKeys.size === 0;
-    $("batch-download").disabled = app.selectedKeys.size === 0;
+    $("batch-download").disabled = app.batchDownloading || app.selectedKeys.size === 0;
   }
 
   const CRC_TABLE = (() => {
@@ -883,22 +885,22 @@
   }
 
   async function downloadSelectedZip() {
-    const items = [...app.selectedKeys].map((key) => app.catalog.items.find((item) => item.key === key)).filter(Boolean);
+    if (app.batchDownloading) return;
+    const items = [...app.selectedKeys].map((key) => app.catalog.byKey.get(key)).filter(Boolean);
     if (!items.length) return;
     if (items.length > 50) return toast("ZIP batches are limited to 50 wallpapers.", "error");
+    app.batchDownloading = true;
+    updateBatchControls();
     try {
       toast(`Preparing ${items.length} full-resolution downloads…`, "info", 5000);
       const encoder = new TextEncoder();
-      const files = []; let downloadedTotal = 0;
+      const files = [], usedNames = new Set(); let downloadedTotal = 0;
       for (const item of items) {
         const response = await fetch(imgUrl(item, false));
         if (!response.ok) throw new Error(`Could not fetch ${item.title}`);
-        const declared = Number(response.headers.get("content-length")) || 0;
-        if (declared && downloadedTotal + declared > 100 * 1024 * 1024) throw new Error("ZIP exceeds the 100 MB safety limit.");
-        const data = new Uint8Array(await response.arrayBuffer());
+        const data = await C.readBoundedResponse(response, 100 * 1024 * 1024 - downloadedTotal);
         downloadedTotal += data.length;
-        if (downloadedTotal > 100 * 1024 * 1024) throw new Error("ZIP exceeds the 100 MB safety limit.");
-        files.push({ name: encoder.encode(niceFilename(item)), data });
+        files.push({ name: encoder.encode(C.uniqueFilename(niceFilename(item), usedNames)), data });
       }
       const local = [], central = []; let offset = 0;
       for (const file of files) {
@@ -921,6 +923,7 @@
       downloadBlob(new Blob([...local, ...central, end], { type: "application/zip" }), "spotlight-wallpapers.zip");
       toast(`ZIP ready · ${files.length} wallpapers`, "success");
     } catch (error) { toast(error.message || "Could not create ZIP. Try a smaller batch.", "error"); }
+    finally { app.batchDownloading = false; updateBatchControls(); }
   }
 
   function createCollection() {
@@ -930,10 +933,11 @@
     if (!name || !name.trim()) return;
     const clean = name.trim().slice(0, 48);
     app.collections[clean] = [...new Set([...(app.collections[clean] || []), ...keys])].slice(0, C.MAX_FAVORITES);
-    store.set("collections", app.collections);
+    const persisted = store.set("collections", app.collections);
+    app.cache.key = "";
     app.state.collection = clean;
     render();
-    toast(`Collection “${clean}” saved`, "success");
+    toast(persisted ? `Collection “${clean}” saved` : "Collection is available only for this session; browser storage is unavailable.", persisted ? "success" : "error");
   }
 
   function toggleFavoritesView() {
@@ -1183,8 +1187,10 @@
   }
 
   function toggleFullscreen() {
+    app.lb.zoom = 1; app.lb.panX = 0; app.lb.panY = 0; applyViewerTransform();
     if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
     else if (lb.stage.requestFullscreen) lb.stage.requestFullscreen().catch(() => toast("Fullscreen is not available here.", "info"));
+    else toast("Fullscreen is not available here.", "info");
   }
 
   async function copyText(text, okMessage) {
@@ -1255,6 +1261,7 @@
     $("lb-prev").addEventListener("click", () => stepLightbox(-1));
     $("lb-next").addEventListener("click", () => stepLightbox(1));
     $("lb-fullscreen").addEventListener("click", toggleFullscreen);
+    $("lb-exit-fullscreen").addEventListener("click", toggleFullscreen);
     $("lb-share").addEventListener("click", shareWallpaper);
     $("lb-retry").addEventListener("click", () => app.lb.item && showLightboxItem(app.lb.item, { retry: true }));
     $("lb-fav").addEventListener("click", () => toggleFavorite(app.lb.item));
@@ -1614,6 +1621,12 @@
     window.addEventListener("offline", connectionStatus);
     connectionStatus();
     window.addEventListener("storage", (event) => {
+      if (event.key === "spotlight:collections" || event.key === null) {
+        app.collections = C.normalizeCollections(store.get("collections", {}));
+        if (app.state.collection && !Object.hasOwn(app.collections, app.state.collection)) app.state.collection = "";
+        app.cache.key = "";
+        if (app.catalog) render();
+      }
       if (event.key !== "spotlight:favorites" && event.key !== null) return;
       app.favorites = new Set(C.normalizeFavorites(store.get("favorites", [])));
       app.favVersion += 1;
@@ -1630,6 +1643,15 @@
     // Results bar
     $("sort").addEventListener("change", (e) => patchState({ sort: e.target.value }));
     $("collection-filter").addEventListener("change", (e) => patchState({ collection: e.target.value }));
+    $("collection-delete").addEventListener("click", () => {
+      const name = app.state.collection;
+      if (!Object.hasOwn(app.collections, name) || !window.confirm(`Delete collection “${name}”? Wallpapers and favorites will not be deleted.`)) return;
+      delete app.collections[name];
+      const persisted = store.set("collections", app.collections);
+      app.cache.key = "";
+      patchState({ collection: "" });
+      toast(persisted ? "Collection deleted" : "Collection removed for this session; browser storage is unavailable.", persisted ? "success" : "error");
+    });
     $("batch-toggle").addEventListener("click", () => { app.batchMode = !app.batchMode; if (!app.batchMode) app.selectedKeys.clear(); updateBatchControls(); render(); });
     $("batch-favorite").addEventListener("click", () => {
       let changed = false;
@@ -1772,7 +1794,7 @@
         if (inViewer) $("lb-download").click();
         break;
       case "Enter":
-        if (inViewer && (t === document.body || t === lb.dlg || t === lb.stage || t === lb.img)) toggleFullscreen();
+        if (inViewer && (document.fullscreenElement === lb.stage || t === document.body || t === lb.dlg || t === lb.stage || t === lb.img)) { e.preventDefault(); toggleFullscreen(); }
         break;
       default:
     }

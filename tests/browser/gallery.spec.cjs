@@ -278,3 +278,43 @@ test('PWA keeps its scoped shell/catalog offline even after visiting the desktop
   await expect(page.locator('#daily-spotlight')).toBeVisible();
   await expect(page.locator('#offline-banner')).toBeVisible();
 });
+
+test('fullscreen fills the viewport and restores the viewer', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('.card')).toHaveCount(24);
+  await page.locator('.card-main').first().click();
+  await page.locator('#lb-fullscreen').click();
+  await expect.poll(() => page.evaluate(() => document.fullscreenElement?.id)).toBe('lb-stage');
+  const dimensions = await page.locator('#lb-img').evaluate(img => {
+    const rect = img.getBoundingClientRect();
+    return { width: rect.width, height: rect.height, viewportWidth: innerWidth, viewportHeight: innerHeight, fit: getComputedStyle(img).objectFit };
+  });
+  expect(dimensions.width).toBe(dimensions.viewportWidth);
+  expect(dimensions.height).toBe(dimensions.viewportHeight);
+  expect(dimensions.fit).toBe('cover');
+  await expect(page.locator('#lb-exit-fullscreen')).toBeVisible();
+  await page.locator('#lb-exit-fullscreen').click();
+  await expect.poll(() => page.evaluate(() => document.fullscreenElement)).toBe(null);
+  await expect(page.locator('#lightbox')).toBeVisible();
+});
+
+test('collections recover malformed storage and can be created, extended and deleted', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('spotlight:collections', 'null'));
+  await page.goto('/');
+  await expect(page.locator('.card')).toHaveCount(24);
+  page.on('dialog', dialog => dialog.type() === 'prompt' ? dialog.accept('constructor') : dialog.accept());
+  await page.locator('.card-fav').first().click();
+  await page.locator('#btn-menu').click();
+  await page.locator('[data-action="create-collection"]').click();
+  await expect(page.locator('#collection-filter')).toHaveValue('constructor');
+  await expect(page.locator('.card')).toHaveCount(1);
+  await page.locator('#collection-filter').selectOption('');
+  await page.locator('.card-fav').nth(1).click();
+  await page.locator('#btn-menu').click();
+  await page.locator('[data-action="create-collection"]').click();
+  await expect(page.locator('.card')).toHaveCount(2);
+  await page.locator('#collection-delete').click();
+  await expect(page.locator('#collection-filter')).toHaveValue('');
+  await expect(page.locator('.card')).toHaveCount(24);
+  await expect(page.locator('#fav-count')).toHaveText('2');
+});

@@ -7,12 +7,12 @@ import React from 'react';
 import { StyleSheet, Switch, View, type StyleProp, type ViewStyle } from 'react-native';
 
 import { radius, spacing } from '../../theme/tokens';
-import { useColors } from '../../theme/ThemeProvider';
+import { useColors, useTheme } from '../../theme/ThemeProvider';
 import { AppText, type TextTone } from './AppText';
 import { Touchable } from './Pressable';
 
 export function SectionCard({ title, footer, children, style }: { title?: string; footer?: string; children: React.ReactNode; style?: StyleProp<ViewStyle> }) {
-  const colors = useColors();
+  const { colors, reduceTransparency } = useTheme();
   return (
     <View style={[styles.section, style]}>
       {title ? (
@@ -20,7 +20,7 @@ export function SectionCard({ title, footer, children, style }: { title?: string
           {title}
         </AppText>
       ) : null}
-      <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.stroke }]}>{children}</View>
+      <View style={[styles.card, { backgroundColor: reduceTransparency ? colors.surface : colors.glassSecondary, borderColor: colors.stroke }]}>{children}</View>
       {footer ? (
         <AppText variant="caption" tone="faint" style={styles.footer}>
           {footer}

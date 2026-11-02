@@ -50,7 +50,7 @@ The whole view is a small state object (`DEFAULT_STATE` in `core.js`), mirrored 
 
 `decodeState` validates every value against allow-lists, so a malicious link can only select a legal view. Display preferences (`view`, `per`) are remembered in `localStorage` and overridden by the URL.
 
-Browser storage: `spotlight:favorites` (list of filenames — stable across database rebuilds), `spotlight:prefs`, `spotlight:theme` (`auto|light|dark`, stored as a bare string because `theme-init.js` reads it before anything else), `spotlight:crawl` (last source/mode), `sessionStorage` `spotlight:lfs-dismissed`.
+Browser storage: `spotlight:collections` (browser-local named lists; validated on load and synchronized across tabs), `spotlight:favorites` (list of filenames — stable across database rebuilds), `spotlight:prefs`, `spotlight:theme` (`auto|light|dark`, stored as a bare string because `theme-init.js` reads it before anything else), `spotlight:crawl` (last source/mode), `sessionStorage` `spotlight:lfs-dismissed`.
 
 ## Data model (`core.js`)
 
@@ -81,14 +81,14 @@ A native `<dialog>` (focus trap, `Esc`, inert background for free).
 * **Image failure:** retain the thumbnail, show persistent connection/LFS advice and a
   retry button; stop the loading state and cancel obsolete detached loaders.
 * **Bandwidth-aware**: the viewer uses the full-frame 1440px WebP preview by default (with the thumbnail as a compatibility fallback); full originals load only through the explicit Download or Set Wallpaper actions. Neighboring WebP previews may be prefetched.
-* Mouse wheel zoom and click-and-drag panning inspect image detail; double-click resets the view.
+* Mouse wheel zoom and click-and-drag panning inspect image detail; double-click resets the view. Fullscreen fills the screen using cover (cropping mismatched aspect ratios); use the exit control, Escape, or Enter to return.
 * **Navigation crosses pages** — it walks the whole filtered list and keeps the gallery page in sync (applied when the viewer closes).
 * Swipe left/right on touch screens, fullscreen (`Enter`), favorite, copy permalink / direct image URL, download (with a readable file name like `kirstenbosch-botanical-garden-1920x1080.jpg`; for cross-origin GitHub URLs the link opens in a new tab because browsers ignore `download` there).
 * **Shuffle** picks from the *whole filtered result*, not only the visible page.
 
 ## Discovery tools
 
-The sidebar classifies dimensions into Landscape, Ultrawide, Standard and Portrait; the dominant-color swatches filter against locally extracted palette colors. Batch mode selects across pages, applies favorites, and downloads up to 50 originals in a bounded ZIP. Named collections are private browser-local lists; favorites backups remain the portable cross-platform JSON schema (`spotlight-favorites`, version 1), shared by web and Expo mobile clients.
+The sidebar classifies dimensions into Landscape, Ultrawide, Standard and Portrait; the dominant-color swatches filter against locally extracted palette colors. Batch mode selects across pages, applies favorites, and downloads up to 50 originals in a ZIP with a 100 MiB aggregate input cap enforced while streaming. Archive construction can temporarily use more memory than that cap; cross-origin downloads require CORS from the image host. Named collections are private browser-local lists and can be deleted from the sidebar without deleting images or favorites; favorites backups remain the portable cross-platform JSON schema (`spotlight-favorites`, version 1), shared by web and Expo mobile clients.
 
 ## Desktop crawler console
 
