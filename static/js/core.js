@@ -501,6 +501,52 @@
     return Array.isArray(value) ? [...new Set(value.filter(validFavoriteKey))].slice(0, MAX_FAVORITES) : [];
   }
 
+  /** Collections are untrusted local storage; use a null prototype for arbitrary names. */
+  function normalizeCollections(value) {
+    const result = Object.create(null);
+    if (!value || typeof value !== "object" || Array.isArray(value)) return result;
+    for (const [name, keys] of Object.entries(value)) {
+      if (!name.trim() || name.length > 48 || !Array.isArray(keys)) continue;
+      result[name] = normalizeFavorites(keys);
+    }
+    return result;
+  }
+
+  /** Read a response incrementally so missing or inaccurate Content-Length cannot bypass the limit. */
+  async function readBoundedResponse(response, limit) {
+    const declared = Number(response.headers.get("content-length"));
+    if (declared > limit) throw new Error("ZIP exceeds the 100 MB safety limit.");
+    if (!response.body) return new Uint8Array(0);
+    const reader = response.body.getReader();
+    const chunks = []; let size = 0;
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        size += value.byteLength;
+        if (size > limit) throw new Error("ZIP exceeds the 100 MB safety limit.");
+        chunks.push(value);
+      }
+    } catch (error) {
+      await reader.cancel().catch(() => {});
+      throw error;
+    } finally { reader.releaseLock(); }
+    const result = new Uint8Array(size); let offset = 0;
+    for (const chunk of chunks) { result.set(chunk, offset); offset += chunk.byteLength; }
+    return result;
+  }
+
+  /** Keep ZIP entries unique even when distinct photos share title and dimensions. */
+  function uniqueFilename(name, used) {
+    let candidate = name; let suffix = 2;
+    const dot = name.lastIndexOf(".");
+    const base = dot > 0 ? name.slice(0, dot) : name;
+    const ext = dot > 0 ? name.slice(dot) : "";
+    while (used.has(candidate.toLowerCase())) candidate = `${base}-${suffix++}${ext}`;
+    used.add(candidate.toLowerCase());
+    return candidate;
+  }
+
   function favoritesBackup(favorites) {
     return { format: "spotlight-favorites", version: 1, favorites: normalizeFavorites([...favorites]) };
   }
@@ -534,7 +580,7 @@
 
   return {
     DEFAULT_IMAGE_BASE, SORTS, PAGE_SIZES, VIEWS, SOURCES, QUALITIES, QUALITY_LABELS, SOURCE_LABELS,
-    DEFAULT_STATE, CSV_COLUMNS, MAX_FAVORITES, normalizeFavorites, favoritesBackup, parseFavoritesBackup,
+    DEFAULT_STATE, CSV_COLUMNS, MAX_FAVORITES, normalizeFavorites, normalizeCollections, readBoundedResponse, uniqueFilename, favoritesBackup, parseFavoritesBackup,
     isPlaceholderTitle, foldText, tokenize, splitTags, titleCase, slugify,
     fmtInt, fmtBytes, fmtDate, fmtRelative, fmtDuration, parseDateTs,
     qualityClass, buildCatalog, dailyWallpaper, topTags, comparator, filterAndSort, filterKey, paginate, pageNumbers,

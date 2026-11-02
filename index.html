@@ -184,6 +184,7 @@
           <section class="panel" aria-labelledby="collections-title">
             <div class="panel-title" id="collections-title"><span>Collections</span></div>
             <label class="field"><span class="sr-only">Collection</span><select id="collection-filter" class="select" aria-label="Filter by collection"><option value="">All wallpapers</option></select></label>
+            <button class="btn btn-ghost btn-sm" id="collection-delete" type="button" hidden>Delete collection</button>
           </section>
 
           <section class="panel" aria-labelledby="tags-title">
@@ -297,6 +298,7 @@
     <button class="lb-nav lb-next" type="button" id="lb-next" title="Next (→)" aria-label="Next wallpaper"><span data-icon="chevron-right" data-size="22"></span></button>
     <figure class="lb-stage" id="lb-stage">
       <picture class="lb-picture"><source id="lb-webp" type="image/webp" /><img id="lb-img" class="lb-img" alt="" decoding="async" draggable="false" /></picture>
+      <button class="lb-btn lb-exit-fullscreen" id="lb-exit-fullscreen" type="button" title="Exit fullscreen" aria-label="Exit fullscreen"><span data-icon="x"></span></button>
       <div class="lb-spinner" id="lb-spinner" aria-hidden="true"></div>
       <div class="lb-error" id="lb-error" role="status" hidden>
         <span data-icon="alert" data-size="24"></span>

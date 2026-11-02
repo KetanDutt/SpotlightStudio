@@ -1,4 +1,4 @@
-# Archival Graphite & Sunlit Ochre — design system
+# Spotlight Studio — Liquid Glass design system
 
 Release **2.8.1** · web/PWA, desktop crawler studio, API reference, and Expo mobile client.
 
@@ -7,10 +7,10 @@ Design methodology informed by **Unslop by Damir Sokolovsky** (`https://github.c
 ## Five-line direction
 
 - **Product:** A curated, perceptually de-duplicated archive and wallpaper studio for ~7,500 4K and Full HD Windows Spotlight photographs across web, desktop, mobile, and TV.
-- **Character:** Archival, optical, composed.
+- **Character:** Calm, spatial, photographic and composed.
 - **World:** Darkroom slate (`#121316`) and matte museum mount board (`#f6f5f2`) — color-neutral surfaces that cast zero tint onto landscape photography, paired with a single sunlit-ochre (`#e2b05e`) / burnished-umber (`#86530d`) accent drawn from the rising sun in Spotlight Studio's emblem.
 - **Moments:** (1) The **Daily Spotlight** contact-sheet plate (asymmetric framed photograph + UTC archival colophon) and (2) the **Optical Loupe** viewer (`#090a0c` darkroom stage + hairline technical specification rail).
-- **Signature:** **Contact-Sheet Colophon** — unblemished photographic wells framed by `1px` optical hairlines (never diagonal glass glare) paired with tabular monospace telemetry (`3840 × 2160`, `4K`, `2026-11-01 UTC`) in compact `4–6px` architectural badges.
+- **Signature:** Neutral translucent surfaces and restrained edge highlights frame unaltered photographs, with readable metadata and subtle motion.
 
 ## Design tokens
 
@@ -22,7 +22,7 @@ Design methodology informed by **Unslop by Damir Sokolovsky** (`https://github.c
 | Ink (opaque, AA >= 5.0:1) | `--text`, `--text-2`, `--text-3` | `text`, `textMuted`, `textFaint` |
 | Accent & status | `--accent` (`#e2b05e` / `#86530d`), `--accent-ink`, `--ok`, `--warn`, `--danger` | `accent`, `onAccent`, `accentFill`, `ok`, `warn`, `danger` |
 | Hairlines | `--border` (8–9% alpha), `--border-strong` (15–16% alpha) | `stroke`, `strokeStrong` |
-| Radii (nested math) | `--radius-xs` 4 · `--radius-sm` 6 · `--radius-md` 10 · `--radius-lg` 14 · `--radius-xl` 16 | `sm` 6 · `md` 10 · `lg` 14 · `xl` 16 |
+| Radii (nested math) | `--radius-xs` 4 · `--radius-sm` 9 · `--radius-md` 14 · `--radius-lg` 20 · `--radius-xl` 24 | `sm` 9 · `md` 14 · `lg` 20 · `xl` 24 |
 | Spacing (4px grid) | `--space-1…10` (`4, 8, 12, 16, 20, 24, 32, 40px`) | `xxs` 2 · `xs` 4 · `sm` 8 · `md` 12 · `lg` 16 · `xl` 20 · `xxl` 24 · `xxxl` 32 |
 | Typography | `--font-sans` + `--font-mono`, sentence-case labels, `tabular-nums` | `AppText` variants + `mono`, sentence-case labels, `tabular-nums` |
 | Motion | `140 / 200 / 280ms`, `cubic-bezier(.2, 0, 0, 1)` (calm optical settle, no overshoot) | `150 / 260 / 380ms`, cubic-out settle, reduced-motion zeroing |
@@ -30,9 +30,9 @@ Design methodology informed by **Unslop by Damir Sokolovsky** (`https://github.c
 ## Core component & layout rules
 
 - **No color cast on chrome:** App backgrounds, sidebars, cards, and modals remain strictly achromatic/neutral so warm desert, alpine snow, and ocean photography retain accurate white balance.
-- **No decorative glass or ambient blobs:** Depth comes from crisp surface steps (`--bg-inset` → `--bg` → `--bg-elev`) and `1px` hairlines rather than ambient radial washes, diagonal specular sheens over photos, or heavy drop shadows.
+- **Selective glass:** Navigation, dialogs and floating surfaces use translucent fills, restrained blur and edge highlights; a low-contrast ambient field provides depth. Photo tiles avoid expensive per-card backdrop blur. Mobile uses structural blur on iOS and opaque fallbacks on Android and when reduced transparency is enabled.
 - **Sentence case & restrained weight:** Section titles, form labels, status indicators, and metadata labels use sentence case (`500`–`600` weight, zero `.14em` uppercase tracking).
-- **Nested radius discipline:** Inner elements step down proportionally (`R_inner = max(4, R_outer - padding)`), avoiding `999px` pill overload across buttons, chips, inputs, and pagination.
+- **Radius discipline:** Shared radii create a consistent hierarchy while leaving photographs and lists easy to scan.
 - **Operational hierarchy in Crawler:** Live crawl telemetry uses a hairline-divided 3×2 monospace readout (`New`, `Duplicates`, `Errors`, `Rate`, `Queue`, `Pages left`), a quiet dot-and-label status indicator, and a single primary `Start` action.
 - **Contextual batch selection:** Batch selection triggers from the main results toolbar and reveals its action bar only while selection mode is active.
 
